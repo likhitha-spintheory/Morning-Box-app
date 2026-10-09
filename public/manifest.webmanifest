@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "Morning Box — Your Personal Breakfast Assistant",
+  "short_name": "Morning Box",
+  "description": "Plan and order a personalised breakfast from Morning Box.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FBF7EF",
+  "theme_color": "#FBF7EF",
+  "icons": [
+    {
+      "src": "./icons/morning-box-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icons/morning-box-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

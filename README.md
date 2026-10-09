@@ -15,6 +15,14 @@ npm run build      # build the web app into dist/
 npm start          # production: API + built web app on http://localhost:8787
 ```
 
+## Install on a phone
+
+Morning Box is an installable Progressive Web App (PWA). Deploy it over HTTPS, open its URL in
+your phone's browser, then choose **Install app** in Chrome/Android or **Share → Add to Home Screen**
+in Safari/iOS. It opens from the home screen without browser controls. The app shell and previously
+loaded static files are cached for startup offline; signing in, checking availability, and placing or
+managing orders still need a connection to the API.
+
 Data is stored in `data/morningbox.db` (override with `DB_FILE`). Other settings:
 `PORT` (8787), `TZ` (defaults to Asia/Dubai — the 9:00 PM cutoff is Dubai time),
 `WINDOW_CAPACITY` (boxes per delivery window per morning, default 120),
