@@ -18,7 +18,7 @@
 
 import { CONTEXT_PRIORITY, REASON, PRICE_LEVELS, SIZE_ADJUSTMENT, ADDON_PRICES, volumeDiscount } from './standards.js';
 import { COMPONENTS, SWAP_GROUPS, NO_DIRECT_SWAP, ADDON_BREAD, ADDON_PASTRY,
-         isComponentEligible, portion } from './library.js';
+         isComponentEligible, resolveBuild, portion } from './library.js';
 import { BASE_RECOMMENDATIONS, recipeById, describe, priceLevel } from './recipes.js';
 
 /* ============================================================
@@ -28,17 +28,50 @@ import { BASE_RECOMMENDATIONS, recipeById, describe, priceLevel } from './recipe
    ============================================================ */
 
 /**
+ * MB-PRO-001 §11 / §12 — explicit incompatibility table for the Combination
+ * Compatibility Filter. Each pair may not appear together in one box as the
+ * result of a swap or a system substitution (base recommendations themselves
+ * are the approved compositions and never contain these pairs).
+ *  - §11 "mechanically applying a sweet-spread swap where the resulting
+ *    breakfast combination is not appropriate": peanut butter does not layer
+ *    with a second fat spread (butter / cream cheese) on the same bread.
+ *  - §12.1/§12.4: sweet spreads are not combined with the savory hot mains,
+ *    savory proteins or savory cheese (labneh & honey is a recognised pairing
+ *    and is allowed).
+ */
+const SWEET_SPREADS = ['honey', 'jam', 'peanutButter'];
+const SAVORY_ONLY = ['scrambledEggs', 'omelette', 'boiledEggs', 'beans', 'chickenSausage', 'beefBacon', 'turkeyBacon', 'feta', 'labneh'];
+export const INCOMPATIBLE_PAIRS = [
+  ['peanutButter', 'butter'], ['peanutButter', 'creamCheese'],
+  ...SAVORY_ONLY.flatMap(a => SWEET_SPREADS.map(b => [a, b])).filter(([a, b]) => !(a === 'labneh' && b === 'honey'))
+];
+const incompatible = (a, b) => INCOMPATIBLE_PAIRS.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+/** §12.4 — "PB & Banana Sandwich; no added sweetener": honey or jam may not be swapped in. */
+const ADDED_SWEETENERS = ['honey', 'jam'];
+
+/**
  * MB-PRO-001 §11 — the Combination Compatibility Filter.
  * Prevents mechanically valid but unsuitable results: a component already
- * present elsewhere in the box, or one that cannot work in a ready-to-eat
- * format (for example, beans in a sandwich).
+ * present elsewhere in the box, one that cannot work in a ready-to-eat
+ * format (for example, beans in a sandwich), an added sweetener where the
+ * specification says "no added sweetener", or a pair from INCOMPATIBLE_PAIRS.
  */
 function compatibleInComposition(altId, recipe, components, index) {
   if (components.some((c, i) => i !== index && c === altId)) return false;
   const readyToEat = /sandwich|ready-to-eat|cup/i.test(recipe.format || '');
   if (readyToEat && COMPONENTS[altId].notBusyFormat) return false;
+  if (/no added sweetener/i.test(recipe.format || '') && ADDED_SWEETENERS.includes(altId)) return false;
+  if (components.some((c, i) => i !== index && incompatible(altId, c))) return false;
   return true;
 }
+
+/** The approved build (variant id or null) of each component for this profile. */
+const buildVariant = (id, profile) => resolveBuild(id, profile)?.variant?.id || null;
+export const variantsFor = (components, profile) =>
+  Object.fromEntries(components.map(id => [id, buildVariant(id, profile)]));
+/** Human label of an approved component variant, e.g. "Plant milk base". */
+export const variantLabel = (id, variantId) =>
+  variantId && COMPONENTS[id]?.variant?.id === variantId ? COMPONENTS[id].variant.label : null;
 
 /**
  * Resolve one Base Recommendation against the user's safety and dietary
@@ -48,19 +81,23 @@ function compatibleInComposition(altId, recipe, components, index) {
 export function resolveEligibility(recipe, profile) {
   const components = [];
   const substitutions = [];
+  /* Which approved build each component uses (e.g. Overnight Oats on a
+     plant-milk base for a vegan user). The bakery must produce that build. */
+  const variants = {};
 
   for (let i = 0; i < recipe.components.length; i++) {
     const id = recipe.components[i];
-    if (isComponentEligible(id, profile)) { components.push(id); continue; }
+    if (isComponentEligible(id, profile)) { components.push(id); variants[id] = buildVariant(id, profile); continue; }
 
     /* §3 — the engine first checks for an approved compatible substitution.
        A substitution may only come from the Morning Box-approved Component
        Library, never the Partner Bakery's general menu. */
     const group = COMPONENTS[id].swapGroup;
     const pool = group && !NO_DIRECT_SWAP.includes(id) ? SWAP_GROUPS[group] : [];
+    const current = [...components, ...recipe.components.slice(i)];
     const alt = pool.find(a =>
       a !== id && isComponentEligible(a, profile) &&
-      compatibleInComposition(a, recipe, recipe.components, i));
+      compatibleInComposition(a, recipe, current, i));
 
     /* §3 — if no approved compatible substitution exists, the Base
        Recommendation is removed from the Candidate Pool. Safety
@@ -68,10 +105,11 @@ export function resolveEligibility(recipe, profile) {
     if (!alt) return null;
 
     components.push(alt);
+    variants[alt] = buildVariant(alt, profile);
     substitutions.push({ from: id, to: alt, reason: REASON.SUBSTITUTION });
   }
 
-  return { recipe, components, substitutions };
+  return { recipe, components, substitutions, variants };
 }
 
 /* ============================================================
@@ -162,6 +200,9 @@ export function applySwap(config, index, altId) {
   const before = config.components[index];
   config.components = config.components.slice();
   config.components[index] = altId;
+  config.variants = { ...(config.variants || {}) };
+  if (!config.components.includes(before)) delete config.variants[before];
+  config.variants[altId] = buildVariant(altId, config.profile);
   (config.userSwaps ||= []).push({ from: before, to: altId });
   return { ok: true };
 }
@@ -222,6 +263,7 @@ export function configure(resolved, profile) {
     baseRecommendationId: resolved.recipe.id,
     components: resolved.components.slice(),
     substitutions: resolved.substitutions.slice(),
+    variants: { ...(resolved.variants || variantsFor(resolved.components, profile)) },
     userSwaps: [],
     size: hasSizeSelector(resolved.recipe) ? 'regular' : 'standard',
     addons: [],
@@ -236,7 +278,8 @@ export function configure(resolved, profile) {
    Every recommendation must be traceable from the inputs to the final
    breakfast configuration.
    ============================================================ */
-export function traceRecord(config, context) {
+export function traceRecord(config, context, alternativeId = null) {
+  const variants = config.variants || variantsFor(config.components, config.profile);
   return {
     inputs: {
       eatingStyle: config.profile.eatingStyle,
@@ -247,7 +290,8 @@ export function traceRecord(config, context) {
     },
     recommendation: {
       baseRecommendation: config.baseRecommendationId,
-      reasonCode: config.reasonCode
+      reasonCode: config.reasonCode,
+      alternativeBaseRecommendation: alternativeId || null
     },
     changes: {
       systemSubstitutions: config.substitutions,
@@ -256,7 +300,7 @@ export function traceRecord(config, context) {
       addons: config.addons
     },
     output: {
-      components: config.components.map(id => ({ id, name: COMPONENTS[id].name, portion: portion(id, config.size === 'standard' ? 'regular' : config.size) })),
+      components: config.components.map(id => ({ id, name: COMPONENTS[id].name, portion: portion(id, config.size === 'standard' ? 'regular' : config.size), variant: variants[id] ?? null })),
       price: priceBox(config)
     }
   };
@@ -319,7 +363,7 @@ export function priceBusinessDay(lines, specials) {
   const boxes = lines.reduce((t, l) => t + l.qty, 0) + specials.reduce((t, s) => t + s.qty, 0);
   const gross =
     lines.reduce((t, l) => t + (l.model.base + SIZE_ADJUSTMENT[l.size]) * l.qty, 0) +
-    specials.reduce((t, s) => t + (s.resolved ? PRICE_LEVELS[priceLevel(s.resolved.recipe)] : 0) * s.qty, 0);
+    specials.reduce((t, s) => t + (s.resolved ? PRICE_LEVELS[priceLevel(s.resolved.recipe)] + SIZE_ADJUSTMENT[s.size || 'regular'] : 0) * s.qty, 0);
   const pct = volumeDiscount(boxes);
   return { boxes, gross, discountPct: pct, discount: gross * pct, total: gross * (1 - pct) };
 }

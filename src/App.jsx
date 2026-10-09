@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Home from './screens/Home.jsx';
+import Splash from './screens/Splash.jsx';
 import { EatingStyle, Preferences, Dietary } from './screens/personal/Profile.jsx';
 import { Start, ChooseDates, DailyContext, MorningBox, Extras, NextMorning, WeeklySummary } from './screens/personal/Plan.jsx';
 import { SignIn, Delivery, ReviewPay, Confirmed } from './screens/personal/Checkout.jsx';
@@ -19,6 +20,7 @@ export default function App() {
   return (
     <>
       <ScrollTop />
+      <Splash />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/start" element={<Start />} />

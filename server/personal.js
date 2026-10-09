@@ -70,7 +70,7 @@ export function serializeOrder(o) {
     paid: o.total,
     days: days.map(d => ({
       date: d.date, window: d.window, cfg: parse(d.cfg), price: d.price, address: parse(d.address),
-      cancelled: !!d.cancelled, refund: d.refund, feedback: d.feedback, stage: d.cancelled ? -1 : d.stage,
+      cancelled: !!d.cancelled, refund: d.refund, feedback: d.feedback, feedbackReasons: parse(d.feedback_reasons) || [], stage: d.cancelled ? -1 : d.stage,
       bakery: d.stage >= 1 ? bakeryName(d.bakery_id) : null, deliveredAt: d.delivered_at, deliveryPoint: d.delivery_point
     }))
   };
@@ -170,12 +170,16 @@ personalRouter.post('/orders/:id/days/:date/cancel', requireUser, (req, res) => 
   res.json(serializeOrder(order));
 });
 
-/** Loved it / Not for me — collected as a learning signal only (MB-REC-001 §14). */
+/** Loved it / Not for me — collected as a learning signal only (MB-REC-001 §14).
+    "Not for me" may carry optional reasons from a fixed list. */
+const FEEDBACK_REASONS = ['Not my taste', 'Too much', 'Too little', 'Not fresh enough', 'Arrived late'];
 personalRouter.post('/orders/:id/days/:date/feedback', requireUser, (req, res) => {
   const order = ownOrder(req.userId, req.params.id);
   const day = ownDay(order, req.params.date);
   if (!['Loved it', 'Not for me'].includes(req.body.value)) throw bad('feedback_invalid', 'Choose Loved it or Not for me.');
   if (day.stage < 3) throw bad('not_delivered', 'Feedback opens after delivery.');
-  db.prepare('UPDATE order_days SET feedback = ? WHERE id = ?').run(req.body.value, day.id);
+  const reasons = req.body.value === 'Not for me' && Array.isArray(req.body.reasons)
+    ? [...new Set(req.body.reasons.filter(r => FEEDBACK_REASONS.includes(r)))] : [];
+  db.prepare('UPDATE order_days SET feedback = ?, feedback_reasons = ? WHERE id = ?').run(req.body.value, json(reasons), day.id);
   res.json(serializeOrder(order));
 });

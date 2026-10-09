@@ -30,9 +30,9 @@ export function dateInfo(iso) {
 }
 
 /** Two planning weeks starting at the first orderable morning (9 PM cutoff applied). */
-export function planningWeeks(now = new Date()) {
-  const dates = orderableDates(now, 14).map(d => dateInfo(isoDate(d)));
-  return [dates.slice(0, 7), dates.slice(7, 14)];
+export function planningWeeks(now = new Date(), weeks = 4) {
+  const dates = orderableDates(now, weeks * 7).map(d => dateInfo(isoDate(d)));
+  return Array.from({ length: weeks }, (_, i) => dates.slice(i * 7, i * 7 + 7));
 }
 
 export const todayIso = () => isoDate(new Date());
@@ -111,6 +111,28 @@ export function boxTitle(cfg) {
   const s = names.length > 1 ? `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}` : names[0];
   return s.charAt(0) + s.slice(1).toLowerCase();
 }
+/**
+ * Display name derived from the breakfast's own preference and morning type
+ * (e.g. "The Savory Workday"). Ready-to-eat Busy boxes are named by their
+ * contents (e.g. "Cheese Croissant & Banana"). No marketing claims.
+ */
+const PREF_WORD = { savory: 'Savory', bakery: 'Bakery', fresh: 'Fresh', sweet: 'Sweet' };
+export function boxName(cfg) {
+  if (!cfg) return '';
+  const r = recipeById[cfg.recipeId];
+  const p = PREF_WORD[r?.preference] || '';
+  switch (cfg.context || r?.context) {
+    case 'regular': return `The ${p} Workday`;
+    case 'active': return `The Active ${p}`;
+    case 'relaxed': return `The Relaxed ${p}`;
+    default: {
+      const n = cfg.components.slice(0, 2).map(id => componentName(id).replace(/^Halal /, ''));
+      return n.join(' & ');
+    }
+  }
+}
+/** Short place name for compact lines: "Gate Village, Building 3" → "Gate Village 3". */
+export const shortPlace = b => (b || '').replace(/,?\s*(Building|Bldg\.?|Tower)\s+/i, ' ').trim();
 export const sizeLabel = s => ({ light: 'Light', regular: 'Regular', large: 'Large', standard: 'Standard' }[s] || s);
 
 export function extrasText(addons) {

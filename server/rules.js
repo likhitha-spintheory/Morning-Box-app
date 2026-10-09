@@ -8,7 +8,7 @@ import {
 import { recipeById, describe, priceLevel } from '../src/domain/recipes.js';
 import {
   CONTEXTS, DELIVERY_WINDOWS, DIETARY, ALLERGENS, PREFERENCES, EATING_STYLES, PRICE_LEVELS,
-  isBeforeCutoff, orderableDates, isoDate
+  isBeforeCutoff, orderableDates, isoDate, EXCEPTION_KINDS as BASE_EXCEPTION_KINDS
 } from '../src/domain/standards.js';
 import { db } from './db.js';
 
@@ -104,9 +104,11 @@ export function buildPersonalDay(input, profile) {
   const cfg = {
     recipeId: config.recipe.id, context, which: candidate === rec.primary ? 'primary' : 'alternative',
     components: config.components, substitutions: config.substitutions, userSwaps: config.userSwaps,
-    size: config.size, addons: config.addons, label: config.label, format: config.recipe.format || null
+    size: config.size, addons: config.addons, label: config.label, format: config.recipe.format || null,
+    variants: config.variants
   };
-  return { cfg, price, trace: traceRecord(config, context) };
+  const other = candidate === rec.primary ? rec.alternative : rec.primary;
+  return { cfg, price, trace: traceRecord(config, context, other?.recipe.id || null) };
 }
 
 export function validateAddress(a) {
@@ -139,7 +141,9 @@ export function buildBusinessDay(input) {
     const allergies = (s.allergies || []).filter(x => ids(ALLERGENS).includes(x));
     if (!dietary.length && !allergies.length) throw bad('special_invalid', 'Each Special Breakfast needs at least one requirement.');
     if (!Number.isInteger(s.qty) || s.qty < 1) throw bad('special_invalid', 'Each Special Breakfast needs a quantity.');
-    const r = resolveSpecial({ dietary, allergies, qty: s.qty }, 'regular');
+    const size = s.size || 'regular';
+    if (!['light', 'regular', 'large'].includes(size)) throw bad('size_invalid', 'Choose a size for each Special Breakfast.');
+    const r = resolveSpecial({ dietary, allergies, qty: s.qty, size }, 'regular');
     if (!r.resolved) throw bad('special_no_match', 'No approved breakfast can safely meet one of your Special Breakfast requirements.', { dietary, allergies });
     return r;
   });
@@ -149,7 +153,12 @@ export function buildBusinessDay(input) {
   return {
     people,
     lines: lines.map(({ recipeId, size, qty }) => ({ recipeId, size, qty })),
-    specials: specials.map(s => ({ dietary: s.dietary, allergies: s.allergies, qty: s.qty, recipeId: s.resolved.recipe.id })),
+    /* Each Special Breakfast carries its resolved build so the bakery produces
+       exactly the safe composition (substitutions and approved variants). */
+    specials: specials.map(s => ({
+      dietary: s.dietary, allergies: s.allergies, qty: s.qty, size: s.size, recipeId: s.resolved.recipe.id,
+      components: s.resolved.components, substitutions: s.resolved.substitutions, variants: s.resolved.variants || {}
+    })),
     gross: Math.round(p.gross), discount: Math.round(p.discount), total: Math.round(p.total), discountPct: p.discountPct
   };
 }
@@ -163,3 +172,75 @@ export function validateBusinessDelivery(d) {
 }
 
 export const needsGlutenFreeHandling = (dietary = [], allergies = []) => dietary.includes('glutenFree') || allergies.includes('gluten');
+
+/* ---------- Bakery capability & capacity (MB-BKY-001, MB-DLV-001 §7–8) ---------- */
+export const CAPABILITIES = ['glutenFree', 'nutFree', 'dairyFree', 'eggFree', 'vegan', 'sesameFree', 'soyFree', 'peanutFree'];
+export const BAKERY_STATUSES = ['Active', 'Under Review', 'Suspended'];
+
+/** Bakery capabilities a box with these requirements needs. Vegetarian / Halal are met by every partner. */
+export function needsFor(dietary = [], allergies = []) {
+  const n = new Set();
+  if (dietary.includes('glutenFree') || allergies.includes('gluten')) n.add('glutenFree');
+  if (dietary.includes('dairyFree') || allergies.includes('dairy')) n.add('dairyFree');
+  if (dietary.includes('vegan')) n.add('vegan');
+  if (allergies.includes('egg')) n.add('eggFree');
+  if (allergies.includes('treenut')) n.add('nutFree');
+  if (allergies.includes('peanut')) n.add('peanutFree');
+  if (allergies.includes('sesame')) n.add('sesameFree');
+  if (allergies.includes('soy')) n.add('soyFree');
+  return [...n];
+}
+export const bakeryCaps = b => { try { return JSON.parse(b.capabilities || '{}') || {}; } catch { return {}; } };
+export const bakeryCovers = (b, needs = []) => needs.every(k => bakeryCaps(b)[k]);
+export const activeBakeries = () => db.prepare("SELECT * FROM bakeries WHERE status = 'Active' ORDER BY distance_km").all();
+
+/** All boxes booked for a date (personal + business, not cancelled). */
+export function boxesBookedOnDate(date) {
+  const personal = db.prepare('SELECT COUNT(*) AS n FROM order_days WHERE date = ? AND cancelled = 0').get(date).n;
+  const business = db.prepare('SELECT COALESCE(SUM(people), 0) AS n FROM business_days WHERE date = ? AND cancelled = 0').get(date).n;
+  return personal + business;
+}
+
+/** Production capacity: booked boxes + new boxes must fit the Active bakeries able to make them. */
+export function assertBakeryCapacity(date, boxes, needs = []) {
+  const capacity = activeBakeries().filter(b => bakeryCovers(b, needs)).reduce((t, b) => t + b.daily_capacity, 0);
+  if (boxesBookedOnDate(date) + boxes > capacity) {
+    throw bad('capacity_full', `Our partner bakeries are fully booked for ${date}. Please choose another morning.`, { date, needs });
+  }
+}
+
+/* ---------- Delivery windows (local server time, Asia/Dubai) ---------- */
+const WINDOW_START = { w1: '07:30', w2: '08:30', w3: '09:30' };
+const WINDOW_END = { w1: '08:30', w2: '09:30', w3: '10:30' };
+export const windowStart = (date, window) => new Date(`${date}T${WINDOW_START[window] || '07:30'}:00`);
+export const windowEnd = (date, window) => new Date(`${date}T${WINDOW_END[window] || '10:30'}:00`);
+
+/* ---------- Exceptions (MB-OPS-001 §8) ---------- */
+export const EXCEPTION_CATEGORIES = ['Safety', 'Bakery', 'Courier', 'Customer/Location', 'Payment'];
+export const EXCEPTION_KINDS = [...BASE_EXCEPTION_KINDS, 'Safety Incident', 'Pickup Delay', 'QC Failure', 'Delivery Failed', 'Payment Issue', 'Customer Issue'];
+const KIND_CATEGORY = {
+  'Product/Ingredient Unavailable': 'Bakery', 'Capacity Issue': 'Bakery', 'Dietary/Allergy Issue': 'Safety',
+  'Equipment/Operational Issue': 'Bakery', 'Courier Delay': 'Courier', 'Location Unavailable': 'Customer/Location',
+  'Other': 'Customer/Location', 'Safety Incident': 'Safety', 'Pickup Delay': 'Bakery', 'QC Failure': 'Bakery',
+  'Delivery Failed': 'Courier', 'Payment Issue': 'Payment', 'Customer Issue': 'Customer/Location'
+};
+/** Safety concerns receive the highest operational priority (1). */
+export const PRIORITY = { Safety: 1, Bakery: 2, Courier: 2, Payment: 2, 'Customer/Location': 3 };
+
+/**
+ * Record an exception. Unless `dedupe` is false, an unresolved exception with
+ * the same ref + kind is reused instead of creating a duplicate.
+ * Returns the exception id.
+ */
+export function raiseException({ ref, kind, note = '', category, owner = null, action = null, cause = null, responsibleParty = null, customerCategory = null, dedupe = true }) {
+  if (!EXCEPTION_KINDS.includes(kind)) throw bad('kind_invalid', `kind must be one of: ${EXCEPTION_KINDS.join(', ')}`);
+  const cat = EXCEPTION_CATEGORIES.includes(category) ? category : KIND_CATEGORY[kind] || 'Customer/Location';
+  if (dedupe) {
+    const existing = db.prepare('SELECT id FROM exceptions WHERE ref = ? AND kind = ? AND resolved = 0').get(String(ref || ''), kind);
+    if (existing) return existing.id;
+  }
+  const r = db.prepare(`INSERT INTO exceptions (ref, kind, note, category, priority, owner, action, cause, responsible_party, customer_category)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(String(ref || ''), kind, String(note || '').slice(0, 1000), cat, PRIORITY[cat], owner, action, cause, responsibleParty, customerCategory);
+  return Number(r.lastInsertRowid);
+}

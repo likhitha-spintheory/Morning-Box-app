@@ -1,88 +1,96 @@
-import { Link } from 'react-router-dom';
-import { Icon, Logo } from '../components/ui.jsx';
+import { useEffect, useState } from 'react';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
+import { Icon, Logo, Ring } from '../components/ui.jsx';
 import { useStore } from '../state/store.jsx';
+import { get } from '../api.js';
 import { planningWeeks, timeLeft } from '../domain/app.js';
+import { cutoffFor } from '../domain/standards.js';
+
+function tomorrowIso() {
+  const d = new Date(); d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
 
 export default function Home() {
   const { state } = useStore();
   const first = planningWeeks()[0][0];
   const left = timeLeft(first.iso);
-  const signedIn = !!state.user;
+  const hoursLeft = Math.max(0, (cutoffFor(first.iso) - new Date()) / 3.6e6);
+  const signedIn = !!(state.session && state.user);
+  const [open, setOpen] = useState(null);
+  const [params] = useSearchParams();
 
+  /* Live delivery-window availability for the next orderable morning (MB-DLV-001 §8). */
+  useEffect(() => {
+    get(`/availability?dates=${first.iso}`)
+      .then(a => setOpen(Object.values(a[first.iso] || {}).filter(w => w.available).length))
+      .catch(() => setOpen(null));
+  }, [first.iso]);
+
+  /* MB-FLW-001 §10: returning customers go straight to their mornings (?home=1 shows this page). */
+  if (signedIn && !params.get('home')) return <Navigate to="/today" replace />;
   return (
     <div style={{ background: 'var(--ivory)', minHeight: '100dvh' }}>
-      <header className="home-wide row" style={{ paddingTop: 12, paddingBottom: 12 }}>
-        <Logo width={140} />
-        <nav className="nav-links" aria-label="Main">
-          <a className="l" href="#how">How it works</a>
-          <Link className="l" to="/business">For companies</Link>
-          <span className="tag" style={{ padding: '8px 12px' }}><Icon name="pin" size={14} stroke={2} /> DIFC</span>
-          <Link to={signedIn ? '/today' : '/sign-in?next=/today'} className="icon-btn" aria-label={signedIn ? 'My mornings' : 'Sign in'}>
-            <Icon name="user" />
+      <header className="home-wide row" style={{ paddingTop: 16, paddingBottom: 8 }}>
+        <Logo width={150} />
+        <span className="row" style={{ gap: 10 }}>
+          <span className="date-pill" style={{ padding: '10px 16px', fontWeight: 500 }}><Icon name="pin" size={18} stroke={1.7} /> DIFC</span>
+          <Link to={signedIn ? '/today' : '/sign-in?next=/today'} className="icon-btn" style={{ width: 48, height: 48 }} aria-label={signedIn ? 'My mornings' : 'Sign in'}>
+            <Icon name="user" size={22} />
           </Link>
-        </nav>
+        </span>
       </header>
 
-      <section className="home-wide home-hero" style={{ paddingTop: 8 }}>
-        <div className="stack gap-16" style={{ order: 2 }}>
-          <span className="eyebrow">Your personal breakfast assistant</span>
-          <h1 className="h-hero big">Breakfast, arranged around your morning.</h1>
-          <p className="help" style={{ maxWidth: 520 }}>
-            Three simple questions. One confident recommendation. Freshly prepared by a partner bakery and delivered in the window you choose.
+      <section className="home-wide home-hero" style={{ paddingTop: 12, paddingBottom: 32 }}>
+        <div className="stack gap-16">
+          <span className="eyebrow grey" style={{ letterSpacing: '.24em' }}>{greeting()}{signedIn ? `, ${state.user.firstName}` : ''}</span>
+          <h1 className="h-hero big">Tomorrow’s breakfast, <em>already sorted.</em></h1>
+          <p className="help" style={{ fontSize: 17, maxWidth: 520 }}>
+            Three simple questions. One breakfast made for you — prepared fresh by a partner bakery and delivered in the window you choose.
           </p>
-          <div className="stack gap-10" style={{ maxWidth: 420 }}>
-            <Link to="/start" className="btn">Create My Morning <Icon name="arrow" size={18} stroke={2} /></Link>
-            <Link to="/business/people" className="btn-secondary">Business Breakfast</Link>
-          </div>
-          <span className="sm row" style={{ justifyContent: 'flex-start', gap: 10 }}>
-            <Icon name="clock" size={18} color="#7A5A14" />
-            {left ? <>Order by 9:00 PM for {first.label} · <b className="strong">{left} left</b></> : 'Order by 9:00 PM for next-day breakfast'}
-          </span>
         </div>
-        <div style={{ order: 1 }}>
-          <img className="home-hero-img" src="./assets/morningbox-breakfast-over-dubai.png" alt="A Morning Box breakfast on a sunlit table over the Dubai skyline" />
-        </div>
-      </section>
 
-      <section id="how" className="home-wide stack gap-16" style={{ paddingTop: 72 }}>
-        <span className="eyebrow">How it works</span>
-        <h2 className="h-section">Simple questions. Clear choices. Fast decisions.</h2>
-        <div className="home-grid">
-          {[
-            ['Tell us how you like to eat', 'Eating style, what you enjoy, and any dietary needs or allergies. Asked once.'],
-            ['Plan your mornings', 'Pick one or more dates, tell us what each morning looks like, and receive your Morning Box.'],
-            ['Delivered in your window', 'Prepared fresh by a partner bakery, delivered between 7:30 and 10:30 AM.']
-          ].map(([t, d], i) => (
-            <div key={t} className="step card" style={{ padding: 22 }}>
-              <span className="num">{i + 1}</span>
-              <div><div className="strong">{t}</div><div className="sm">{d}</div></div>
+        <div className="stack gap-16">
+          <div className="home-photo">
+            <img src="./assets/morningbox-skyline-breakfast.png" alt="An open Morning Box with croissant, granola bowl and yogurt over the Dubai skyline" />
+            <div className="countdown">
+              <Ring fraction={Math.min(1, hoursLeft / 24)} label={`${Math.floor(hoursLeft)}h`} size={44} />
+              <span className="stack" style={{ lineHeight: 1.3 }}>
+                <span className="strong" style={{ fontSize: 16 }}>Order by 9:00 PM</span>
+                <span className="sm">for {first.label}{left ? <> · <b className="strong">{left} left</b></> : ''}</span>
+              </span>
             </div>
-          ))}
+          </div>
+          {open !== null && (
+            <span className="live" style={{ fontWeight: 500 }}><i />
+              <span><b>Live</b> <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>{open} of 3 delivery windows open for {first.iso === tomorrowIso() ? 'tomorrow' : first.label}</span></span>
+            </span>
+          )}
+
+          <div className="stack gap-12" style={{ marginTop: 6 }}>
+            <Link to="/start" className="entry gold">
+              <Icon name="sunny" size={24} stroke={1.6} />
+              <span style={{ flex: 1 }}><b>Create My Morning</b><span className="d">A breakfast made for you</span></span>
+              <Icon name="arrow" size={22} stroke={1.8} />
+            </Link>
+            <Link to={state.businessUser ? '/business' : '/business/people'} className="entry plain">
+              <Icon name="brief" size={24} stroke={1.6} />
+              <span style={{ flex: 1 }}><b>Morning Box for Business</b><span className="d" style={{ color: 'var(--text-3)', opacity: 1 }}>Meetings, teams &amp; company</span></span>
+              <Icon name="arrow" size={22} stroke={1.8} />
+            </Link>
+          </div>
+          {!signedIn && (
+            <p className="sm center" style={{ margin: '4px 0 0', fontSize: 16 }}>
+              Already planning with us? <Link to="/sign-in?next=/today" className="strong" style={{ textDecorationColor: 'var(--gold)', textUnderlineOffset: 4 }}>Sign in</Link>
+            </p>
+          )}
         </div>
       </section>
-
-      <section className="home-wide home-hero" style={{ paddingTop: 72 }}>
-        <img className="home-hero-img" src="./assets/morningbox-skyline-breakfast.png" alt="An open Morning Box with croissant, granola bowl and yogurt" style={{ height: 320 }} />
-        <div className="stack gap-12">
-          <span className="eyebrow">Plan ahead</span>
-          <h2 className="h-section">Plan a day, a week, or the week after.</h2>
-          <p className="help">Choose the dates first, then build one morning at a time. Copy a morning you liked to the next day in one tap. Never a subscription — every morning is your choice.</p>
-        </div>
-      </section>
-
-      <section className="home-wide" style={{ paddingTop: 72 }}>
-        <div className="dark-band">
-          <span className="eyebrow">For teams, meetings &amp; companies</span>
-          <h2 className="h-section" style={{ color: 'var(--ivory)' }}>Breakfast for the whole team, without the catering hassle.</h2>
-          <p style={{ margin: 0, color: '#E9DCC6' }}>Tell us how many people. We handle the mix, protect special dietary needs, and deliver individual boxes to your office.</p>
-          <Link to="/business/people" className="btn auto" style={{ alignSelf: 'flex-start', marginTop: 6 }}>Plan a Business Breakfast</Link>
-        </div>
-      </section>
-
-      <footer className="home-wide sm row" style={{ padding: '48px clamp(16px,4vw,48px) 32px', flexWrap: 'wrap' }}>
-        <span><b className="strong">Morning Box</b> · DIFC, Dubai</span>
-        <span>Pre-order only · Delivery windows 7:30–10:30 AM</span>
-      </footer>
     </div>
   );
 }

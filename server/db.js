@@ -121,6 +121,72 @@ CREATE TABLE IF NOT EXISTS exceptions (
 );
 `);
 
+/* Additive migrations for databases created by earlier versions. */
+const columnsOf = table => db.prepare(`PRAGMA table_info('${table}')`).all().map(c => c.name);
+function addColumns(table, defs) {
+  const have = columnsOf(table);
+  const added = [];
+  for (const [name, def] of Object.entries(defs)) {
+    if (!have.includes(name)) { db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`); added.push(name); }
+  }
+  return added;
+}
+/* Fulfilment columns shared by personal and business days (MB-DLV-001, MB-OPS-001, MB-BKY-001). */
+const DAY_FULFILMENT = {
+  delivered_at: 'TEXT', delivery_point: 'TEXT', recipient_type: 'TEXT',
+  bakery_state: 'TEXT', issue_reason: 'TEXT', delay_minutes: 'INTEGER', qc_passed: 'INTEGER NOT NULL DEFAULT 0',
+  delivery_state: 'TEXT', late: 'INTEGER NOT NULL DEFAULT 0', refund_reason: 'TEXT'
+};
+addColumns('order_days', { feedback_reasons: 'TEXT', ...DAY_FULFILMENT });
+addColumns('business_days', { ...DAY_FULFILMENT, refund: 'INTEGER NOT NULL DEFAULT 0' });
+addColumns('orders', { payment_status: "TEXT NOT NULL DEFAULT 'captured_demo'" });
+addColumns('business_orders', { payment_status: "TEXT NOT NULL DEFAULT 'captured_demo'" });
+/* capabilities: JSON { glutenFree, nutFree, dairyFree, eggFree, vegan, sesameFree, soyFree, peanutFree }.
+   status: Active | Under Review | Suspended — only Active partners are allocated (MB-BKY-001). */
+addColumns('bakeries', { capabilities: 'TEXT', status: "TEXT NOT NULL DEFAULT 'Active'" });
+addColumns('exceptions', {
+  category: 'TEXT', priority: 'INTEGER NOT NULL DEFAULT 3', owner: 'TEXT', action: 'TEXT', resolution: 'TEXT',
+  cause: 'TEXT', responsible_party: 'TEXT', customer_category: 'TEXT', resolved_at: 'TEXT'
+});
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS delivery_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day_kind TEXT NOT NULL,
+  day_id INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS handovers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day_kind TEXT NOT NULL,
+  day_id INTEGER NOT NULL,
+  bakery_id INTEGER NOT NULL REFERENCES bakeries(id),
+  boxes INTEGER NOT NULL,
+  special_boxes INTEGER NOT NULL DEFAULT 0,
+  ready_by TEXT,
+  route_id TEXT,
+  picked_up_at TEXT
+);
+/* Outbox: an SMS / email / push provider consumes undelivered rows. */
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  ref TEXT,
+  kind TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  read_at TEXT
+);
+CREATE TABLE IF NOT EXISTS payment_adjustments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_day_id INTEGER NOT NULL REFERENCES order_days(id),
+  amount INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+
 /* Launch partner set for the DIFC pilot (MB-BKY-001). Names are placeholders
    until partner agreements are signed. */
 if (db.prepare('SELECT COUNT(*) AS n FROM bakeries').get().n === 0) {
@@ -128,6 +194,20 @@ if (db.prepare('SELECT COUNT(*) AS n FROM bakeries').get().n === 0) {
   ins.run('Partner Bakery A', 'DIFC', 0.6, 120, 1);
   ins.run('Partner Bakery B', 'Downtown Dubai', 2.1, 150, 0);
   ins.run('Partner Bakery C', 'Business Bay', 3.4, 200, 1);
+}
+/* Capability placeholders for the launch partners until their allergen-control
+   audits are on file (MB-BKY-001). Unknown bakeries fall back to their
+   gluten-free certification only. */
+const ALL_CAPS = ['glutenFree', 'nutFree', 'dairyFree', 'eggFree', 'vegan', 'sesameFree', 'soyFree', 'peanutFree'];
+const caps = on => Object.fromEntries(ALL_CAPS.map(k => [k, on.includes(k)]));
+const PLACEHOLDER_CAPS = {
+  'Partner Bakery A': caps(ALL_CAPS),
+  'Partner Bakery B': caps(['dairyFree', 'eggFree', 'vegan', 'soyFree']),
+  'Partner Bakery C': caps(['glutenFree', 'dairyFree', 'eggFree', 'vegan', 'sesameFree', 'soyFree'])
+};
+for (const b of db.prepare('SELECT id, name, gluten_free_certified FROM bakeries WHERE capabilities IS NULL').all()) {
+  const c = PLACEHOLDER_CAPS[b.name] || caps(b.gluten_free_certified ? ['glutenFree'] : []);
+  db.prepare('UPDATE bakeries SET capabilities = ? WHERE id = ?').run(JSON.stringify(c), b.id);
 }
 
 export const json = v => JSON.stringify(v ?? null);

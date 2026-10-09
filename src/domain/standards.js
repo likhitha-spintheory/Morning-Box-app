@@ -22,7 +22,7 @@ export const EATING_STYLES = [
 /* ---------- MB-PER-001 Q2 · Breakfast Preference (multi-select) ---------- */
 export const PREFERENCES = [
   { id: 'savory', label: 'Savory Breakfast',  blurb: 'Eggs, bread, fresh vegetables.' },
-  { id: 'bakery', label: 'Bread & Pastry',    blurb: 'Fresh bakery with spreads and fruit.' },
+  { id: 'bakery', label: 'Bakery & Pastry',    blurb: 'Fresh bakery with spreads and fruit.' },
   { id: 'fresh',  label: 'Fresh & Wholesome', blurb: 'Yogurt, oats, granola, fruit.' },
   { id: 'sweet',  label: 'Sweet Breakfast',   blurb: 'A naturally sweeter start.' }
 ];

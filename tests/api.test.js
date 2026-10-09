@@ -90,10 +90,11 @@ test('edits, feedback gating, cancellation with refund', async () => {
   assert.equal(e.body.days[0].window, 'w1');
   assert.equal((await call('POST', `/orders/${orderId}/days/${dates[0]}/feedback`, { value: 'Loved it' }, token)).status, 400);
   for (let i = 0; i < 3; i++) await call('POST', '/demo/advance', { orderId, date: dates[0] }, token);
-  const f = await call('POST', `/orders/${orderId}/days/${dates[0]}/feedback`, { value: 'Loved it' }, token);
+  const f = await call('POST', `/orders/${orderId}/days/${dates[0]}/feedback`, { value: 'Not for me', reasons: ['Too little', 'hacked'] }, token);
+  assert.deepEqual(f.body.days[0].feedbackReasons, ['Too little']);
   const locked = await call('PATCH', `/orders/${orderId}/days/${dates[0]}`, { size: 'large' }, token);
   assert.equal(locked.body.error, 'in_production');
-  assert.equal(f.body.days[0].feedback, 'Loved it');
+  assert.equal(f.body.days[0].feedback, 'Not for me');
   assert.equal(f.body.days[0].stage, 3);
   const c = await call('POST', `/orders/${orderId}/days/${dates[1]}/cancel`, {}, token);
   assert.equal(c.body.days[1].cancelled, true);

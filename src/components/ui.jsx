@@ -49,7 +49,15 @@ const PATHS = {
   truck: '<path d="M3 6h11v10H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
   home: '<path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>',
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
-  logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>'
+  logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+  leafy: '<path d="M5 19c0-8 6-14 14-14 0 8-6 14-14 14z"/><path d="M5 19l7-7"/>',
+  sunny: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  sunrise: '<path d="M4 18h16M7 18a5 5 0 0 1 10 0M12 7v3M5.6 11.6l1.6 1.6M18.4 11.6l-1.6 1.6M2 18h1M21 18h1"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="3"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16v4M17 18h4"/>',
+  apple: '<path d="M16 3c-1.5.2-3 1.3-3.3 3 1.6.1 3-.9 3.3-3z"/><path d="M12 7c-1.2 0-2-.6-3.2-.6C6.6 6.4 5 8.3 5 11c0 4 2.6 9 4.6 9 1 0 1.4-.6 2.4-.6s1.3.6 2.4.6c1.6 0 3.3-3.2 3.9-5-1.8-.8-2.6-2.4-2.6-4 0-1.5.8-2.8 2-3.4-.8-1.1-2-1.6-3.2-1.6C13.6 6 13 7 12 7z"/>',
+  dot: '<circle cx="12" cy="12" r="3"/>',
+  map: '<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>'
 };
 
 export function Icon({ name, size = 20, stroke = 1.7, color = 'currentColor', style }) {
@@ -101,16 +109,16 @@ export function Progress({ step, total = 5 }) {
 }
 
 export function Tick({ on, square }) {
-  return <span className={`tick${square ? ' square' : ''}${on ? ' on' : ''}`}>{on && <Icon name="check" size={14} stroke={3} />}</span>;
+  return <span className={`tick${square ? ' square' : ''}${on ? ' on' : ''}`}>{on && <Icon name="check" size={15} stroke={2.2} />}</span>;
 }
 
 export function Option({ on, onClick, icon, title, children, role = 'radio', square }) {
   return (
     <button type="button" className={`option${on ? ' on' : ''}`} role={role} aria-checked={on} onClick={onClick}>
-      {icon && <span className="ico"><Icon name={icon} size={22} stroke={1.6} /></span>}
-      <span className="stack gap-4">
-        <span style={{ fontWeight: 600, fontSize: 17 }}>{title}</span>
-        {children && <span className="sm">{children}</span>}
+      {icon && <span className="ico"><Icon name={icon} size={24} stroke={1.6} /></span>}
+      <span className="stack" style={{ gap: 3, flex: 1 }}>
+        <span style={{ fontWeight: 600, fontSize: 18, lineHeight: 1.3 }}>{title}</span>
+        {children && <span className="help" style={{ fontSize: 15.5, lineHeight: 1.45 }}>{children}</span>}
       </span>
       <Tick on={on} square={square} />
     </button>
@@ -143,8 +151,8 @@ export function Money({ value, className = '' }) {
   return <span className={`money ${className}`}>AED {Math.round(value).toLocaleString('en-AE')}</span>;
 }
 
-export function Footer({ children, split }) {
-  return <div className={`footer${split ? ' split' : ''}`}>{children}</div>;
+export function Footer({ children, split, sheet }) {
+  return <div className={`footer${split ? ' split' : ''}${sheet ? ' sheet' : ''}`}>{children}</div>;
 }
 
 export function Screen({ children }) {
@@ -156,7 +164,7 @@ export function MorningPills({ dates, active, done = [] }) {
     <div className="mpills">
       {dates.map(d => (
         <span key={d.iso} className={`mpill${d.iso === active ? ' on' : done.includes(d.iso) ? ' done' : ''}`}>
-          {done.includes(d.iso) && d.iso !== active && <Icon name="check" size={12} stroke={3} />}{d.short}
+          {done.includes(d.iso) && d.iso !== active && <Icon name="check" size={15} stroke={2.2} />}{d.label}
         </span>
       ))}
     </div>
@@ -173,14 +181,89 @@ export function Note({ icon = 'info', children }) {
 }
 
 export function TabBar({ active }) {
-  const tabs = [['/today', 'sun', 'Today'], ['/orders', 'box', 'Orders'], ['/me', 'user', 'Profile']];
+  const tabs = [['/today', 'home', 'Today'], ['/start', 'cal', 'Plan'], ['/orders', 'box', 'Orders'], ['/me', 'user', 'Profile']];
   return (
     <nav className="tabbar" aria-label="Primary">
       {tabs.map(([to, icon, label]) => (
         <Link key={to} to={to} className={active === to ? 'active' : ''} aria-current={active === to ? 'page' : undefined}>
-          <Icon name={icon} size={22} /><span>{label}</span>
+          <Icon name={icon} size={24} stroke={1.6} /><span>{label}</span>
         </Link>
       ))}
     </nav>
+  );
+}
+
+/** Primary label with trailing arrow, as in the approved style. */
+export function Go({ children }) {
+  return <>{children}<Icon name="arrow" size={20} stroke={1.8} /></>;
+}
+
+/** Morning Profile progress: the sun rises along an arc across the three questions. */
+export function SunArc({ step, labels = ['Eating style', 'Preferences', 'Dietary & allergies'] }) {
+  const pts = [[60, 74], [270, 38], [470, 64]];
+  const [sx, sy] = pts[step - 1];
+  const solid = step === 1 ? `M30 82 L${sx} ${sy}` : step === 2 ? `M30 82 Q150 40 ${sx} ${sy}` : `M30 82 Q150 40 270 38 Q400 38 ${sx} ${sy}`;
+  const rays = [0, 1, 2, 3, 4, 5, 6].map(i => {
+    const a = Math.PI * (0.95 + i * 0.185);
+    return <line key={i} x1={sx + 17 * Math.cos(a)} y1={sy + 17 * Math.sin(a)} x2={sx + 24 * Math.cos(a)} y2={sy + 24 * Math.sin(a)} stroke="#D99A12" strokeWidth="2.6" strokeLinecap="round" />;
+  });
+  return (
+    <div className="sunarc" aria-hidden="true">
+      <svg viewBox="0 0 520 96">
+        <line x1="0" y1="92" x2="520" y2="92" stroke="#EADCC1" strokeWidth="1.5" />
+        <path d="M30 82 Q150 40 270 38 Q400 38 500 84" fill="none" stroke="#E6D3AE" strokeWidth="2.5" strokeDasharray="2 7" strokeLinecap="round" />
+        <path d={solid} fill="none" stroke="#D99A12" strokeWidth="3.5" strokeLinecap="round" />
+        {rays}
+        <circle cx={sx} cy={sy} r="11" fill="#D99A12" />
+      </svg>
+      <div className="sunarc-labels">
+        {labels.map((l, i) => <span key={l} className={i + 1 === step ? 'on' : i + 1 < step ? 'done' : ''}>{l}</span>)}
+      </div>
+    </div>
+  );
+}
+
+/** Small countdown ring (e.g. hours left until the 9:00 PM cutoff). */
+export function Ring({ fraction, label, size = 40 }) {
+  const r = size / 2 - 3, c = 2 * Math.PI * r;
+  return (
+    <span className="ring" style={{ width: size, height: size }} aria-hidden="true">
+      <svg width={size} height={size}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#F1E3C6" strokeWidth="4" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#D99A12" strokeWidth="4" strokeLinecap="round"
+          strokeDasharray={`${c * Math.max(0, Math.min(1, fraction))} ${c}`} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+      </svg>
+      <span>{label}</span>
+    </span>
+  );
+}
+
+export function UaeFlag() {
+  return (
+    <svg width="26" height="18" viewBox="0 0 26 18" aria-hidden="true" style={{ borderRadius: 3, flex: 'none' }}>
+      <rect width="26" height="6" fill="#00732F" /><rect y="6" width="26" height="6" fill="#FFFFFF" /><rect y="12" width="26" height="6" fill="#000000" />
+      <rect width="7" height="18" fill="#FF0000" />
+    </svg>
+  );
+}
+
+/** UAE mobile field with flag and +971 inside one control. */
+export function PhoneField({ id, value, onChange, invalid, disabled, describedBy }) {
+  return (
+    <div className={`phone${invalid ? ' invalid' : ''}`}>
+      <span className="cc"><UaeFlag />+971</span>
+      <input id={id} inputMode="tel" autoComplete="tel-national" placeholder="50 123 4567" value={value}
+        onChange={e => onChange(e.target.value)} disabled={disabled} aria-describedby={describedBy} aria-invalid={invalid || undefined} />
+    </div>
+  );
+}
+
+/** Eyebrow + serif date with the gold rule ("PLANNING / Friday, 9 October"). */
+export function RuledDate({ eyebrow, children }) {
+  return (
+    <div className="ruled">
+      <span className="eyebrow grey">{eyebrow}</span>
+      <span className="date-title">{children}</span>
+    </div>
   );
 }

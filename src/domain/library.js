@@ -43,13 +43,13 @@ export const COMPONENTS = {
     { note: 'White beans, light tomato sauce, seasoning.', notBusyFormat: true }),
 
   chickenSausage: c('chickenSausage', 'Halal Chicken Sausage', 'Savory Protein',
-    { light: '1 pc', regular: '2 pcs', large: '3 pcs' }, [], ['glutenFree', 'halal'], 'savoryProtein',
+    { light: '1 pc', regular: '2 pcs', large: '3 pcs' }, [], ['dairyFree', 'glutenFree', 'halal'], 'savoryProtein',
     { flexibleOnly: true, note: 'Approx. 35–45 g per unit.' }),
   beefBacon: c('beefBacon', 'Halal Beef Bacon', 'Savory Protein',
-    { light: '25 g', regular: '40 g', large: '60 g' }, [], ['glutenFree', 'halal'], 'savoryProtein',
+    { light: '25 g', regular: '40 g', large: '60 g' }, [], ['dairyFree', 'glutenFree', 'halal'], 'savoryProtein',
     { flexibleOnly: true, note: 'Cooked weight.' }),
   turkeyBacon: c('turkeyBacon', 'Halal Turkey Bacon', 'Savory Protein',
-    { light: '25 g', regular: '40 g', large: '60 g' }, [], ['glutenFree', 'halal'], 'savoryProtein',
+    { light: '25 g', regular: '40 g', large: '60 g' }, [], ['dairyFree', 'glutenFree', 'halal'], 'savoryProtein',
     { flexibleOnly: true, note: 'Cooked weight.' }),
 
   /* ---- §4 Bread — all baked in-house, served untoasted by default ---- */
