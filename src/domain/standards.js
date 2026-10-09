@@ -131,7 +131,7 @@ export const SIZE_ADJUSTMENT = { light: -7, regular: 0, large: 11 };   // AED, i
 
 export const ADDON_PRICES = {                                     // AED, indicative
   bread: { half: 12, whole: 20 },
-  pastry: { 'Plain Croissant': 11, 'Cheese Croissant': 13, 'Pain au Chocolat': 13, 'Fruit Danish': 14 }
+  pastry: { 'Plain Croissant': 11, 'Cheese Croissant': 13, 'Pain au Chocolat': 13, 'Fruit Danish': 14, 'Gluten-Free Blueberry Muffin': 15 /* SAMPLE */ }
 };
 
 export const DELIVERY_FEE = 0;        // included in MVP pricing, indicative

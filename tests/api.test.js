@@ -122,8 +122,10 @@ test('business: headcount must match boxes; capacity is checked before payment',
   assert.equal(full.body.error, 'window_full');
   const av = await call('GET', `/availability?dates=${dates[4]}`);
   assert.equal(av.body[dates[4]].w1.remaining, 5);
-  const unsafe = await call('POST', '/business/quote', { days: [{ date: dates[5], people: 1, lines: [], specials: [{ dietary: ['vegan'], allergies: ['gluten'], qty: 1 }] }] }, token);
-  assert.equal(unsafe.body.error, 'special_no_match');
+  /* With the SAMPLE gluten-free / vegan items in library.js every special has a safe match.
+     When the approved menu replaces them, restore a 'special_no_match' check here if any combination is uncovered. */
+  const special = await call('POST', '/business/quote', { days: [{ date: dates[5], people: 1, lines: [], specials: [{ dietary: ['vegan'], allergies: ['gluten'], qty: 1 }] }] }, token);
+  assert.equal(special.status, 200, JSON.stringify(special.body));
   const inv = await call('GET', `/business/orders/${ok.body.id}/invoice`, null, token);
   assert.match(inv.body, /Tax Invoice/);
 });

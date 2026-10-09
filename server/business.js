@@ -107,7 +107,7 @@ businessRouter.post('/orders', (req, res) => {
   const id = `MB-B-${randomBytes(3).toString('hex').toUpperCase()}`;
   const order = tx(() => {
     built.forEach(b => assertCapacity(b.date, b.window, b.people));
-    if (typeof rules.assertBakeryCapacity === 'function') built.forEach(b => rules.assertBakeryCapacity(b.date, b.people, needsOf(b.specials)));
+    if (typeof rules.assertBakeryCapacity === 'function') built.forEach(b => { const n = needsOf(b.specials); rules.assertBakeryCapacity(b.date, b.people, rules.needsFor(n.dietary, n.allergies)); });
     const total = built.reduce((t, b) => t + b.total, 0);
     // Payment gateway integration point: charge `total` before persisting.
     db.prepare('INSERT INTO business_orders (id, user_id, company, email, invoice, payment_ref, total) VALUES (?, ?, ?, ?, ?, ?, ?)')

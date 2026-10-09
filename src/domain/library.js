@@ -64,6 +64,10 @@ export const COMPONENTS = {
   focaccia: c('focaccia', 'Focaccia', 'Bread',
     { light: '40 g', regular: '60 g', large: '80 g' }, ['gluten'], GL, 'bread',
     { note: 'Plain or approved Olive variant.' }),
+  /* SAMPLE (testing only) — replace with the approved gluten-free menu. */
+  glutenFreeBread: c('glutenFreeBread', 'Gluten-Free Seeded Loaf', 'Bread',
+    { light: '40 g', regular: '60 g', large: '80 g' }, [], V, 'bread',
+    { sample: true, note: 'SAMPLE item for testing. Certified gluten-free flours; vegan; baked in a gluten-free area.' }),
 
   /* ---- §5 Pastry — one piece regardless of breakfast size ---- */
   plainCroissant: c('plainCroissant', 'Plain Croissant', 'Pastry',
@@ -78,6 +82,10 @@ export const COMPONENTS = {
   fruitDanish: c('fruitDanish', 'Fruit Danish', 'Pastry',
     { light: '1 pc', regular: '1 pc', large: '1 pc' }, ['gluten', 'dairy', 'egg'], ['vegetarian', 'halal'], 'pastry',
     { fixedUnit: true, standardPastry: true, note: '70–90 g. Apple, Berry or Apricot.' }),
+  /* SAMPLE (testing only). */
+  glutenFreeMuffin: c('glutenFreeMuffin', 'Gluten-Free Blueberry Muffin', 'Pastry',
+    { light: '1 pc', regular: '1 pc', large: '1 pc' }, [], V, 'pastry',
+    { sample: true, fixedUnit: true, standardPastry: true, note: 'SAMPLE item for testing. Vegan, gluten-free, dairy-free and egg-free.' }),
 
   /* ---- §6 Fresh savory ---- */
   avocado: c('avocado', 'Avocado', 'Fresh Savory',
@@ -107,11 +115,18 @@ export const COMPONENTS = {
   /* ---- §8 Dairy & cheese ---- */
   greekYogurt: c('greekYogurt', 'Greek Yogurt', 'Dairy & Cheese',
     { light: '100 g', regular: '150 g', large: '200 g' }, ['dairy'], DY, null,
-    { noDirectSwap: true, note: 'Plain, unsweetened.' }),
+    { noDirectSwap: true, note: 'Plain, unsweetened.',
+      /* SAMPLE (testing only) — plant-based build for vegan / dairy-free users. */
+      variant: { id: 'coconutYogurt', label: 'Coconut yogurt (sample)', sample: true,
+                 allergens: [], diet: V } }),
   labneh: c('labneh', 'Labneh', 'Dairy & Cheese',
     { light: '50 g', regular: '75 g', large: '100 g' }, ['dairy'], DY, 'savoryDairy', { note: 'Plain.' }),
   feta: c('feta', 'Feta', 'Dairy & Cheese',
     { light: '30 g', regular: '45 g', large: '60 g' }, ['dairy'], DY, 'savoryDairy', { note: 'Plain.' }),
+  /* SAMPLE (testing only) — plant-based alternative in the savory dairy role. */
+  hummus: c('hummus', 'Hummus', 'Dairy & Cheese',
+    { light: '50 g', regular: '75 g', large: '100 g' }, ['sesame'], V, 'savoryDairy',
+    { sample: true, note: 'SAMPLE item for testing. Chickpea and tahini; vegan.' }),
 
   /* ---- §9 Grains & bowls ---- */
   overnightOats: c('overnightOats', 'Overnight Oats', 'Grains & Bowls',
@@ -123,20 +138,34 @@ export const COMPONENTS = {
          new product — so it is available to the engine as a compatible
          substitution under MB-REC-001 §3. The bakery must be told which
          build to produce, so the variant is carried into the production list. */
-      variant: { id: 'plantMilk', label: 'Plant milk base',
-                 allergens: ['gluten'], diet: ['vegetarian', 'vegan', 'dairyFree', 'halal'] } }),
+      variant: [
+        { id: 'plantMilk', label: 'Plant milk base',
+          allergens: ['gluten'], diet: ['vegetarian', 'vegan', 'dairyFree', 'halal'] },
+        /* SAMPLE (testing only) — certified gluten-free oats. */
+        { id: 'gfOatsDairy', label: 'Gluten-free oats (sample)', sample: true,
+          allergens: ['dairy'], diet: ['vegetarian', 'glutenFree', 'halal'] },
+        { id: 'gfOatsPlantMilk', label: 'Gluten-free oats, plant milk (sample)', sample: true,
+          allergens: [], diet: V }] }),
   granola: c('granola', 'Granola', 'Grains & Bowls',
     { light: '30 g', regular: '45 g', large: '60 g' }, ['gluten', 'treenut'], GL, 'dryGrain',
     { note: 'Packed separately from wet components.' }),
   muesli: c('muesli', 'Muesli', 'Grains & Bowls',
     { light: '30 g', regular: '45 g', large: '60 g' }, ['gluten', 'treenut'], GL, 'dryGrain',
     { note: 'No added sugar or syrup. Packed separately.' }),
+  /* SAMPLE (testing only). */
+  seedGranola: c('seedGranola', 'Gluten-Free Seed Granola', 'Grains & Bowls',
+    { light: '30 g', regular: '45 g', large: '60 g' }, [], V, 'dryGrain',
+    { sample: true, note: 'SAMPLE item for testing. Seeds, puffed rice and coconut; gluten-free and nut-free. Packed separately.' }),
 
   /* ---- §10 Spreads & accompaniments — all portioned separately ---- */
   creamCheese: c('creamCheese', 'Cream Cheese', 'Spreads',
     { light: '20 g', regular: '30 g', large: '40 g' }, ['dairy'], DY, 'neutralSpread', { note: 'Plain.' }),
   butter: c('butter', 'Butter', 'Spreads',
     { light: '10 g', regular: '15 g', large: '20 g' }, ['dairy'], DY, 'neutralSpread', { note: 'Plain unsalted.' }),
+  /* SAMPLE (testing only). */
+  plantButter: c('plantButter', 'Plant-Based Butter', 'Spreads',
+    { light: '10 g', regular: '15 g', large: '20 g' }, [], V, 'neutralSpread',
+    { sample: true, note: 'SAMPLE item for testing. Vegan, dairy-free spread.' }),
   honey: c('honey', 'Pure Honey', 'Spreads',
     { light: '10 g', regular: '15 g', large: '20 g' }, [], VG, 'sweetSpread',
     { note: 'Pure honey, no added sugar or flavouring. Vegetarian yes, vegan no.' }),
@@ -155,13 +184,13 @@ export const COMPONENTS = {
 export const SWAP_GROUPS = {
   eggHotMain:    ['scrambledEggs', 'omelette', 'boiledEggs', 'beans'],
   savoryProtein: ['chickenSausage', 'beefBacon', 'turkeyBacon'],
-  bread:         ['whiteSourdough', 'wholeWheatSourdough', 'multigrain', 'ciabatta', 'focaccia'],
-  pastry:        ['plainCroissant', 'cheeseCroissant', 'painAuChocolat', 'fruitDanish'],
+  bread:         ['whiteSourdough', 'wholeWheatSourdough', 'multigrain', 'ciabatta', 'focaccia', 'glutenFreeBread'],
+  pastry:        ['plainCroissant', 'cheeseCroissant', 'painAuChocolat', 'fruitDanish', 'glutenFreeMuffin'],
   freshVegetable:['tomato', 'cucumber', 'mixedGreens'],
   fruit:         ['seasonalFruit', 'berries', 'banana'],
-  savoryDairy:   ['labneh', 'feta'],
-  dryGrain:      ['granola', 'muesli'],
-  neutralSpread: ['creamCheese', 'butter'],
+  savoryDairy:   ['labneh', 'feta', 'hummus'],
+  dryGrain:      ['granola', 'muesli', 'seedGranola'],
+  neutralSpread: ['creamCheese', 'butter', 'plantButter'],
   sweetSpread:   ['honey', 'jam', 'peanutButter']
 };
 
@@ -170,8 +199,8 @@ export const NO_DIRECT_SWAP = ['avocado', 'olives', 'greekYogurt', 'overnightOat
 
 /* ---------- MB-PRO-001 §14 · Add-on library ----------
    MVP add-ons are limited to two groups only. */
-export const ADDON_BREAD = ['whiteSourdough', 'wholeWheatSourdough', 'multigrain', 'ciabatta', 'focaccia'];
-export const ADDON_PASTRY = ['plainCroissant', 'cheeseCroissant', 'painAuChocolat', 'fruitDanish'];
+export const ADDON_BREAD = ['whiteSourdough', 'wholeWheatSourdough', 'multigrain', 'ciabatta', 'focaccia', 'glutenFreeBread'];
+export const ADDON_PASTRY = ['plainCroissant', 'cheeseCroissant', 'painAuChocolat', 'fruitDanish', 'glutenFreeMuffin'];
 
 /* ---------- Packaging rules (MB-PRO-001 §15.2) ---------- */
 export const PACKING_RULES = {
@@ -222,7 +251,8 @@ export function resolveBuild(id, { dietary = [], allergies = [], eatingStyle } =
   if (eatingStyle === 'health' && (k.flexibleOnly || k.standardPastry)) return null;
 
   const builds = [{ variant: null, allergens: k.allergens, diet: k.diet }];
-  if (k.variant) builds.push({ variant: k.variant, allergens: k.variant.allergens, diet: k.variant.diet });
+  /* `variant` is one approved alternative build or a list of them, tried in order. */
+  for (const v of [].concat(k.variant || [])) builds.push({ variant: v, allergens: v.allergens, diet: v.diet });
 
   for (const b of builds) {
     if (allergies.some(a => b.allergens.includes(a))) continue;

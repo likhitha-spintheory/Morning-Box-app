@@ -71,7 +71,7 @@ export const variantsFor = (components, profile) =>
   Object.fromEntries(components.map(id => [id, buildVariant(id, profile)]));
 /** Human label of an approved component variant, e.g. "Plant milk base". */
 export const variantLabel = (id, variantId) =>
-  variantId && COMPONENTS[id]?.variant?.id === variantId ? COMPONENTS[id].variant.label : null;
+  (variantId && [].concat(COMPONENTS[id]?.variant || []).find(v => v.id === variantId)?.label) || null;
 
 /**
  * Resolve one Base Recommendation against the user's safety and dietary
