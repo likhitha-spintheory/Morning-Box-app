@@ -286,7 +286,7 @@ export function Delivery() {
               </div>
             </div>
             <div className="field"><label htmlFor="n">Delivery notes <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
-              <input id="n" className="input" placeholder="e.g. Leave with the concierge" value={a.notes} onChange={e => upd(d => { d.address.notes = e.target.value; })} /></div>
+              <input id="n" className="input" placeholder="e.g. Leave with the concierge" maxLength={200} value={a.notes} onChange={e => upd(d => { d.address.notes = e.target.value; })} /></div>
             {touched && !addrOk && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Add your building and office or floor</span>}
             {addrOk && <button type="button" className="btn-secondary" onClick={() => setEditing(false)}>Use this address</button>}
           </section>
@@ -299,12 +299,21 @@ export function Delivery() {
               <span className="strong">{dateInfo(iso).long}</span>
               <div className="field"><label htmlFor={`b-${iso}`}>Building / Tower</label>
                 <input id={`b-${iso}`} className={`input${touched && !x.building.trim() ? ' invalid' : ''}`} value={x.building} onChange={e => setDayAddr(iso, 'building', e.target.value)} /></div>
-              <div className="field"><label htmlFor={`u-${iso}`}>Office / Floor</label>
-                <input id={`u-${iso}`} className={`input${touched && !x.unit.trim() ? ' invalid' : ''}`} value={x.unit} onChange={e => setDayAddr(iso, 'unit', e.target.value)} /></div>
-              <div className="chips">
-                <Chip on={x.handover === 'reception'} onClick={() => setDayAddr(iso, 'handover', 'reception')}>Reception</Chip>
-                <Chip on={x.handover === 'door'} onClick={() => setDayAddr(iso, 'handover', 'door')}>My door</Chip>
+              <div className="grid-2">
+                <div className="field"><label htmlFor={`u-${iso}`}>Office / Floor</label>
+                  <input id={`u-${iso}`} className={`input${touched && !x.unit.trim() ? ' invalid' : ''}`} value={x.unit} onChange={e => setDayAddr(iso, 'unit', e.target.value)} /></div>
+                {/* FLW §8: each date has its own location; delivery is DIFC only, as in the shared form. */}
+                <div className="field"><label htmlFor={`ar-${iso}`}>Area</label><input id={`ar-${iso}`} className="input" value={x.area || 'DIFC'} readOnly /></div>
               </div>
+              <div className="stack gap-8">
+                <span className="label">Hand over at</span>
+                <div className="chips">
+                  <Chip on={x.handover === 'reception'} onClick={() => setDayAddr(iso, 'handover', 'reception')}>Reception</Chip>
+                  <Chip on={x.handover === 'door'} onClick={() => setDayAddr(iso, 'handover', 'door')}>My door</Chip>
+                </div>
+              </div>
+              <div className="field"><label htmlFor={`n-${iso}`}>Delivery notes <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
+                <input id={`n-${iso}`} className="input" placeholder="e.g. Leave with the concierge" maxLength={200} value={x.notes || ''} onChange={e => setDayAddr(iso, 'notes', e.target.value)} /></div>
             </section>
           );
         })}
@@ -360,7 +369,7 @@ export function ReviewPay() {
     try {
       const order = await post('/orders', {
         idempotencyKey: idemKey, expectedTotal: payTotal,
-        method: method === 'apple' ? 'apple' : 'card', email: email.trim(), address: dl.address,
+        method: method === 'apple' ? 'apple' : 'card', email: email.trim(), address: addrOf(dates[0]),
         days: dates.map(iso => {
           const c = plan.days[iso].cfg;
           return { date: iso, context: c.context, recipeId: c.recipeId, components: c.components, size: c.size, addons: c.addons, danishFlavour: c.danishFlavour, window: win(iso), address: addrOf(iso) };

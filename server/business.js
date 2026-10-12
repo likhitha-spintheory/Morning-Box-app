@@ -199,18 +199,44 @@ businessRouter.post('/orders/:id/days/:date/issue', (req, res) => {
   res.json(serialize(o));
 });
 
+/** Cancel one day: allowed only before its cutoff and before production starts; full refund for that day.
+    Throws (via assertEditable) when the day can no longer be cancelled. */
+function cancelDay(userId, o, d) {
+  if (d.cancelled) return false;
+  assertEditable(d.date, d.stage);
+  // Payment gateway integration point: refund `d.total` against the order's payment_ref.
+  const sql = dayColumns().includes('refund') ? 'UPDATE business_days SET cancelled = 1, refund = total WHERE id = ?' : 'UPDATE business_days SET cancelled = 1 WHERE id = ?';
+  db.prepare(sql).run(d.id);
+  notify(userId, `${o.id}:${d.date}`, 'refund', `Business breakfast on ${rules.prettyDate(d.date)} is cancelled. AED ${d.total} will be refunded.`);
+  return true;
+}
+
 /** Cancel one day before cutoff → full refund for that day; other days unaffected. */
 businessRouter.post('/orders/:id/days/:date/cancel', (req, res) => {
   const o = own(req.userId, req.params.id);
-  const d = ownDay(o, req.params.date);
-  if (!d.cancelled) {
-    assertEditable(d.date, d.stage);
-    // Payment gateway integration point: refund `d.total` against the order's payment_ref.
-    const sql = dayColumns().includes('refund') ? 'UPDATE business_days SET cancelled = 1, refund = total WHERE id = ?' : 'UPDATE business_days SET cancelled = 1 WHERE id = ?';
-    db.prepare(sql).run(d.id);
-    notify(req.userId, `${o.id}:${d.date}`, 'refund', `Business breakfast on ${rules.prettyDate(d.date)} is cancelled. AED ${d.total} will be refunded.`);
-  }
+  cancelDay(req.userId, o, ownDay(o, req.params.date));
   res.json(serialize(o));
+});
+
+/** Cancel Order (MB-B2B-001 §10): every day still before its cutoff and not started is cancelled and
+    refunded in full; days past cutoff, in progress or delivered stay as they are and are reported back. */
+businessRouter.post('/orders/:id/cancel', (req, res) => {
+  const o = own(req.userId, req.params.id);
+  const days = db.prepare('SELECT * FROM business_days WHERE order_id = ? ORDER BY date').all(o.id);
+  const cancelled = [];
+  const notCancelled = [];
+  let refund = 0;
+  tx(() => days.forEach(d => {
+    if (d.cancelled) return;
+    try {
+      if (cancelDay(req.userId, o, d)) { cancelled.push(d.date); refund += d.total; }
+    } catch (e) {
+      if (!(e instanceof ApiError)) throw e;
+      notCancelled.push({ date: d.date, reason: e.message });
+    }
+  }));
+  if (cancelled.length) reallocateProvisional(cancelled);
+  res.json({ cancelled, notCancelled, refund, order: serialize(o) });
 });
 
 /** Company / tax invoice (HTML; PDF rendering is a later step).

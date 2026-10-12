@@ -171,7 +171,7 @@ export function MorningPills({ dates, active, done = [] }) {
   return (
     <div className="mpills">
       {dates.map(d => (
-        <span key={d.iso} className={`mpill${d.iso === active ? ' on' : done.includes(d.iso) ? ' done' : ''}`}>
+        <span key={d.iso} className={`mpill${d.iso === active ? ' on' : done.includes(d.iso) ? ' done' : ''}`} aria-current={d.iso === active ? 'step' : undefined}>
           {done.includes(d.iso) && d.iso !== active && <Icon name="check" size={15} stroke={2.2} />}{d.label}
         </span>
       ))}

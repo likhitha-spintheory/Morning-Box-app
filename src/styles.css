@@ -129,7 +129,9 @@ img { max-width: 100%; display: block; }
 .date-pill { display: inline-flex; align-items: center; gap: 8px; background: var(--white); color: var(--espresso); border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; font-size: 14px; font-weight: 600; }
 .mpills { display: flex; flex-wrap: nowrap; gap: 7px; overflow-x: auto; scrollbar-width: none; }
 .mpill { display: inline-flex; align-items: center; gap: 6px; padding: 8px 13px; border-radius: 999px; font-size: 14.5px; white-space: nowrap; font-weight: 500; border: 1.5px solid var(--line); color: var(--espresso); background: var(--white); }
-.mpill.on { background: var(--gold-chip); border-color: var(--gold); }
+.mpill.on { background: var(--gold-chip); border-color: var(--gold); font-weight: 600; }
+/* DSN §10: the current morning is marked by weight and a dot, not colour alone. */
+.mpill.on::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--espresso); flex: none; }
 .mpill.done { background: var(--espresso); border-color: var(--espresso); color: var(--ivory); }
 
 /* ---------- Choice controls ---------- */
@@ -151,6 +153,8 @@ img { max-width: 100%; display: block; }
 .seg { display: grid; gap: 4px; padding: 5px; border-radius: 999px; background: var(--sand-soft); }
 .seg button { min-height: 44px; border-radius: 999px; border: 0; background: transparent; font-size: 15px; font-weight: 600; color: var(--text-2); cursor: pointer; }
 .seg button.on { background: var(--white); color: var(--espresso); box-shadow: 0 1px 4px rgba(59, 45, 34, .12); }
+/* DSN §10: the selected tab is underlined as well as raised, so it does not rely on colour alone. */
+.seg:not(.tall) button.on { text-decoration: underline; text-decoration-color: var(--gold); text-decoration-thickness: 2px; text-underline-offset: 6px; }
 .seg.tall { border-radius: 22px; padding: 6px; }
 .seg.tall button { min-height: 62px; border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; line-height: 1.2; font-size: 16px; }
 .seg.tall button span { font-weight: 400; font-size: 14px; color: var(--text-3); }

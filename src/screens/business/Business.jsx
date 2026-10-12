@@ -60,9 +60,10 @@ const linesText = lines => lines.filter(l => l.qty > 0)
  */
 function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
   const models = useMemo(() => businessModels('regular'), []);
-  const [adding, setAdding] = useState(null);       // null | { recipeId, size } | { special: { dietary, allergies, size } }
+  /* null | { recipeId, size } | { special: { dietary, allergies, size }, index? } — `index` edits an existing group (B2B §10 Update Special Breakfast). */
+  const [adding, setAdding] = useState(null);
   const set = (nextLines, nextSpecials) => onChange(nextLines.filter(l => l.qty > 0), nextSpecials.filter(x => x.qty > 0));
-  const toggleNeed = (k, id) => setAdding(a => ({ special: { ...a.special, [k]: a.special[k].includes(id) ? a.special[k].filter(x => x !== id) : [...a.special[k], id] } }));
+  const toggleNeed = (k, id) => setAdding(a => ({ ...a, special: { ...a.special, [k]: a.special[k].includes(id) ? a.special[k].filter(x => x !== id) : [...a.special[k], id] } }));
   const resolved = adding?.special && (adding.special.dietary.length + adding.special.allergies.length) ? resolveSpecial({ ...adding.special, qty: 1 }, 'regular') : null;
   return (
     <div className="stack gap-10">
@@ -82,6 +83,7 @@ function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
             <Qty value={x.qty} min={0} max={max} label={`special breakfasts (${specialText(x)})`} onChange={v => set(lines, specials.map((y, k) => (k === i ? { ...y, qty: v } : y)))} />
           </div>
           <SizeSeg value={x.size || 'regular'} label="Special Breakfast size" onChange={sz => set(lines, specials.map((y, k) => (k === i ? { ...y, size: sz } : y)))} />
+          {!adding && <button type="button" className="link" style={{ alignSelf: 'flex-start' }} onClick={() => setAdding({ index: i, special: { dietary: [...x.dietary], allergies: [...x.allergies], size: x.size || 'regular' } })}>Change requirements</button>}
         </div>
       ))}
       {!adding && (
@@ -101,7 +103,7 @@ function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
         </div>
       )}
       {adding?.special && (
-        <div className="card stack gap-8" style={{ padding: 14 }}>
+        <div className="card stack gap-8" style={{ padding: 14 }} aria-label={adding.index !== undefined ? 'Change Special Breakfast requirements' : 'Add a Special Breakfast'}>
           <span className="label">Dietary</span>
           <div className="chips">{DIETARY.map(x => <Chip key={x.id} on={adding.special.dietary.includes(x.id)} onClick={() => toggleNeed('dietary', x.id)}>{x.label}</Chip>)}</div>
           <span className="label">Allergens</span>
@@ -109,7 +111,14 @@ function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
           {resolved && !resolved.resolved && <Err>No approved breakfast can safely meet this combination yet.</Err>}
           <div className="row"><button type="button" className="link" onClick={() => setAdding(null)}>Cancel</button>
             <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} disabled={!resolved?.resolved}
-              onClick={() => { set(lines, [...specials, { ...adding.special, qty: 1 }]); setAdding(null); }}>Add</button></div>
+              onClick={() => {
+                const { index, special } = adding;
+                /* Only the requirements change; quantity and size stay, and the safe breakfast is re-resolved from them. */
+                set(lines, index !== undefined
+                  ? specials.map((y, k) => (k === index ? { dietary: special.dietary, allergies: special.allergies, qty: y.qty, size: y.size || 'regular' } : y))
+                  : [...specials, { ...special, qty: 1 }]);
+                setAdding(null);
+              }}>{adding.index !== undefined ? 'Save' : 'Add'}</button></div>
         </div>
       )}
     </div>
@@ -1259,11 +1268,58 @@ export function BizManage() {
           </div>
         )}
         <DayEditor key={day.date} order={order} day={day} set={set} signedIn={!!state.session} />
+        {state.session && order.days.length > 1 && <CancelOrder order={order} set={set} />}
       </main>
       <Footer>
         <Link to="/business" className="btn-text" style={{ alignSelf: 'center' }}>Back to Business Breakfast</Link>
       </Footer>
     </Screen>
+  );
+}
+
+/** Cancel Order (MB-B2B-001 §10): every day still before its cutoff is cancelled and refunded in full;
+    days past cutoff or already being prepared stay as they are. The confirm step lists both. */
+function CancelOrder({ order, set }) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+  const live = order.days.filter(d => !d.cancelled);
+  const cancellable = live.filter(d => d.editable ?? (isBeforeCutoff(d.date) && d.stage <= 0));
+  const kept = live.filter(d => !cancellable.includes(d));
+  const refund = sum(cancellable, d => d.total);
+  const run = async () => {
+    setBusy(true); setError('');
+    try {
+      const res = await post(`/business/orders/${order.id}/cancel`);
+      set(s => putOrder(s, res.order));
+      setResult(res); setConfirm(false);
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  };
+  if (result) {
+    return (
+      <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2.4} style={{ flex: 'none' }} />
+        <span>{result.cancelled.length ? `${result.cancelled.length} day${result.cancelled.length === 1 ? '' : 's'} cancelled · AED ${result.refund} will be refunded.` : 'Nothing could be cancelled.'}
+          {result.notCancelled.length > 0 && ` ${result.notCancelled.map(x => dateInfo(x.date).label).join(', ')} could not be cancelled.`}</span>
+      </div>
+    );
+  }
+  if (!cancellable.length) return null;
+  if (!confirm) return <button type="button" className="btn-danger" disabled={busy} onClick={() => setConfirm(true)}>Cancel whole order</button>;
+  return (
+    <div className="card stack gap-12" role="alertdialog" aria-labelledby={`co-${order.id}`}>
+      <strong id={`co-${order.id}`} style={{ fontSize: 18 }}>Cancel order {order.id}?</strong>
+      <span className="help" style={{ fontSize: 15.5 }}>These days will be cancelled and refunded in full to your original payment method:</span>
+      <div className="stack gap-6">
+        {cancellable.map(d => <div key={d.date} className="sr"><span>{dateInfo(d.date).long}</span><Money value={d.total} /></div>)}
+        <hr className="divider" />
+        <div className="sr total"><span>Refund</span><span>AED {refund}</span></div>
+      </div>
+      {kept.length > 0 && <span className="help" style={{ fontSize: 15.5 }}>{kept.map(d => dateInfo(d.date).label).join(', ')} {kept.length === 1 ? 'is' : 'are'} past the change cutoff or already being prepared, so {kept.length === 1 ? 'it stays' : 'they stay'} as ordered.</span>}
+      <ApiErr error={error} />
+      <div className="grid-2"><button type="button" className="btn-secondary" onClick={() => setConfirm(false)}>Keep order</button>
+        <button type="button" className="btn-danger" disabled={busy} onClick={run}>{busy ? 'Cancelling…' : 'Yes, cancel'}</button></div>
+    </div>
   );
 }
 

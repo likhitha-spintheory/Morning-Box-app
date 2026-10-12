@@ -102,6 +102,8 @@ export function Today() {
   };
   /* Have the most recent breakfast again: the customer picks the dates (MB-FLW-001 §10). */
   const quick = allDays(state.orders).filter(d => !d.cancelled).sort((a, b) => b.date.localeCompare(a.date))[0];
+  /* DSN §9: one gold primary per screen — the suggestion's order button when shown, otherwise the first entry. */
+  const hasSuggestion = !!(suggestion && !suggestion.none && !inProgress);
 
   return (
     <Screen>
@@ -175,17 +177,26 @@ export function Today() {
           </section>
         )}
         {quick && (
-          <Link to={`/plan/dates?reorder=${quick.orderId}:${quick.date}`} className="entry gold">
+          <Link to={`/plan/dates?reorder=${quick.orderId}:${quick.date}`} className={`entry ${hasSuggestion ? 'plain' : 'gold'}`}>
             <Icon name="repeat" size={24} stroke={1.6} />
             <span style={{ flex: 1 }}><b>Have it again</b>
               <span className="d">{boxName(quick.cfg)}</span></span>
             <Icon name="arrow" size={22} stroke={1.8} />
           </Link>
         )}
-        <Link to="/start" className={`entry ${quick ? 'plain' : 'gold'}`}>
+        <Link to="/start" className={`entry ${quick || hasSuggestion ? 'plain' : 'gold'}`}>
           <Icon name="sunny" size={24} stroke={1.6} />
           <span style={{ flex: 1 }}><b>Plan my mornings</b></span>
           <Icon name="arrow" size={22} stroke={1.8} />
+        </Link>
+        {/* FLW §1/§18: Business Breakfast stays reachable for signed-in customers (secondary). */}
+        <Link to={state.businessUser ? '/business' : '/business/people'} className="option" style={{ textDecoration: 'none' }}>
+          <span className="ico"><Icon name="brief" size={22} stroke={1.6} /></span>
+          <span className="stack" style={{ flex: 1, gap: 2 }}>
+            <span style={{ fontWeight: 600, fontSize: 18 }}>Business Breakfast</span>
+            <span className="help" style={{ fontSize: 15 }}>{state.businessUser ? 'New order, reorder or a saved plan' : 'For teams & meetings'}</span>
+          </span>
+          <Icon name="chevron" size={18} stroke={1.8} />
         </Link>
 
         {lastOrder && (
