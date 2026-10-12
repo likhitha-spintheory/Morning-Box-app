@@ -88,6 +88,12 @@ try {
 
   /* Operations: allocate the first morning, then walk Omar's breakfast through to delivered and Sara's into preparation. */
   await ops('POST', '/allocate', { date: d1 });
+  /* A courier for the DIFC route, planned the night before for the first two mornings; access codes for the Bakery and Courier Views. */
+  const driver = await ops('POST', '/admin/couriers', { name: 'Test Courier', phone: '50 000 0198', routeId: 'DIFC-1' });
+  const courierCode = (await ops('POST', `/admin/couriers/${driver.id}/access-code`)).code;
+  for (const date of [d1, d2]) await ops('POST', '/routes', { date, routeId: 'DIFC-1' });
+  const bakeryCodes = [];
+  for (const b of (await ops('GET', '/admin/bakeries')).filter(b => b.status === 'Active')) bakeryCodes.push(`${b.name}: ${(await ops('POST', `/admin/bakeries/${b.id}/access-code`)).code}`);
   for (let i = 0; i < 3; i++) await call('POST', '/demo/advance', { orderId: omarOrder.id, date: d1 }, omar);
   await call('POST', `/orders/${omarOrder.id}/days/${d1}/feedback`, { value: 'Loved it' }, omar);
   await call('POST', `/orders/${omarOrder.id}/days/${d1}/issue`, { reason: 'Packaging issue', note: 'The lid was cracked.' }, omar);
@@ -103,7 +109,9 @@ try {
     50 000 0102  Omar   — flexible · order ${omarOrder.id} (first morning delivered, feedback + packaging issue)
     50 000 0103  Aisha  — peanut & tree nut allergy, "Kiwi" typed as other allergy · order ${aishaOrder.id} (held for an allergy check)
     50 000 0104  Layla  — business, Alder & Finch Consulting · orders ${team.id} (20 people, 3 special) and ${meeting.id} (2 days)
-  Operations console: #/ops with key ${OPS['x-ops-key']} · first test morning ${d1}`);
+  Operations console: #/ops with key ${OPS['x-ops-key']} · first test morning ${d1}
+  Bakery View (#/bakery) access codes: ${bakeryCodes.join(' · ')}
+  Courier View (#/courier): Test Courier, route DIFC-1, access code ${courierCode}`);
 } catch (e) {
   console.error('[seed] Failed:', e.message);
   process.exitCode = 1;
