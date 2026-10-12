@@ -16,10 +16,12 @@ export const emptyProfile = () => ({ eatingStyle: null, preferences: [], dietary
 const initial = () => ({
   profile: emptyProfile(),
   profileDone: false,
+  /* True from finishing the first Morning Profile until that first plan is paid: drives the 5-step progress. */
+  onboarding: false,
   session: null,
   plan: emptyPlan(),
   user: null,
-  delivery: { sameForAll: true, address: { building: '', unit: '', area: 'DIFC', handover: 'reception', notes: '' }, window: null, perDay: {} },
+  delivery: { sameForAll: null, address: { building: '', unit: '', area: 'DIFC', handover: 'reception', notes: '' }, window: null, perDay: {} },
   orders: [],
   settings: { coffeeReminder: true },
   business: emptyBusiness(),

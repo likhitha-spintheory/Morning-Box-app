@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { get, post, put, applySession, setToken, resetPersonal, newIdempotencyKey, download, track } from '../../api.js';
-import { Screen, TopBar, Footer, Icon, Chip, Switch, Logo, PhoneField, Go, IconButton, InfoTip } from '../../components/ui.jsx';
+import { Screen, TopBar, Footer, Icon, Chip, Switch, Option, Logo, PhoneField, Go, IconButton, InfoTip } from '../../components/ui.jsx';
 import { useStore } from '../../state/store.jsx';
 import {
   DELIVERY_WINDOWS, dateInfo, dayPrice, boxName, sizeLabel, windowLabel, canChooseSize, componentName, shortPlace,
@@ -130,10 +130,10 @@ export function SignIn() {
     return (
       <Screen>
         <header className="topbar"><IconButton icon="back" label="Back" onClick={() => { setSent(false); setError(''); }} /><span style={{ flex: 1 }} /></header>
-        <main className="screen-main" style={{ paddingTop: 20, gap: 22 }}>
+        <main className="screen-main" style={{ paddingTop: 20, gap: 24 }}>
           <div className="stack gap-8">
             <span className="eyebrow">Verify</span>
-            <h1 className="h-display" style={{ fontSize: 38 }}>Enter the code</h1>
+            <h1 className="h-display" style={{ fontSize: 34 }}>Enter the code</h1>
             <p className="help" style={{ fontSize: 17 }}>Sent to {prettyMobile(digits)} · <button type="button" className="link" style={{ padding: 0, fontWeight: 400, color: 'var(--text-3)' }} onClick={() => setSent(false)}>Change</button></p>
           </div>
           <div className="otp" role="group" aria-label="6-digit code">
@@ -169,7 +169,7 @@ export function SignIn() {
       <main className="screen-main" style={{ paddingTop: 8, gap: 20 }}>
         <Logo width={150} />
         <div className="stack gap-10">
-          <h1 className="h-display" style={{ fontSize: 40 }}>{planned.length ? 'Almost there.' : 'Welcome back.'}</h1>
+          <h1 className="h-display" style={{ fontSize: 34 }}>{planned.length ? 'Almost there.' : 'Welcome back.'}</h1>
           <p className="help" style={{ fontSize: 17 }}>
             {planned.length
               ? `Sign in to secure your ${planned.length === 1 ? 'morning' : `${planned.length} mornings`}.`
@@ -217,13 +217,18 @@ export function Delivery() {
   if (!dates.length) return <Navigate to="/plan/dates" replace />;
 
   const isFull = (iso, w) => (avail[iso]?.[w] ? !avail[iso][w].available : false);
-  const addrFor = iso => (dl.sameForAll || dates.length === 1 ? dl.address : (dl.perDay[iso]?.address || dl.address));
-  const setDayAddr = (iso, k, v) => upd(d => { const cur = d.perDay[iso]?.address || structuredClone(d.address); d.perDay[iso] = { ...(d.perDay[iso] || {}), address: { ...cur, [k]: v } }; });
-  const remaining = (iso, w) => avail[iso]?.[w]?.remaining;
   const dl = state.delivery;
   const a = dl.address;
   const upd = fn => set(s => fn(s.delivery));
-  const sameForAll = dl.sameForAll || dates.length === 1;
+  /* FLW §8: for several mornings the customer first answers whether the same delivery details
+     apply to all of them. Nothing is preselected; the answer is kept for this set of dates. */
+  const multi = dates.length > 1;
+  const answered = !multi || (typeof dl.sameForAll === 'boolean' && dl.sameAnswerFor === key);
+  const answer = v => upd(d => { d.sameForAll = v; d.sameAnswerFor = key; });
+  const sameForAll = !multi || (answered && dl.sameForAll);
+  const addrFor = iso => (sameForAll ? dl.address : (dl.perDay[iso]?.address || dl.address));
+  const setDayAddr = (iso, k, v) => upd(d => { const cur = d.perDay[iso]?.address || structuredClone(d.address); d.perDay[iso] = { ...(d.perDay[iso] || {}), address: { ...cur, [k]: v } }; });
+  const remaining = (iso, w) => avail[iso]?.[w]?.remaining;
   const windowFor = iso => (sameForAll ? dl.window : dl.perDay[iso]?.window);
   const addrOk = (sameForAll ? [a] : dates.map(addrFor)).every(x => x.building.trim() && x.unit.trim());
   const windowsOk = dates.every(iso => windowFor(iso) && !isFull(iso, windowFor(iso)));
@@ -252,25 +257,29 @@ export function Delivery() {
       <TopBar back={-1} close={null}><span className="topbar-title">Delivery</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 8, gap: 20 }}>
         <div className="stack gap-8">
-          <h1 className="h-display" style={{ fontSize: 40 }}>Where &amp; when?</h1>
+          <h1 className="h-display" style={{ fontSize: 34 }}>Where &amp; when?</h1>
         </div>
         {expiredNote && <div className="note" role="status"><Icon name="clock" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{expiredNote}</span></div>}
-        {dates.length > 1 && (
-          <div className="panel row" style={{ flexDirection: 'row', padding: '18px 20px' }}>
-            <span className="strong" style={{ fontSize: 17 }}>Same delivery for all {dates.length} mornings?</span>
-            <Switch checked={dl.sameForAll} label="Use the same delivery for all mornings" onChange={v => upd(d => { d.sameForAll = v; })} />
-          </div>
+        {multi && (
+          <section className="stack gap-12" aria-labelledby="same-q">
+            <h2 id="same-q" className="h3" style={{ fontSize: 20 }}>Same delivery details for all {dates.length} mornings?</h2>
+            <div className="stack gap-12" role="radiogroup" aria-labelledby="same-q">
+              <Option icon="copy" on={answered && dl.sameForAll === true} title="Yes, the same for all" onClick={() => answer(true)}>One address and delivery window for every morning.</Option>
+              <Option icon="cal" on={answered && dl.sameForAll === false} title="No, set each morning" onClick={() => answer(false)}>Choose the address and window for each date.</Option>
+            </div>
+            {touched && !answered && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Choose Yes or No to continue</span>}
+          </section>
         )}
 
-        {!sameForAll ? null : !editing && addrOk ? (
-          <div className="card row" style={{ padding: '20px 22px', gap: 16 }}>
+        {!answered ? null : !sameForAll ? null : !editing && addrOk ? (
+          <div className="card row" style={{ padding: '20px 24px', gap: 16 }}>
             <Icon name="pin" size={24} stroke={1.6} />
             <span className="stack" style={{ flex: 1 }}><span className="strong" style={{ fontSize: 18 }}>{a.building}</span>
               <span className="help" style={{ fontSize: 16 }}>{a.unit} · {a.handover === 'door' ? 'At my door' : 'At reception'}</span></span>
             <button type="button" className="link" onClick={() => setEditing(true)}>Change</button>
           </div>
         ) : (
-          <section className="card stack gap-14" style={{ padding: 20, gap: 14 }}>
+          <section className="card stack gap-16" style={{ padding: 20, gap: 16 }}>
             <div className="field"><label htmlFor="b">Building / Tower</label>
               <input id="b" className={`input${touched && !a.building.trim() ? ' invalid' : ''}`} placeholder="e.g. Gate Village, Building 3" value={a.building} onChange={e => upd(d => { d.address.building = e.target.value; })} /></div>
             <div className="grid-2">
@@ -292,10 +301,10 @@ export function Delivery() {
           </section>
         )}
 
-        {!sameForAll && dates.map(iso => {
+        {answered && !sameForAll && dates.map(iso => {
           const x = addrFor(iso);
           return (
-            <section key={`a${iso}`} className="card stack gap-12" style={{ padding: 18 }} aria-label={`Address for ${dateInfo(iso).long}`}>
+            <section key={`a${iso}`} className="card stack gap-12" style={{ padding: 16 }} aria-label={`Address for ${dateInfo(iso).long}`}>
               <span className="strong">{dateInfo(iso).long}</span>
               <div className="field"><label htmlFor={`b-${iso}`}>Building / Tower</label>
                 <input id={`b-${iso}`} className={`input${touched && !x.building.trim() ? ' invalid' : ''}`} value={x.building} onChange={e => setDayAddr(iso, 'building', e.target.value)} /></div>
@@ -317,14 +326,16 @@ export function Delivery() {
             </section>
           );
         })}
+        {answered && <>
         <h2 className="h3" style={{ fontSize: 20, marginTop: 4 }}>Delivery window <InfoTip label="About delivery windows">Availability updates live. A window closes when it’s fully booked.</InfoTip></h2>
         {sameForAll
           ? <WindowCards />
           : dates.map(iso => (<section key={iso} className="stack gap-10"><span className="strong">{dateInfo(iso).long}</span><WindowCards iso={iso} /></section>))}
 
         {touched && !windowsOk && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Choose an available delivery window{sameForAll ? '' : ' for each morning'}</span>}
+        </>}
       </main>
-      <Footer><button className="btn" onClick={() => { setTouched(true); if (addrOk && windowsOk) nav('/checkout/review'); else if (!addrOk) setEditing(true); }}><Go>Review my order</Go></button></Footer>
+      <Footer><button className="btn" onClick={() => { setTouched(true); if (!answered) return; if (addrOk && windowsOk) nav('/checkout/review'); else if (!addrOk) setEditing(true); }}><Go>Review my order</Go></button></Footer>
     </Screen>
   );
 }
@@ -351,6 +362,8 @@ export function ReviewPay() {
   if (!state.session) return <Navigate to="/sign-in?next=/checkout/review" replace />;
   if (!dates.length) return <Navigate to="/plan/dates" replace />;
   const dl = state.delivery;
+  /* The same-delivery question (FLW §8) must be answered for these dates before review. */
+  if (dates.length > 1 && (typeof dl.sameForAll !== 'boolean' || dl.sameAnswerFor !== dates.join(','))) return <Navigate to="/checkout/delivery" replace />;
   const win = iso => (dl.sameForAll || dates.length === 1 ? dl.window : dl.perDay[iso]?.window);
   const addrOf = iso => (dl.sameForAll || dates.length === 1 ? dl.address : (dl.perDay[iso]?.address || dl.address));
   const prices = dates.map(d => dayPrice(plan.days[d].cfg, state.profile));
@@ -379,6 +392,7 @@ export function ReviewPay() {
         s.orders = [order, ...s.orders.filter(o => o.id !== order.id)];
         if (email.trim()) s.user.email = email.trim();
         s.plan = { dates: [], days: {} };
+        s.onboarding = false;
       });
       nav(`/orders/${order.id}/confirmed`, { replace: true });
     } catch (e) {
@@ -390,8 +404,8 @@ export function ReviewPay() {
   return (
     <Screen>
       <TopBar back={-1} close={null}><span className="topbar-title">Review &amp; pay</span></TopBar>
-      <main className="screen-main" style={{ paddingTop: 8, gap: 18 }}>
-        <h1 className="h-display" style={{ fontSize: 38 }}>Review your mornings</h1>
+      <main className="screen-main" style={{ paddingTop: 8, gap: 16 }}>
+        <h1 className="h-display" style={{ fontSize: 34 }}>Review your mornings</h1>
         {expiredNote && <div className="note" role="status"><Icon name="clock" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{expiredNote}</span></div>}
         <section className="card list" style={{ padding: '4px 20px' }}>
           {dates.map((iso, k) => {
@@ -399,7 +413,7 @@ export function ReviewPay() {
             const d = dateInfo(iso);
             const meta = [c.addons.length ? extrasShort(c.addons) : null, windowLabel(win(iso)).replace(' AM', '').replace(' – ', '–'), dl.sameForAll || dates.length === 1 ? null : shortPlace(addrOf(iso).building)].filter(Boolean).join(' · ');
             return (
-              <div key={iso} className="row" style={{ alignItems: 'flex-start', gap: 16, padding: '18px 0', borderTop: k ? '1px solid var(--line-soft)' : 0 }}>
+              <div key={iso} className="row" style={{ alignItems: 'flex-start', gap: 16, padding: '16px 0', borderTop: k ? '1px solid var(--line-soft)' : 0 }}>
                 <span className="stack" style={{ alignItems: 'center', width: 46, flex: 'none' }}>
                   <span className="eyebrow grey" style={{ letterSpacing: '.08em', fontWeight: 500 }}>{d.wd}</span>
                   <span className="serif" style={{ fontSize: 28, lineHeight: 1.1 }}>{d.day}</span>
@@ -423,7 +437,7 @@ export function ReviewPay() {
           {PRICING.indicative && <span className="xs">Prices are indicative during our pilot.</span>}
         </section>
         {oneAddress && dl.address.building && (
-          <Link to="/checkout/delivery" className="card row" style={{ textDecoration: 'none', gap: 14, padding: '16px 20px' }}>
+          <Link to="/checkout/delivery" className="card row" style={{ textDecoration: 'none', gap: 16, padding: '16px 20px' }}>
             <Icon name="pin" size={22} stroke={1.6} />
             <span className="stack" style={{ flex: 1, gap: 2 }}><span className="strong" style={{ fontSize: 16 }}>{dl.address.building}{dl.address.unit ? `, ${dl.address.unit}` : ''}</span>
               <span className="help" style={{ fontSize: 15 }}>{dl.address.handover === 'door' ? 'To your door' : 'At Reception'} · {dates.length > 1 ? 'all mornings' : 'DIFC'}</span></span>
@@ -436,7 +450,7 @@ export function ReviewPay() {
           {emailTouched && emailBad && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Enter a valid email, e.g. name@company.com — or leave it empty</span>}</div>
         <div className="grid-2" role="radiogroup" aria-label="Payment method">
           {[['apple', 'apple', 'Apple Pay'], ['card', 'card', 'Card']].map(([id, icon, label]) => (
-            <button key={id} type="button" className={`win${method === id ? ' on' : ''}`} role="radio" aria-checked={method === id} onClick={() => setMethod(id)} style={{ padding: '0 14px', minHeight: 60, gap: 10 }}>
+            <button key={id} type="button" className={`win${method === id ? ' on' : ''}`} role="radio" aria-checked={method === id} onClick={() => setMethod(id)} style={{ padding: '0 16px', minHeight: 60, gap: 10 }}>
               <Icon name={icon} size={22} stroke={1.6} /><span style={{ fontSize: 17, fontWeight: 600, whiteSpace: 'nowrap' }}>{label}</span>
               {method === id && <span className="dot"><Icon name="check" size={15} stroke={2.2} /></span>}
             </button>
@@ -481,14 +495,14 @@ export function Confirmed() {
   const list = ds.length === 1 ? ds[0].long.replace(',', '') : `${ds.slice(0, -1).map(d => `${d.wd} ${d.day}`).join(', ')} & ${ds[ds.length - 1].wd} ${ds[ds.length - 1].day} ${dateInfo(ds[ds.length - 1].iso).long.split(' ').pop()}`;
   return (
     <Screen>
-      <main className="screen-main" style={{ paddingTop: 48, gap: 22 }}>
+      <main className="screen-main" style={{ paddingTop: 48, gap: 24 }}>
         <SunCheck />
         <div className="stack center" style={{ alignItems: 'center', gap: 10, marginTop: -6 }}>
           <span className="eyebrow" style={{ letterSpacing: '.24em' }}>Order {order.id}</span>
-          <h1 className="h-display" style={{ fontSize: 38 }}>Your mornings are set, {state.user?.firstName}.</h1>
+          <h1 className="h-display" style={{ fontSize: 34 }}>Your mornings are set, {state.user?.firstName}.</h1>
           <p className="help" style={{ fontSize: 17 }}>{order.days.length} breakfast{order.days.length > 1 ? 's' : ''} · {list}</p>
         </div>
-        <section className="card stack gap-14" style={{ padding: 20, gap: 14 }}>
+        <section className="card stack gap-16" style={{ padding: 20, gap: 16 }}>
           <div className="row" style={{ alignItems: 'flex-start' }}>
             <span className="stack" style={{ gap: 2 }}>
               <span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>First delivery</span>
@@ -499,7 +513,7 @@ export function Confirmed() {
             <span className="status ok">Confirmed</span>
           </div>
         </section>
-        <section className="panel row" style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+        <section className="panel row" style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
           <Icon name="coffee" size={24} stroke={1.6} style={{ flex: 'none' }} />
           <span className="strong" style={{ flex: 1, fontSize: 17 }}>Remind me the night before</span>
           <Switch checked={state.settings.coffeeReminder} label="Drink reminder" onChange={v => set(s => { s.settings.coffeeReminder = v; })} />
@@ -507,7 +521,7 @@ export function Confirmed() {
       </main>
       <Footer>
         <Link to={`/orders/${order.id}/${first.date}`} className="btn">Track my morning</Link>
-        <div className="row" style={{ justifyContent: 'center', gap: 22 }}>
+        <div className="row" style={{ justifyContent: 'center', gap: 24 }}>
           <button type="button" className="btn-text" onClick={() => download(`/orders/${order.id}/calendar`, `Morning-Box-${order.id}.ics`, 'text/calendar').catch(() => {})}><Icon name="cal" size={16} />Add to calendar</button>
           <Link to="/today" className="btn-text">Back to home</Link>
         </div>

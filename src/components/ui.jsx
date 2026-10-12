@@ -206,11 +206,37 @@ export function Go({ children }) {
   return <>{children}<Icon name="arrow" size={20} stroke={1.8} /></>;
 }
 
-/** Morning Profile progress: the sun rises along an arc across the three questions. */
-export function SunArc({ step, labels = ['Eating style', 'Preferences', 'Dietary & allergies'] }) {
-  const pts = [[60, 74], [270, 38], [470, 64]];
-  const [sx, sy] = pts[step - 1];
-  const solid = step === 1 ? `M30 82 L${sx} ${sy}` : step === 2 ? `M30 82 Q150 40 ${sx} ${sy}` : `M30 82 Q150 40 270 38 Q400 38 ${sx} ${sy}`;
+/* The arc the sun rises along: two quadratic curves, M30 82 Q150 40 270 38 Q400 38 500 84. */
+const ARC = [[[30, 82], [150, 40], [270, 38]], [[270, 38], [400, 38], [500, 84]]];
+const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+/** Position u in [0, 2] along the arc → { pt, path } where path is the solid part up to the sun. */
+function arcAt(u) {
+  const seg = u <= 1 ? 0 : 1, t = seg ? u - 1 : u;
+  const [p0, p1, p2] = ARC[seg];
+  const c = lerp(p0, p1, t), pt = lerp(c, lerp(p1, p2, t), t);
+  const f = n => Math.round(n * 10) / 10;
+  const part = `Q${f(c[0])} ${f(c[1])} ${f(pt[0])} ${f(pt[1])}`;
+  return { pt, path: seg ? `M30 82 Q150 40 270 38 ${part}` : `M30 82 ${part}` };
+}
+export const FIRST_RUN_STEPS = ['Eating style', 'Breakfast', 'Dietary', 'Dates', 'Mornings'];
+
+/**
+ * First-time progress: the sun rises along an arc. MB-DSN-001 §6 — clear progress, no gamification.
+ * With `total` 5 it spans the whole first-time flow (3 profile questions, dates, daily context).
+ */
+export function SunArc({ step, total = 3, labels }) {
+  const names = labels || (total === 5 ? FIRST_RUN_STEPS : ['Eating style', 'Preferences', 'Dietary & allergies']);
+  const pts3 = [[60, 74], [270, 38], [470, 64]];
+  let sx, sy, solid;
+  if (total === 3) {
+    [sx, sy] = pts3[step - 1];
+    solid = step === 1 ? `M30 82 L${sx} ${sy}` : step === 2 ? `M30 82 Q150 40 ${sx} ${sy}` : `M30 82 Q150 40 270 38 Q400 38 ${sx} ${sy}`;
+  } else {
+    /* Evenly spread from just above the horizon (left) to just before it sets (right). */
+    const u = 0.15 + (1.7 * (step - 1)) / (total - 1);
+    const a = arcAt(u);
+    [sx, sy] = a.pt; solid = a.path;
+  }
   const rays = [0, 1, 2, 3, 4, 5, 6].map(i => {
     const a = Math.PI * (0.95 + i * 0.185);
     return <line key={i} x1={sx + 17 * Math.cos(a)} y1={sy + 17 * Math.sin(a)} x2={sx + 24 * Math.cos(a)} y2={sy + 24 * Math.sin(a)} stroke="#D99A12" strokeWidth="2.6" strokeLinecap="round" />;
@@ -224,8 +250,8 @@ export function SunArc({ step, labels = ['Eating style', 'Preferences', 'Dietary
         {rays}
         <circle cx={sx} cy={sy} r="11" fill="#D99A12" />
       </svg>
-      <div className="sunarc-labels">
-        {labels.map((l, i) => <span key={l} className={i + 1 === step ? 'on' : i + 1 < step ? 'done' : ''}>{l}</span>)}
+      <div className={`sunarc-labels${names.length === 5 ? ' five' : ''}`}>
+        {names.map((l, i) => <span key={l} className={i + 1 === step ? 'on' : i + 1 < step ? 'done' : ''}>{l}</span>)}
       </div>
     </div>
   );

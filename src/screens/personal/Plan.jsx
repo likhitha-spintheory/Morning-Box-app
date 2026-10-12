@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Screen, TopBar, Option, Footer, Icon, MorningPills, Qty, Ring, RuledDate, Go, InfoTip
+  Screen, TopBar, Option, Footer, Icon, MorningPills, Qty, Ring, RuledDate, Go, InfoTip, SunArc
 } from '../../components/ui.jsx';
 import { useConfig, closedOn } from '../../state/config.js';
 import { useStore } from '../../state/store.jsx';
@@ -114,13 +114,16 @@ export function ChooseDates() {
   const monthName = dateInfo(tiles[1]?.iso || tiles[0].iso).date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
   const hoursLeft = Math.max(0, (cutoffFor(first.iso) - new Date()) / 3.6e6);
   const isTomorrow = first.iso === tomorrowIso;
+  /* DSN §6: a first-time customer sees one continuous 5-step progress (profile 1–3, dates 4, daily context 5). */
+  const firstRun = state.onboarding && !source && !roDay;
 
   return (
     <Screen>
-      <TopBar back={-1} close={null}><span className="topbar-title">{source ? 'Use this plan again' : roDay ? 'Reorder a morning' : 'Plan your mornings'}</span></TopBar>
-      <main className="screen-main" style={{ paddingTop: 12, gap: 22 }}>
-        <div className="stack gap-10">
-          <span className="eyebrow">{source || roDay ? 'Choose new dates' : 'Step 1 · Choose your mornings'}</span>
+      <TopBar back={-1} close={null}><span className="topbar-title">{source ? 'Use this plan again' : roDay ? 'Reorder a morning' : firstRun ? 'Step 4 of 5' : 'Plan your mornings'}</span></TopBar>
+      {firstRun && <div style={{ paddingTop: 8 }}><SunArc step={4} total={5} /></div>}
+      <main className="screen-main" style={{ paddingTop: firstRun ? 24 : 16, gap: 24 }}>
+        <div className="stack gap-8">
+          <span className="eyebrow">{source || roDay ? 'Choose new dates' : firstRun ? 'Step 4 of 5 · Choose your mornings' : 'Choose your mornings'}</span>
           <h1 className="h-display">{source ? 'Which dates should we copy your plan to?' : roDay ? 'Which mornings would you like it again?' : 'Which mornings should we plan?'}</h1>
         </div>
 
@@ -161,7 +164,7 @@ export function ChooseDates() {
         {closures.length > 0 && <span className="xs">{closures.map(d => `Closed ${d.wd} ${d.day} ${d.mon} · ${d.reason}`).join('  ·  ')}</span>}
 
         {week === 0 && hoursLeft > 0 && (
-          <div className="panel" style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: '18px 20px' }}>
+          <div className="panel" style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: '16px 20px' }}>
             <Ring fraction={Math.min(1, hoursLeft / 24)} label={`${Math.floor(hoursLeft)}h`} size={42} />
             <span className="stack" style={{ lineHeight: 1.35 }}>
               <span className="strong" style={{ fontSize: 16 }}>{isTomorrow ? `Tomorrow (${dayComma(first.iso)})` : dayComma(first.iso)} closes at 9:00 PM{isTomorrow ? '' : ` the evening before`}{dubaiNote()}</span>
@@ -171,7 +174,7 @@ export function ChooseDates() {
         )}
 
         {picked.length > 0 && (
-          <div className="row" style={{ justifyContent: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
+          <div className="row" style={{ justifyContent: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
             <span className="date-pill" style={{ background: 'var(--espresso)', color: 'var(--ivory)', borderColor: 'var(--espresso)' }}>{picked.length} morning{picked.length > 1 ? 's' : ''}</span>
           </div>
         )}
@@ -202,6 +205,7 @@ export function DailyContext() {
   const [ctx, setCtx] = useState(() => plan.days[iso]?.context || learned());
   if (!plan.dates.includes(iso)) return <Navigate to="/plan/dates" replace />;
   const i = plan.dates.indexOf(iso);
+  const firstRun = !!state.onboarding;
 
   const go = () => {
     /* Same inputs → same recommendation (MB-REC-001 §1.4); feedback never reorders it (§14). */
@@ -217,8 +221,10 @@ export function DailyContext() {
 
   return (
     <Screen>
-      <TopBar back={-1} close={null}><span className="topbar-title">Morning {i + 1} of {plan.dates.length}</span></TopBar>
-      <main className="screen-main" style={{ paddingTop: 8, gap: 24 }}>
+      <TopBar back={-1} close={null}><span className="topbar-title">{firstRun ? 'Step 5 of 5' : `Morning ${i + 1} of ${plan.dates.length}`}</span></TopBar>
+      {firstRun && <div style={{ paddingTop: 8 }}><SunArc step={5} total={5} /></div>}
+      <main className="screen-main" style={{ paddingTop: firstRun ? 24 : 8, gap: 24 }}>
+        {firstRun && <span className="eyebrow">Step 5 of 5 · Your daily context{plan.dates.length > 1 ? <span style={{ color: 'var(--text-3)' }}> · Morning {i + 1} of {plan.dates.length}</span> : null}</span>}
         {infos.length > 1 && <MorningPills dates={infos} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />}
         <RuledDate eyebrow="Planning">{dateInfo(iso).long}</RuledDate>
         <div className="stack gap-8">
@@ -278,11 +284,11 @@ export function MorningBox() {
         {plan.dates.length > 1 && <MorningPills dates={plan.dates.map(dateInfo)} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />}
         <div className="stack gap-8">
           <span className="eyebrow row" style={{ justifyContent: 'flex-start', gap: 10 }}><Icon name="sparkle" size={18} stroke={1.6} color="var(--espresso)" />{day.which === 'primary' ? 'Your Morning Box' : 'Another option for you'}<InfoTip label="Why this breakfast">Matched to: {matched.join(' · ')}</InfoTip></span>
-          <h1 className="h-display" style={{ fontSize: 36 }}>{boxName(cfg)}</h1>
+          <h1 className="h-display" style={{ fontSize: 34 }}>{boxName(cfg)}</h1>
         </div>
 
-        <div style={{ position: 'relative', borderRadius: 26, background: 'linear-gradient(160deg, #F6EBD8, #EBDcC3)', padding: boxPhoto(cfg.recipeId) ? 0 : '62px 16px 22px', overflow: 'hidden' }}>
-          <span className="badge-float" style={{ top: 14, left: 14 }}><Icon name="shield" size={18} stroke={1.7} />Safe for your profile</span>
+        <div style={{ position: 'relative', borderRadius: 26, background: 'linear-gradient(160deg, #F6EBD8, #EBDcC3)', padding: boxPhoto(cfg.recipeId) ? 0 : '62px 16px 24px', overflow: 'hidden' }}>
+          <span className="badge-float" style={{ top: 16, left: 16 }}><Icon name="shield" size={18} stroke={1.7} />Safe for your profile</span>
           {boxPhoto(cfg.recipeId) && <img src={boxPhoto(cfg.recipeId)} alt={`${boxName(cfg)}: ${cfg.components.map(componentName).join(', ')}`} style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover' }} />}
           {!boxPhoto(cfg.recipeId) && <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(cfg.components.length, 5)}, minmax(0, 1fr))`, gap: 8, textAlign: 'center' }} aria-hidden="true">
             {cfg.components.map(id => (
@@ -307,7 +313,7 @@ export function MorningBox() {
 
         {other && (
           <button type="button" onClick={switchOption} className="row" aria-label="Show another option"
-            style={{ textAlign: 'left', cursor: 'pointer', background: 'var(--sand-soft)', border: 0, borderRadius: 24, padding: '18px 20px' }}>
+            style={{ textAlign: 'left', cursor: 'pointer', background: 'var(--sand-soft)', border: 0, borderRadius: 24, padding: '16px 20px' }}>
             <span className="stack" style={{ gap: 4 }}>
               <span className="eyebrow grey" style={{ letterSpacing: '.14em' }}>{day.which === 'primary' ? 'Another option for you' : 'Back to your first match'}</span>
               <span className="strong" style={{ fontSize: 18 }}>{boxName(other)}</span>
@@ -343,7 +349,7 @@ function NoMatch({ iso }) {
   return (
     <Screen>
       <TopBar back={`/plan/day/${iso}/context`} close={null}><span className="topbar-title">{dayComma(iso)} · {contextLabel(day.context)}</span></TopBar>
-      <main className="screen-main center" style={{ alignItems: 'center', paddingTop: 36, gap: 22 }}>
+      <main className="screen-main center" style={{ alignItems: 'center', paddingTop: 36, gap: 24 }}>
         <span style={{ width: 96, height: 96, borderRadius: 999, background: 'var(--sand-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="shield" size={34} stroke={1.5} />
         </span>
@@ -415,9 +421,9 @@ export function Extras() {
   return (
     <Screen>
       <TopBar back={`/plan/day/${iso}/box`} close={null}><span className="topbar-title">{dayComma(iso)} · {boxName(cfg)}</span></TopBar>
-      <main className="screen-main" style={{ paddingTop: 8, gap: 18 }}>
+      <main className="screen-main" style={{ paddingTop: 8, gap: 16 }}>
         {plan.dates.length > 1 && <MorningPills dates={plan.dates.map(dateInfo)} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />}
-        <div className="stack gap-6" style={{ gap: 6 }}>
+        <div className="stack gap-8" style={{ gap: 8 }}>
           <h1 className="q">Choose your size</h1>
           <p className="help">Size changes the quantity — never what’s in your box.</p>
         </div>
@@ -425,7 +431,7 @@ export function Extras() {
           <div className="seg tall" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }} role="radiogroup" aria-label="Size">
             {['light', 'regular', 'large'].map(sz => (
               <button key={sz} role="radio" aria-checked={cfg.size === sz} className={cfg.size === sz ? 'on' : ''} onClick={() => setSize(sz)}>
-                <b className="row" style={{ gap: 6, fontWeight: 600 }}>{cfg.size === sz && <Icon name="check" size={16} stroke={2.2} />}{sizeLabel(sz)}</b>
+                <b className="row" style={{ gap: 8, fontWeight: 600 }}>{cfg.size === sz && <Icon name="check" size={16} stroke={2.2} />}{sizeLabel(sz)}</b>
                 <span>AED {sizePrice(cfg, sz)}</span>
               </button>
             ))}
@@ -444,7 +450,7 @@ export function Extras() {
         {pastry && (
           <section className="stack gap-10">
             <span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>Pastry</span>
-            <div className="card list" style={{ padding: '4px 18px' }}>
+            <div className="card list" style={{ padding: '4px 16px' }}>
               {offeredPastries(pastry.items, flavours).map(item => (
                 <div key={item}>
                   <div className="list-row">
@@ -464,7 +470,7 @@ export function Extras() {
         {bread && (
           <section className="stack gap-10">
             <div className="row"><span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>Bread to take home</span><span className="xs">Half AED {ADDON_PRICES.bread.half} · Whole AED {ADDON_PRICES.bread.whole}</span></div>
-            <div className="card list" style={{ padding: '4px 18px' }}>
+            <div className="card list" style={{ padding: '4px 16px' }}>
               {breadItems.map(item => {
                 const l = loaf(item);
                 return (
@@ -534,7 +540,7 @@ export function NextMorning() {
   return (
     <Screen>
       <TopBar back={-1} close={null}><span className="topbar-title">Morning {i + 1} of {plan.dates.length}</span></TopBar>
-      <main className="screen-main" style={{ paddingTop: 8, gap: 22 }}>
+      <main className="screen-main" style={{ paddingTop: 8, gap: 24 }}>
         <MorningPills dates={infos} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />
         <div className="banner-ok" role="status">
           <Icon name="check" size={22} stroke={2} />
@@ -588,7 +594,7 @@ export function WeeklySummary() {
       <main className="screen-main" style={{ paddingTop: 8, gap: 16 }}>
         <div className="stack gap-10" style={{ marginBottom: 4 }}>
           <span className="eyebrow">{unsaved ? 'Almost planned' : 'All planned'}</span>
-          <h1 className="h-display" style={{ fontSize: 38 }}>{rows.length === 1 ? 'Your morning,' : `${NUM[rows.length] || `${rows.length} mornings`},`} beautifully sorted.</h1>
+          <h1 className="h-display" style={{ fontSize: 34 }}>{rows.length === 1 ? 'Your morning,' : `${NUM[rows.length] || `${rows.length} mornings`},`} beautifully sorted.</h1>
         </div>
         {expiredNote && <div className="note" role="status"><Icon name="clock" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{expiredNote}</span></div>}
         {rows.map((iso, k) => {
@@ -596,7 +602,7 @@ export function WeeklySummary() {
           const d = dateInfo(iso);
           const details = [canChooseSize(day.cfg) ? sizeLabel(day.cfg.size) : 'Standard size', day.cfg.addons.length ? `+ ${extrasLine(day.cfg.addons)}` : null].filter(Boolean).join(' · ');
           return (
-            <article key={iso} className="card row" style={{ alignItems: 'flex-start', gap: 16, padding: 18 }}>
+            <article key={iso} className="card row" style={{ alignItems: 'flex-start', gap: 16, padding: 16 }}>
               <span className="datebox"><span className="wd">{d.wd}</span><span className="dn">{d.day}</span><span className="mo">{d.mon}</span></span>
               <span className="stack" style={{ flex: 1, gap: 3, minWidth: 0 }}>
                 <span className="row" style={{ alignItems: 'baseline', gap: 10 }}>
@@ -604,7 +610,7 @@ export function WeeklySummary() {
                   <span className="money" style={{ fontSize: 18, whiteSpace: 'nowrap' }}>AED {prices[k].total}</span>
                 </span>
                 <span className="help" style={{ fontSize: 15 }}>{details}</span>
-                <span className="row" style={{ justifyContent: 'flex-start', gap: 18 }}>
+                <span className="row" style={{ justifyContent: 'flex-start', gap: 16 }}>
                   <Link to={`/plan/day/${iso}/box`} className="link" style={{ minHeight: 40, display: 'inline-flex', alignItems: 'center' }} aria-label={`Edit ${dateInfo(iso).label}`}>Edit</Link>
                   <button type="button" className="link" style={{ minHeight: 40, color: 'var(--text-3)', textDecorationColor: 'var(--line)' }} onClick={() => remove(iso)} aria-label={`Remove ${dateInfo(iso).label}`}>Remove</button>
                 </span>

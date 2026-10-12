@@ -62,10 +62,10 @@ function Frame({ step, back, editing, children, footer }) {
   return (
     <Screen>
       <TopBar back={editing ? (editing === 'plan' ? -1 : '/me') : back} close={editing ? null : '/'}>
-        <span className="topbar-title">{editing ? 'Edit Morning Profile' : `Your Morning Profile · ${step} of 3`}</span>
+        <span className="topbar-title">{editing ? 'Edit Morning Profile' : `Your Morning Profile · Step ${step} of 5`}</span>
       </TopBar>
-      {!editing && <div style={{ paddingTop: 8 }}><SunArc step={step} /></div>}
-      <main className="screen-main" style={{ paddingTop: 28, gap: 24 }}>{children}</main>
+      {!editing && <div style={{ paddingTop: 8 }}><SunArc step={step} total={5} /></div>}
+      <main className="screen-main" style={{ paddingTop: 24, gap: 24 }}>{children}</main>
       <Footer>{footer}</Footer>
     </Screen>
   );
@@ -110,7 +110,7 @@ export function Preferences() {
     <Frame step={2} back="/profile/eating" editing={editing}
       footer={<button className="btn" disabled={!sel.length || busy} onClick={() => goNext()}>{editing ? (busy ? 'Saving…' : 'Save') : <Go>Continue</Go>}</button>}>
       <Heading q="What kind of breakfast do you usually enjoy?" help="Choose as many as you like." />
-      <div className="grid-2" style={{ gap: 14 }}>
+      <div className="grid-2" style={{ gap: 16 }}>
         {PREFERENCES.map(p => {
           const on = sel.includes(p.id);
           return (
@@ -138,7 +138,8 @@ export function Dietary() {
     const a = p[key];
     p[key] = a.includes(id) ? a.filter(x => x !== id) : [...a, id];
   });
-  const finish = () => goNext(s => { s.profileDone = true; });
+  /* First-time profile: dates and daily context follow as steps 4 and 5 of the same flow. */
+  const finish = () => goNext(s => { if (!editing) s.onboarding = true; s.profileDone = true; });
   const safetyText = allergies.length
     ? `We’ll leave out anything with ${allergies.map(a => allergyLabel(a).split(' /')[0].toLowerCase()).join(', ')}.`
     : other.trim() ? 'We’ll check your other allergies with the bakery.'
