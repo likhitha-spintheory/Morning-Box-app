@@ -53,8 +53,8 @@ export function Live({ data, meta, busy, act }) {
           const key = `${r.kind}${r.id}`;
           return (
             <Fragment key={key}>
-              <tr className={['Late', 'Failed', 'Attention Required'].includes(r.health) || r.safetyHold ? 'warn' : ''}>
-                <td>{r.orderId}{r.kind === 'business' ? ' (business)' : ''}{r.safetyHold ? ' · SAFETY HOLD' : ''}{r.needs?.length ? <><br /><small>Needs: {r.needs.join(', ')}</small></> : null}</td>
+              <tr className={['Late', 'Failed', 'Attention Required'].includes(r.health) || r.safetyHold || r.safetyCheck ? 'warn' : ''}>
+                <td>{r.orderId}{r.kind === 'business' ? ' (business)' : ''}{r.safetyHold ? ' · SAFETY HOLD' : ''}{r.safetyCheck ? ' · ALLERGY CHECK OPEN' : ''}{r.needs?.length ? <><br /><small>Needs: {r.needs.join(', ')}</small></> : null}</td>
                 <td>{windowLabel(r.window)}<br /><small>Ready by {r.readyBy}{r.routeId ? ` · route ${r.routeId}` : ''}</small></td>
                 <td>{r.address.building}, {r.address.unit || r.address.office}</td>
                 <td>{r.boxes}{r.specialBoxes ? <><br /><small>{r.specialBoxes} special</small></> : null}</td>
@@ -95,7 +95,11 @@ function Actions({ r, meta, busy, act }) {
     ? r.allocation.map(p => ({ bakeryId: p.bakeryId, boxes: p.boxes, special: (p.items || []).filter(it => r.production[it.entry]?.special?.length).reduce((t, it) => t + it.qty, 0) }))
     : [{ bakeryId: undefined, boxes: r.boxes, special: r.specialBoxes }];
   const [f, setF] = useState({ delay: '', reason: meta.planIssues[0], route: r.routeId || '', eta: '', fail: meta.failureReasons[0], remedy: meta.remedies[1], amount: '', why: '',
-    counts: Object.fromEntries(parts.map(p => [p.bakeryId ?? 'one', { boxes: String(p.boxes), special: String(p.special) }])) });
+    counts: Object.fromEntries(parts.map(p => [p.bakeryId ?? 'one', { boxes: String(p.boxes), special: String(p.special) }])), qc: {} });
+  /* Final quality check before Ready (MB-BKY-001 §4): each check is ticked, never a blanket pass. */
+  const qcChecks = meta.qcChecks || {};
+  const qcDone = Object.keys(qcChecks).every(c => f.qc[c]);
+  const blocked = r.safetyHold || r.safetyCheck;
   const set = k => e => setF(x => ({ ...x, [k]: e.target.value }));
   const done = r.stage >= 3;
   const leftBakery = ['Handed Over'].includes(r.bakeryState) || r.stage >= 2;
@@ -103,17 +107,26 @@ function Actions({ r, meta, busy, act }) {
   return (
     <div className="stack gap-12" style={{ padding: '6px 0' }}>
       {r.attempts?.length > 0 && <span className="xs">Attempts: {r.attempts.map(a => `${a.reason} (${a.created_at})`).join('; ')}</span>}
-      {r.handover && <span className="xs">Picked up {r.handover.picked_up_at} · {r.handover.boxes} boxes ({r.handover.special_boxes} special){r.handover.route_id ? ` · route ${r.handover.route_id}` : ''}</span>}
+      {blocked && <div className="banner-warn" role="status"><span><b>{r.safetyHold ? 'Safety hold' : 'Open allergy / dietary check'}</b> — resolve it in Exceptions before the bakery prepares or hands this over (MB-BKY-001 §3).</span></div>}
+      {r.handover && <span className="xs">Handed over {r.handover.boxes} boxes ({r.handover.special_boxes} special){r.handover.route_id ? ` · route ${r.handover.route_id}` : ''} · {r.handover.picked_up_at ? `picked up ${r.handover.picked_up_at}` : 'awaiting courier pickup'}</span>}
       {!leftBakery && !done && (
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
           <b style={{ fontSize: 14 }}>Bakery:</b>
-          <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `${path}/bakery-state`, { state: 'In Preparation' })}>In preparation</button>
-          <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `${path}/bakery-state`, { state: 'Ready', qcPassed: true })}>Ready (QC’d, packed, labelled)</button>
+          <button type="button" className="btn-text" disabled={busy || blocked} onClick={() => act('POST', `${path}/bakery-state`, { state: 'In Preparation' })}>In preparation</button>
           <input className="input" style={{ ...input, width: 90 }} placeholder="Minutes" inputMode="numeric" aria-label="Delay in minutes" value={f.delay} onChange={set('delay')} />
           <button type="button" className="btn-text" disabled={busy || !f.delay} onClick={() => act('POST', `${path}/bakery-state`, { state: 'Delayed', delayMinutes: Number(f.delay) })}>Report delay</button>
           <select className="input" style={{ ...input, width: 230 }} aria-label="Why it can’t be fulfilled" value={f.reason} onChange={set('reason')}>{meta.planIssues.map(x => <option key={x}>{x}</option>)}</select>
           <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `${path}/bakery-state`, { state: 'Unable to Fulfil', reason: f.reason })}>Can’t fulfil</button>
           <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `${path}/reallocate`)}>Reallocate to next bakery</button>
+        </div>
+      )}
+      {!leftBakery && !done && r.bakeryState !== 'Ready' && (
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
+          <b style={{ fontSize: 14 }}>Final check:</b>
+          {Object.entries(qcChecks).map(([id, label]) => (
+            <label key={id} className="row xs" style={{ gap: 6 }}><input type="checkbox" checked={!!f.qc[id]} onChange={e => setF(x => ({ ...x, qc: { ...x.qc, [id]: e.target.checked } }))} />{label}</label>
+          ))}
+          <button type="button" className="btn-secondary" style={small} disabled={busy || blocked || !qcDone} onClick={() => act('POST', `${path}/bakery-state`, { state: 'Ready', qc: f.qc })}>Mark Ready</button>
         </div>
       )}
       {!done && r.stage < 2 && (
@@ -135,10 +148,17 @@ function Actions({ r, meta, busy, act }) {
             <input className="input" style={{ ...input, width: 80 }} inputMode="numeric" aria-label="Boxes counted" value={c.boxes} onChange={e => setC('boxes', e.target.value)} />
             <span className="xs">boxes, of which special</span>
             <input className="input" style={{ ...input, width: 80 }} inputMode="numeric" aria-label="Special boxes counted" value={c.special} onChange={e => setC('special', e.target.value)} />
-            <button type="button" className="btn-secondary" style={small} disabled={busy} onClick={() => act('POST', `${path}/handover`, { bakeryId: p.bakeryId, boxes: Number(c.boxes), specialBoxes: Number(c.special), routeId: f.route })}>Record pickup</button>
+            <button type="button" className="btn-secondary" style={small} disabled={busy || blocked} onClick={() => act('POST', `${path}/handover`, { bakeryId: p.bakeryId, boxes: Number(c.boxes), specialBoxes: Number(c.special), routeId: f.route })}>Record pickup</button>
           </div>
         );
       })}
+      {/* The bakery handed everything over; the courier still has to confirm the pickup (MB-OPS-001 §6). */}
+      {r.bakeryState === 'Handed Over' && !r.deliveryState && !done && (
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
+          <b style={{ fontSize: 14 }}>Handed over by the bakery — waiting for the courier{r.routeId ? ` (${r.routeId})` : ''}:</b>
+          <button type="button" className="btn-secondary" style={small} disabled={busy} onClick={() => act('POST', `${path}/pickup`)}>Confirm courier pickup</button>
+        </div>
+      )}
       {['Picked Up', 'Failed'].includes(r.deliveryState) && !done && (
         <button type="button" className="btn-secondary" style={{ ...small, alignSelf: 'flex-start' }} disabled={busy} onClick={() => act('POST', `${path}/out`)}>{r.deliveryState === 'Failed' ? 'Re-attempt delivery' : 'Out for delivery'}</button>
       )}
@@ -206,10 +226,10 @@ export function ProductionPlan({ plan, date, children }) {
       <table className="ops-table">
         <thead><tr><th>Order</th><th>Ready by</th><th>Box</th><th>Pack</th></tr></thead>
         <tbody>{plan.packing.map(o => (
-          <tr key={`${o.kind}${o.id}`} className={o.safetyHold || o.lines.some(l => l.special.length) ? 'warn' : ''}>
-            <td>{o.ref}<br /><small>{[o.name, o.window, o.shared].filter(Boolean).join(' · ')}</small>{o.safetyHold ? <><br /><b>SAFETY HOLD — do not prepare</b></> : null}</td>
+          <tr key={`${o.kind}${o.id}`} className={o.safetyHold || o.safetyCheck || o.lines.some(l => l.special.length) ? 'warn' : ''}>
+            <td>{o.ref}<br /><small>{[o.name, o.window, o.shared].filter(Boolean).join(' · ')}</small>{o.safetyHold ? <><br /><b>SAFETY HOLD — do not prepare</b></> : o.safetyCheck ? <><br /><b>ALLERGY CHECK OPEN — do not prepare</b></> : null}</td>
             <td>{o.readyBy}</td>
-            <td>{o.lines.map((l, i) => <div key={i}>{l.qty}× {l.box} · {l.size}{l.special.length ? <b> · {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? <><br /><small>+ {l.addons.join(', ')}</small></> : null}</div>)}{o.otherAllergies ? <b>Also avoid: {o.otherAllergies}</b> : null}</td>
+            <td>{o.lines.map((l, i) => <div key={i}>{l.qty}× {l.box} · {l.size}{l.special.length ? <b> · {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? <><br /><small>+ {l.addons.join(', ')}</small></> : null}</div>)}{o.otherAllergies && !o.lines.some(l => l.special.some(w => w.startsWith('Also avoid'))) ? <b>Also avoid: {o.otherAllergies}</b> : null}</td>
             <td><small>{[...new Set(o.lines.flatMap(l => l.packing))].join(' ')}</small></td>
           </tr>
         ))}</tbody>
@@ -239,6 +259,7 @@ export function LabelGrid({ labels }) {
           {l.addons?.length > 0 && <span>+ {l.addons.join(', ')}</span>}
           {l.warnings?.length > 0 && <b>⚠ {l.warnings.join(', ').toUpperCase()}</b>}
           {l.safetyHold && <b>SAFETY HOLD</b>}
+          {!l.safetyHold && l.safetyCheck && <b>ALLERGY CHECK PENDING</b>}
           <small>{l.ref} · ready by {l.readyBy}</small>
         </div>
       ))}

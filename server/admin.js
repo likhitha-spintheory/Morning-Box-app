@@ -8,6 +8,7 @@ import { ApiError, bad, isIsoDate, BAKERY_CONDITIONS, bakeryCaps, bakeryProducts
 import { getPricing, savePricing, resetPricing, pricingHistory, getCompany, saveCompany, getLibrary, saveLibrary, getDelivery, saveDelivery } from './settings.js';
 import { COMPONENTS, ADDON_BREAD, ADDON_PASTRY } from '../src/domain/library.js';
 import { BASE_RECOMMENDATIONS, describe, priceLevel } from '../src/domain/recipes.js';
+import { ALLERGENS, DIETARY } from '../src/domain/standards.js';
 
 export const adminRouter = Router();
 
@@ -26,6 +27,14 @@ adminRouter.get('/company', (_req, res) => res.json(getCompany()));
 adminRouter.put('/company', (req, res) => res.json(saveCompany(req.body)));
 adminRouter.get('/library', (_req, res) => res.json({ ...getLibrary(), items: Object.values(COMPONENTS).filter(c => c.sample).map(c => c.name) }));
 adminRouter.put('/library', (req, res) => res.json(saveLibrary(req.body)));
+/** Read-only ingredient & allergen record of every product, with its approved variants (MB-PRO-001 §15.1). */
+adminRouter.get('/products', (_req, res) => {
+  const items = Object.values(COMPONENTS).map(c => ({
+    id: c.id, name: c.name, category: c.category, allergens: c.allergens || [], diet: c.diet || [], sample: !!c.sample, note: c.note || '',
+    variants: [].concat(c.variant || []).map(v => ({ id: v.id, label: v.label, allergens: v.allergens || [], diet: v.diet || [], sample: !!v.sample }))
+  }));
+  res.json({ items, allergens: ALLERGENS, dietary: DIETARY });
+});
 adminRouter.get('/delivery', (_req, res) => res.json(getDelivery()));
 adminRouter.put('/delivery', (req, res) => res.json(saveDelivery(req.body)));
 
@@ -43,6 +52,8 @@ function bakeryOut(b) {
   const kpi = db.prepare(`SELECT COUNT(*) AS total, SUM(stage = 3 AND late = 0) AS onTime, SUM(late = 1) AS late, SUM(bakery_state = 'Unable to Fulfil') AS unable,
       SUM(feedback = 'Loved it') AS loved, SUM(feedback = 'Not for me') AS notForMe
     FROM order_days WHERE bakery_id = ? AND cancelled = 0 AND date < ?`).get(b.id, today);
+  /* Unable to Fulfil from the partner log: it stays with this bakery after the order is reallocated (MB-BKY-001 §9). */
+  kpi.unable = db.prepare("SELECT COUNT(DISTINCT day_kind || day_id) AS n FROM bakery_events WHERE bakery_id = ? AND kind = 'Unable to Fulfil' AND date < ?").get(b.id, today).n;
   return {
     id: b.id, name: b.name, area: b.area, distanceKm: b.distance_km, dailyCapacity: b.daily_capacity,
     effectiveCapacity: b.effective_capacity ?? null, glutenFreeCertified: !!b.gluten_free_certified,
@@ -137,6 +148,8 @@ adminRouter.post('/bakeries/:id/status', (req, res) => {
     if (!b.bakes_own_bread) throw bad('bread_required', 'A partner bakery must bake its own bread in-house before it can be Active.');
     if (!b.licence_no) throw bad('licence_required', 'Record the food business licence before making the bakery Active.');
     if (b.licence_expiry && b.licence_expiry < new Date().toLocaleDateString('en-CA')) throw bad('licence_expired', 'The food business licence has expired.');
+    /* §8: onboarding sample production approved for at least one product before the first orders. */
+    if (b.status !== 'Active' && !db.prepare("SELECT 1 FROM bakery_samples WHERE bakery_id = ? AND result = 'Approved'").get(b.id)) throw bad('sample_required', 'Record at least one Approved onboarding sample before making the bakery Active.');
     /* §10: Identify Issue → Corrective Action → Verification → Return to Active (for a partner that was taken off Active). */
     const wasActive = db.prepare("SELECT 1 FROM bakery_log WHERE bakery_id = ? AND message LIKE 'Active →%'").get(b.id);
     if (b.status !== 'Active' && wasActive && !clean(req.body.verification, 300)) throw bad('verification_required', 'Record the corrective action and how it was verified before returning to Active.');
@@ -162,10 +175,11 @@ adminRouter.post('/bakeries/:id/samples', (req, res) => {
   if (!COMPONENTS[req.body.product]) throw bad('product_invalid', 'Choose the product that was assessed.');
   if (!SAMPLE_RESULTS.includes(req.body.result)) throw bad('result_invalid', `Result must be one of: ${SAMPLE_RESULTS.join(', ')}.`);
   db.prepare('INSERT INTO bakery_samples (bakery_id, product, result, note) VALUES (?, ?, ?, ?)').run(b.id, req.body.product, req.body.result, clean(req.body.note, 300) || null);
-  /* An approved sample adds the product to the bakery's approved list (when it has one). */
+  /* An approved sample adds the product to the bakery's approved list (when it has one); Not Approved always
+     removes it — "every product" (null) becomes every product except that one (MB-BKY-001 §8). */
   const products = bakeryProducts(b);
   if (products && req.body.result === 'Approved' && !products.includes(req.body.product)) db.prepare('UPDATE bakeries SET products = ? WHERE id = ?').run(json([...products, req.body.product]), b.id);
-  if (products && req.body.result === 'Not Approved' && products.includes(req.body.product)) db.prepare('UPDATE bakeries SET products = ? WHERE id = ?').run(json(products.filter(p => p !== req.body.product)), b.id);
+  if (req.body.result === 'Not Approved' && (!products || products.includes(req.body.product))) db.prepare('UPDATE bakeries SET products = ? WHERE id = ?').run(json((products || Object.keys(COMPONENTS)).filter(p => p !== req.body.product)), b.id);
   log(b.id, `Sample: ${COMPONENTS[req.body.product].name} — ${req.body.result}${req.body.note ? ` (${clean(req.body.note, 120)})` : ''}`);
   res.status(201).json(bakeryOut(bakeryById(b.id)));
 });

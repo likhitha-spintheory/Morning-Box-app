@@ -49,6 +49,8 @@ test('admin prices change what customers pay, and the app receives them', async 
   next.priceLevels.L1 += 5; next.priceLevels.L2 += 5; next.priceLevels.L3 += 5; next.priceLevels.L4 += 5;
   next.indicative = false;
   assert.equal((await ops('PUT', '/admin/pricing', { ...next, sizeAdjustment: { light: 5, large: 10 } })).status, 400, 'Light must be below Regular');
+  assert.equal((await ops('PUT', '/admin/pricing', { ...next, sizeAdjustment: { light: 0, large: 10 } })).status, 400, 'Light can’t equal Regular');
+  assert.equal((await ops('PUT', '/admin/pricing', { ...next, sizeAdjustment: { light: -5, large: 0 } })).status, 400, 'Large can’t equal Regular');
   assert.equal((await ops('PUT', '/admin/pricing', next)).status, 200);
   const cfg = (await call('GET', '/config')).body;
   assert.equal(cfg.pricing.priceLevels.L1, DEFAULT_PRICING.priceLevels.L1 + 5);

@@ -11,7 +11,7 @@ import { db, json, parse, tx, logEvent } from './db.js';
 import { ApiError, bad, prettyDate, raiseException, isIsoDate, bakeriesFor, bakeryCovers, bakeryMakes, danishFlavours, bakeryProducts } from './rules.js';
 export { setStage };
 import { notify } from './notify.js';
-import { dayRows, personalRow, businessRow, rowBakeries, health, readyBy } from './days.js';
+import { dayRows, personalRow, businessRow, rowBakeries, health, readyBy, openSafetyCheck } from './days.js';
 import { bakeryByCode, addCondition } from './admin.js';
 import { personalUnits, businessUnits } from './allocation.js';
 import { componentName, sizeLabel, windowLabel } from '../src/domain/app.js';
@@ -76,13 +76,34 @@ function setStage(kind, id, stage, point) {
     /* MB-DLV-001 §10–11: handover is delivery; after the window it is a late delivery (service failure). */
     const late = new Date() > new Date(row.windowEnds) ? 1 : 0;
     db.prepare(`UPDATE ${TABLE[kind]} SET delivered_at = datetime('now'), delivery_point = ?, recipient_type = ?, delivery_state = 'Delivered', late = ?, late_note = NULL WHERE id = ?`).run(point, RECIPIENT[point], late, raw.id);
-    if (late) raiseException({ ref: `${kind}:${raw.id}`, kind: 'Courier Delay', note: `Delivered after the ${windowLabel(row.window)} window — late delivery (service failure)`, owner: 'Operations', action: 'Review the cause; apply service recovery if appropriate' });
+    /* Late because the bakery was not Ready by ready-by → the bakery's delay; otherwise the courier's (MB-OPS-001 §6, §11). */
+    const slow = lateBakeries(row);
+    if (late) raiseException({ ref: `${kind}:${raw.id}`, kind: slow.length ? 'Pickup Delay' : 'Courier Delay', category: slow.length ? 'Bakery' : 'Courier', responsibleParty: slow.join(', ') || null,
+      note: `Delivered after the ${windowLabel(row.window)} window — late delivery (service failure)${slow.length ? `; ${slow.join(', ')} not Ready by ready-by` : ''}`, owner: 'Operations', action: 'Review the cause; apply service recovery if appropriate' });
   }
   event(row, 'stage', ['', 'Being prepared', 'Out for delivery', `Delivered to ${point}`][stage]);
   if (stage === 2) tell(row, 'on_the_way', `Your breakfast for ${prettyDate(row.date)} is on its way.`);
   /* DLV §5: "Delivered to Reception - 8:14 AM", then the simple feedback. */
   if (stage === 3) tell(row, 'delivered', `Delivered to ${point} · ${dubaiTime()}. Enjoy your morning! Loved it or not for you? Tell us in the app.`);
 }
+
+/** Bakeries whose part was marked Ready after its ready-by time (or reported Delayed). */
+function lateBakeries(row) {
+  return rowParts(row).filter(p => {
+    const st = row.partStates[p.bakeryId] || {};
+    return st.delay || (st.readyAt && new Date(st.readyAt) > readyBy(row.date, row.window, p.bakeryId));
+  }).map(p => db.prepare('SELECT name FROM bakeries WHERE id = ?').get(p.bakeryId)?.name || `Bakery #${p.bakeryId}`);
+}
+
+/* ---------- Safety check before preparation and handover (MB-BKY-001 §3) ---------- */
+function assertSafe(kind, raw) {
+  if (raw.safety_hold) throw new ApiError(409, 'safety_hold', 'This order is on a safety hold. Resolve the safety check first — do not prepare or hand it over.');
+  if (openSafetyCheck(kind, raw.id)) throw new ApiError(409, 'safety_check', 'This order has an open allergy / dietary check. Resolve the safety check first (Operations → Exceptions) — do not prepare or hand it over.');
+}
+
+/* Partner reliability log (MB-BKY-001 §9): kept even when the order then moves to another bakery. */
+const partnerEvent = (bakeryId, row, kind, reason) =>
+  db.prepare('INSERT INTO bakery_events (bakery_id, date, day_kind, day_id, kind, reason) VALUES (?, ?, ?, ?, ?, ?)').run(bakeryId, row.date, row.kind, row.id, kind, reason ? String(reason).slice(0, 200) : null);
 
 /* ---------- Each bakery's part of a delivery ----------
    A business order split by line has one part per bakery, each with its own
@@ -151,6 +172,8 @@ export function setBakeryState(kind, id, state, { delayMinutes, reason, note, qc
   if (targets.some(t => partStates(raw)[t]?.state === 'Handed Over')) throw bad('already_handed_over', 'This part has already been handed over.');
   /* Every production plan is confirmed before morning production begins (MB-OPS-001 §4). */
   if (['In Preparation', 'Ready'].includes(state) && !byOps && targets.some(t => planStatus(t, row.date)?.status !== 'Confirmed')) throw bad('plan_not_confirmed', 'Confirm the production plan for this date first.');
+  /* Uncertain about safety → not accepted, by the bakery or by operations (MB-BKY-001 §3). */
+  if (['In Preparation', 'Ready'].includes(state)) assertSafe(kind, raw);
   const bakeryName = db.prepare('SELECT name FROM bakeries WHERE id = ?').get(targets[0])?.name || 'The bakery';
   if (state === 'In Preparation') {
     for (const t of targets) savePart(kind, loadDay(kind, id).raw, row, t, { state, delay: null });
@@ -165,12 +188,13 @@ export function setBakeryState(kind, id, state, { delayMinutes, reason, note, qc
   } else if (state === 'Delayed') {
     const mins = Number(delayMinutes);
     if (!Number.isInteger(mins) || mins < 5 || mins > 180) throw bad('delay_invalid', 'Enter the expected delay in minutes (5–180).');
-    for (const t of targets) savePart(kind, loadDay(kind, id).raw, row, t, { state: 'Delayed', delay: mins });
+    for (const t of targets) { partnerEvent(t, row, 'Delayed', `${mins} min${note ? ` — ${note}` : ''}`); savePart(kind, loadDay(kind, id).raw, row, t, { state: 'Delayed', delay: mins }); }
     update(kind, raw.id, { delay_minutes: mins });
     raiseException({ ref: `${kind}:${raw.id}`, kind: 'Pickup Delay', note: `${bakeryName}: ready about ${mins} min late${note ? ` — ${note}` : ''}`, responsibleParty: bakeryName, owner: 'Operations', action: 'Adjust pickup; warn the customer if the window will be missed' });
   } else {
     if (!PLAN_ISSUES.includes(reason)) throw bad('reason_required', `Choose why: ${PLAN_ISSUES.join(', ')}.`);
-    for (const t of targets) savePart(kind, loadDay(kind, id).raw, row, t, { state: 'Unable to Fulfil' });
+    /* Logged before reallocation resets the row, so the original bakery keeps the record. */
+    for (const t of targets) { partnerEvent(t, row, 'Unable to Fulfil', reason); savePart(kind, loadDay(kind, id).raw, row, t, { state: 'Unable to Fulfil' }); }
     update(kind, raw.id, { issue_reason: reason });
     const exId = raiseException({ ref: `${kind}:${raw.id}`, kind: reason, category: reason === 'Dietary/Allergy Issue' ? 'Safety' : 'Bakery', note: `${bakeryName} cannot fulfil: ${reason}${note ? ` — ${note}` : ''}`, responsibleParty: bakeryName, owner: 'Operations', action: 'Reallocate to the next eligible bakery, otherwise full refund', dedupe: false });
     /* MB-OPS-001 §4 / MB-DLV-001 §11: try the next eligible bakery; if none can, the breakfast is refunded in full and the customer told. */
@@ -219,6 +243,7 @@ export function recordHandover(kind, id, { boxes, specialBoxes, routeId, bakeryI
   if (!part) throw bad('part_required', parts.length > 1 ? 'This order comes from more than one bakery — record each bakery’s handover.' : 'This order has no bakery yet.');
   const states = partStates(raw);
   if (states[part.bakeryId]?.state !== 'Ready') throw bad('not_ready', 'The bakery has not marked this order Ready.');
+  assertSafe(kind, raw);
   const route = String(routeId || raw.route_id || '').trim();
   if (!route) throw bad('route_required', 'Assign the courier or route before pickup.');
   /* Nothing leaves the bakery unless the physical handover matches the digital order record. */
@@ -226,13 +251,29 @@ export function recordHandover(kind, id, { boxes, specialBoxes, routeId, bakeryI
     raiseException({ ref: `${kind}:${raw.id}`, kind: 'Handover Mismatch', note: `Counted ${boxes} boxes (${specialBoxes} special); expected ${part.boxes} (${part.special} special) from bakery #${part.bakeryId}. Not dispatched.`, owner: 'Operations', action: 'Resolve the count with the bakery before dispatch' });
     throw new ApiError(409, 'handover_mismatch', `Count doesn’t match: expected ${part.boxes} box${part.boxes > 1 ? 'es' : ''} (${part.special} special). Do not dispatch until resolved.`);
   }
+  /* The bakery records its handover; the courier's pickup is a separate confirmation (MB-OPS-001 §6). */
+  const courier = by === 'courier';
   tx(() => {
     const at = new Date().toISOString();
     db.prepare(`INSERT INTO handovers (day_kind, day_id, bakery_id, boxes, special_boxes, ready_by, route_id, picked_up_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(kind, raw.id, part.bakeryId, part.boxes, part.special, readyBy(row.date, row.window, part.bakeryId).toISOString(), route.slice(0, 40), by === 'courier' ? at : null);
-    const { states: next } = savePart(kind, raw, row, part.bakeryId, { state: 'Handed Over', handedOverAt: at, ...(by === 'courier' ? { pickedUpAt: at } : {}) });
+      .run(kind, raw.id, part.bakeryId, part.boxes, part.special, readyBy(row.date, row.window, part.bakeryId).toISOString(), route.slice(0, 40), courier ? at : null);
+    const { states: next } = savePart(kind, raw, row, part.bakeryId, { state: 'Handed Over', handedOverAt: at, ...(courier ? { pickedUpAt: at } : {}) });
     update(kind, raw.id, { route_id: route.slice(0, 40), handed_over_at: at });
-    if (parts.every(p => next[p.bakeryId]?.state === 'Handed Over')) update(kind, raw.id, { delivery_state: 'Picked Up', picked_up_at: at });
+    if (courier && parts.every(p => next[p.bakeryId]?.state === 'Handed Over' && next[p.bakeryId]?.pickedUpAt)) update(kind, raw.id, { delivery_state: 'Picked Up', picked_up_at: at });
+  });
+}
+/** The courier confirms pickup once every bakery has handed its part over (MB-OPS-001 §6). */
+export function confirmPickup(kind, id) {
+  const { raw, row } = loadDay(kind, id);
+  const parts = rowParts(row);
+  const states = partStates(raw);
+  if (!parts.length || parts.some(p => states[p.bakeryId]?.state !== 'Handed Over')) throw bad('not_handed_over', 'Every bakery must hand over its boxes before the courier confirms pickup.');
+  if (raw.delivery_state) throw bad('already_picked_up', 'Pickup has already been confirmed.');
+  const at = new Date().toISOString();
+  tx(() => {
+    for (const p of parts) states[p.bakeryId] = { ...states[p.bakeryId], pickedUpAt: states[p.bakeryId].pickedUpAt || at };
+    db.prepare('UPDATE handovers SET picked_up_at = ? WHERE day_kind = ? AND day_id = ? AND picked_up_at IS NULL').run(at, kind, raw.id);
+    update(kind, raw.id, { part_states: json(states), delivery_state: 'Picked Up', picked_up_at: at });
   });
 }
 export function outForDelivery(kind, id) {
@@ -256,6 +297,7 @@ export function demoStep(kind, id) {
   } else if (raw.stage === 1) {
     if (loadDay(kind, id).raw.bakery_state !== 'Ready') setBakeryState(kind, id, 'Ready', { qcPassed: true, byOps: true });
     for (const p of rowParts(row)) if (partStates(loadDay(kind, id).raw)[p.bakeryId]?.state !== 'Handed Over') recordHandover(kind, id, { bakeryId: p.bakeryId, boxes: p.boxes, specialBoxes: p.special, routeId: raw.route_id || 'DEMO' });
+    if (!loadDay(kind, id).raw.delivery_state) confirmPickup(kind, id);
     outForDelivery(kind, id);
   } else if (raw.stage === 2) markDelivered(kind, id, 'Reception');
 }
@@ -266,6 +308,8 @@ export function markFailed(kind, id, reason, note) {
   const { raw, row } = loadDay(kind, id);
   if (!FAILURE_REASONS.includes(reason)) throw bad('reason_invalid', `Reason must be one of: ${FAILURE_REASONS.join(', ')}.`);
   if (raw.stage >= 3) throw bad('delivered', 'This order was already delivered.');
+  /* A delivery attempt must be made before the order is marked failed (MB-DLV-001 §6). */
+  if (raw.delivery_state !== 'Out for Delivery') throw bad('not_out', 'Only an order out for delivery can be marked failed — record the delivery attempt first.');
   db.prepare('INSERT INTO delivery_attempts (day_kind, day_id, reason, note) VALUES (?, ?, ?, ?)').run(kind, raw.id, reason, String(note || '').slice(0, 200) || null);
   update(kind, raw.id, { delivery_state: 'Failed' });
   raiseException({ ref: `${kind}:${raw.id}`, kind: 'Delivery Failed', category: reason === 'Wrong address' || reason === 'Receiving point unavailable' || reason === 'Contact unreachable' ? 'Customer/Location' : 'Courier', note: `${reason}${note ? ` — ${note}` : ''}`, owner: 'Operations', action: 'Contact the customer; re-attempt or apply the refund policy', dedupe: false });
@@ -318,7 +362,10 @@ export function flagAtRisk(now = new Date()) {
     if (!delayedReady && !closeToEnd) continue;
     /* At risk is a warning; "late" is only recorded when it is actually delivered after the window. */
     update(r.kind, r.id, { at_risk: 1, late_note: r.lateNote || 'a little after your window' });
-    raiseException({ ref: `${r.kind}:${r.id}`, kind: r.deliveryState ? 'Courier Delay' : 'Pickup Delay', note: `At risk of missing the ${windowLabel(r.window)} window`, owner: 'Operations', action: 'Expedite; confirm the new time with the customer' });
+    /* Pickup Delay only when the bakery was not Ready by ready-by; otherwise it is the courier's (MB-OPS-001 §6). */
+    const rb = readyBy(r.date, r.window, rowBakeries(r)[0]);
+    const bakeryLate = r.bakeryState === 'Delayed' || (r.readyAt ? new Date(r.readyAt) > rb : now > rb);
+    raiseException({ ref: `${r.kind}:${r.id}`, kind: bakeryLate ? 'Pickup Delay' : 'Courier Delay', note: `At risk of missing the ${windowLabel(r.window)} window`, owner: 'Operations', action: 'Expedite; confirm the new time with the customer' });
     event(r, 'late', 'Running a little late');
     tell(r, 'late', `Sorry — your breakfast for ${prettyDate(r.date)} may arrive a little after your ${windowLabel(r.window)} window. We’re on it.`);
     flagged++;
@@ -358,7 +405,7 @@ export function productionPlan(date, onlyBakery = null, { forBakery = false } = 
       p.packing.push({
         ref: r.orderId, kind: r.kind, id: r.id, name: forBakery ? null : r.kind === 'personal' ? users[r.userId] || '' : r.address.company,
         window: windowLabel(r.window), readyBy: ready, routeId: r.routeId, bakeryId: bid, boxes: share ?? r.boxes, specialBoxes: part ? specialShare : r.specialBoxes, shared: share !== null && share !== undefined ? `${share} of ${r.boxes} boxes` : null,
-        state: (bid && r.partStates[bid]?.state) || r.bakeryState, safetyHold: r.safetyHold, otherAllergies: r.otherAllergies || '',
+        state: (bid && r.partStates[bid]?.state) || r.bakeryState, safetyHold: r.safetyHold, safetyCheck: r.safetyCheck, otherAllergies: r.otherAllergies || '',
         lines: production.map(l => ({
           qty: l.qty, size: sizeLabel(l.size), box: l.box, components: l.components, special: l.special || [],
           addons: (l.addons || []).map(a => `${a.qty}× ${componentName(a.item)}${a.unit ? ` (${a.unit} loaf)` : ''}${flavourText(a)}`),
@@ -389,7 +436,9 @@ export function labelsFor(date, onlyBakery = null, { forBakery = false } = {}) {
       const place = forBakery ? null : row.kind === 'personal' ? `${row.address.building}, ${row.address.unit}` : `${row.address.building}, ${row.address.office}`;
       const handover = forBakery ? null : row.kind === 'personal' ? (row.address.handover === 'door' ? 'Door' : 'Reception') : `Reception · ${row.address.contact}`;
       for (const l of o.lines) for (let i = 0; i < l.qty; i++) {
-        labels.push({ ref: o.ref, name: o.name, window: o.window, readyBy: o.readyBy, place, handover, size: l.size, box: l.box, addons: i === 0 ? l.addons : [], warnings: l.special, safetyHold: o.safetyHold, bakery: p.bakery });
+        /* The customer's free-text allergies are a warning on every label (MB-BKY-001 §5). */
+        const avoid = o.otherAllergies && !l.special.some(w => w.startsWith('Also avoid')) ? [`Also avoid: ${o.otherAllergies}`] : [];
+        labels.push({ ref: o.ref, name: o.name, window: o.window, readyBy: o.readyBy, place, handover, size: l.size, box: l.box, addons: i === 0 ? l.addons : [], warnings: [...l.special, ...avoid], safetyHold: o.safetyHold, safetyCheck: o.safetyCheck, bakery: p.bakery });
       }
     }
   }
@@ -423,6 +472,7 @@ export function registerFulfilmentRoutes(router) {
   });
   router.post('/days/:kind/:id/reallocate', (req, res) => { const [k, i] = kindId(req); const b = reallocate(k, i); res.json({ ok: true, bakery: b.name }); });
   router.post('/days/:kind/:id/handover', (req, res) => { const [k, i] = kindId(req); recordHandover(k, i, req.body); res.json({ ok: true }); });
+  router.post('/days/:kind/:id/pickup', (req, res) => { const [k, i] = kindId(req); confirmPickup(k, i); res.json({ ok: true }); });
   router.post('/days/:kind/:id/out', (req, res) => { const [k, i] = kindId(req); outForDelivery(k, i); res.json({ ok: true }); });
   router.post('/days/:kind/:id/delivered', (req, res) => { const [k, i] = kindId(req); markDelivered(k, i, req.body.deliveryPoint); res.json({ ok: true }); });
   router.post('/days/:kind/:id/failed', (req, res) => { const [k, i] = kindId(req); markFailed(k, i, req.body.reason, req.body.note); res.json({ ok: true }); });
@@ -470,11 +520,15 @@ bakeryRouter.post('/plan/issue', (req, res) => { reportPlanIssue(req.bakery.id, 
 bakeryRouter.post('/plan/start', (req, res) => {
   const date = bakeryDate(req);
   let n = 0;
+  const held = [];
   for (const r of bakeryRows(req.bakery.id, date)) {
     if (req.body.window && r.window !== req.body.window) continue;
-    if (!r.bakeryState || r.bakeryState === 'Confirmed') { setBakeryState(r.kind, r.id, 'In Preparation', { bakeryId: req.bakery.id }); n++; }
+    if (r.bakeryState && r.bakeryState !== 'Confirmed') continue;
+    /* Orders waiting on a safety check are not started (MB-BKY-001 §3). */
+    if (r.safetyHold || r.safetyCheck) { held.push(r.orderId); continue; }
+    setBakeryState(r.kind, r.id, 'In Preparation', { bakeryId: req.bakery.id }); n++;
   }
-  res.json({ ok: true, started: n });
+  res.json({ ok: true, started: n, held });
 });
 /** The bakery hands its part over to the courier: counts must match (MB-OPS-001 §6–7). */
 bakeryRouter.post('/days/:kind/:id/handover', (req, res) => {

@@ -238,7 +238,8 @@ export function needsFor(dietary = [], allergies = []) {
 }
 export const bakeryCaps = b => { try { return JSON.parse(b.capabilities || '{}') || {}; } catch { return {}; } };
 export const bakeryCovers = (b, needs = []) => needs.every(k => bakeryCaps(b)[k]);
-export const activeBakeries = () => db.prepare("SELECT * FROM bakeries WHERE status = 'Active' ORDER BY distance_km").all();
+/* Active partners only, and only while their food business licence is valid on that date (MB-BKY-001 §1). */
+export const activeBakeries = (date = dubaiTodayIso()) => db.prepare("SELECT * FROM bakeries WHERE status = 'Active' AND (licence_expiry IS NULL OR licence_expiry = '' OR licence_expiry >= ?) ORDER BY distance_km").all(date);
 
 /* ---------- Bakery availability for one date (MB-BKY-001 §6) ----------
    Active partners only, after the temporary conditions they reported for that date:
@@ -250,7 +251,7 @@ export const bakeryProducts = b => { try { return JSON.parse(b.products || 'null
 export const danishFlavours = b => { try { return JSON.parse(b.danish_flavours || 'null') || []; } catch { return []; } };
 export function bakeriesFor(date) {
   const conds = db.prepare('SELECT * FROM bakery_conditions WHERE date = ?').all(date);
-  return activeBakeries().flatMap(b => {
+  return activeBakeries(date).flatMap(b => {
     const mine = conds.filter(c => c.bakery_id === b.id);
     if (mine.some(c => c.kind === 'Temporarily Unavailable')) return [];
     const reduced = mine.filter(c => c.kind === 'Reduced Capacity' && Number.isInteger(c.capacity)).map(c => c.capacity);

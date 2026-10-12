@@ -117,7 +117,8 @@ function Orders({ plan, date, busy, act, checks, reasons }) {
   const [qc, setQc] = useState({});
   const [count, setCount] = useState({});
   const allChecked = k => Object.keys(checks).every(c => qc[k]?.[c]);
-  const pending = plan.packing.filter(o => !o.state || o.state === 'Confirmed');
+  /* Orders waiting on a safety check are never started (MB-BKY-001 §3). */
+  const pending = plan.packing.filter(o => (!o.state || o.state === 'Confirmed') && !o.safetyHold && !o.safetyCheck);
   return (
     <section className="stack gap-12">
       <div className="row"><span className="strong">{plan.packing.length} orders · {plan.boxes} boxes</span>
@@ -126,28 +127,31 @@ function Orders({ plan, date, busy, act, checks, reasons }) {
         const k = `${o.kind}/${o.id}`;
         const path = `/days/${k}/state`;
         const gone = o.state === 'Handed Over';
+        const blocked = o.safetyHold || o.safetyCheck;
         const c = count[k] || { boxes: '', special: '' };
         return (
-          <article key={k} className={`card stack gap-8${o.safetyHold || o.lines.some(l => l.special.length) ? ' warn' : ''}`} style={{ padding: 16 }}>
+          <article key={k} className={`card stack gap-8${blocked || o.lines.some(l => l.special.length) ? ' warn' : ''}`} style={{ padding: 16 }}>
             <div className="row" style={{ flexWrap: 'wrap' }}><b>{o.ref}{o.shared ? ` · your part: ${o.shared}` : ''}</b><span className="xs">Ready by {o.readyBy} · {o.window} · {o.state || 'Not started'}</span></div>
             {o.safetyHold && <b>SAFETY HOLD — do not prepare until Morning Box confirms.</b>}
+            {!o.safetyHold && o.safetyCheck && <b>ALLERGY CHECK PENDING — Morning Box is confirming the customer’s allergy note. Do not prepare until it is cleared.</b>}
             {o.lines.map((l, i) => <span key={i}>{l.qty}× {l.box} · {l.size}{l.special.length ? <b> · {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? ` + ${l.addons.join(', ')}` : ''}<br /><small>{l.components.join(', ')}</small></span>)}
-            {o.otherAllergies && <b>Also avoid: {o.otherAllergies}</b>}
+            {o.otherAllergies && !o.lines.some(l => l.special.some(w => w.startsWith('Also avoid'))) && <b>Also avoid: {o.otherAllergies}</b>}
+            {gone && <span className="xs">Handed over — waiting for the courier to confirm pickup.</span>}
             {!gone && (
               <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
-                {o.state !== 'In Preparation' && o.state !== 'Ready' && <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', path, { state: 'In Preparation' })}>In preparation</button>}
+                {o.state !== 'In Preparation' && o.state !== 'Ready' && <button type="button" className="btn-text" disabled={busy || blocked} onClick={() => act('POST', path, { state: 'In Preparation' })}>In preparation</button>}
                 {o.state !== 'Ready' && <>
                   {/* Final check before Ready (MB-BKY-001 §4). */}
                   <span className="row" style={{ gap: 10, flexWrap: 'wrap', justifyContent: 'flex-start' }}>{Object.entries(checks).map(([id, label]) => (
                     <label key={id} className="row xs" style={{ gap: 6 }}><input type="checkbox" checked={!!qc[k]?.[id]} onChange={e => setQc(x => ({ ...x, [k]: { ...(x[k] || {}), [id]: e.target.checked } }))} />{label}</label>
                   ))}</span>
-                  <button type="button" className="btn-secondary" style={small} disabled={busy || !allChecked(k)} onClick={() => act('POST', path, { state: 'Ready', qc: qc[k] })}>Ready</button>
+                  <button type="button" className="btn-secondary" style={small} disabled={busy || blocked || !allChecked(k)} onClick={() => act('POST', path, { state: 'Ready', qc: qc[k] })}>Ready</button>
                 </>}
                 {o.state === 'Ready' && <>
                   <b style={{ fontSize: 14 }}>Hand over to courier{o.routeId ? ` (${o.routeId})` : ''} — count:</b>
                   <input className="input" style={{ width: 80, minHeight: 40 }} inputMode="numeric" placeholder="Boxes" aria-label="Boxes" value={c.boxes} onChange={e => setCount(x => ({ ...x, [k]: { ...c, boxes: e.target.value } }))} />
                   <input className="input" style={{ width: 90, minHeight: 40 }} inputMode="numeric" placeholder="Special" aria-label="Special boxes" value={c.special} onChange={e => setCount(x => ({ ...x, [k]: { ...c, special: e.target.value } }))} />
-                  <button type="button" className="btn-secondary" style={small} disabled={busy || c.boxes === '' || c.special === ''} onClick={() => act('POST', `/days/${k}/handover`, { boxes: Number(c.boxes), specialBoxes: Number(c.special) })}>Handed over</button>
+                  <button type="button" className="btn-secondary" style={small} disabled={busy || blocked || c.boxes === '' || c.special === ''} onClick={() => act('POST', `/days/${k}/handover`, { boxes: Number(c.boxes), specialBoxes: Number(c.special) })}>Handed over</button>
                 </>}
                 <input className="input" style={{ width: 90, minHeight: 40 }} inputMode="numeric" placeholder="Min" aria-label="Delay in minutes" value={delay[k] || ''} onChange={e => setDelay(x => ({ ...x, [k]: e.target.value }))} />
                 <button type="button" className="btn-text" disabled={busy || !delay[k]} onClick={() => act('POST', path, { state: 'Delayed', delayMinutes: Number(delay[k]) })}>Report delay</button>

@@ -310,6 +310,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idem ON orders(user_id, idempotency
 CREATE UNIQUE INDEX IF NOT EXISTS idx_business_orders_idem ON business_orders(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 `);
 
+/* Partner reliability log (MB-BKY-001 §9): a bakery's Delayed / Unable to Fulfil reports stay
+   on its record even after the order is reallocated to another bakery. */
+db.exec(`
+CREATE TABLE IF NOT EXISTS bakery_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bakery_id INTEGER NOT NULL REFERENCES bakeries(id),
+  date TEXT NOT NULL,
+  day_kind TEXT NOT NULL,
+  day_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_bakery_events ON bakery_events(bakery_id, date);
+`);
+
 /* Launch partner set for the DIFC pilot (MB-BKY-001). Names are placeholders
    until partner agreements are signed. */
 if (db.prepare('SELECT COUNT(*) AS n FROM bakeries').get().n === 0) {

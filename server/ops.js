@@ -107,14 +107,22 @@ opsRouter.get('/report', (req, res) => {
       SUM(cancelled = 0 AND late = 1) AS late, SUM(cancelled = 0 AND (delivery_state = 'Failed' OR bakery_state = 'Unable to Fulfil')) AS failed`;
   const personal = db.prepare(`SELECT date, SUM(cancelled = 0) AS mornings, SUM(CASE WHEN cancelled = 0 THEN price ELSE 0 END) AS revenue,
       SUM(cancelled) AS cancelled, SUM(CASE WHEN cancelled = 1 THEN COALESCE(NULLIF(refund, 0), price) ELSE refund END) AS refunds,
+      SUM(cancelled = 1 OR refund > 0) AS refundedOrders,
       ${FULFIL}, SUM(feedback = 'Loved it') AS loved, SUM(feedback = 'Not for me') AS notForMe
     FROM order_days WHERE date BETWEEN ? AND ? GROUP BY date`).all(from, to);
   const business = db.prepare(`SELECT date, SUM(cancelled = 0) AS orders, SUM(CASE WHEN cancelled = 0 THEN people ELSE 0 END) AS boxes,
       SUM(CASE WHEN cancelled = 0 THEN total ELSE 0 END) AS revenue, SUM(CASE WHEN cancelled = 0 THEN discount ELSE 0 END) AS discounts,
-      SUM(cancelled) AS cancelled, SUM(refund) AS refunds, ${FULFIL}
+      SUM(cancelled) AS cancelled, SUM(refund) AS refunds, SUM(refund > 0) AS refundedOrders, ${FULFIL}
     FROM business_days WHERE date BETWEEN ? AND ? GROUP BY date`).all(from, to);
   const credits = db.prepare(`SELECT substr(ref, -10) AS date, SUM(amount) AS n FROM customer_credits WHERE substr(ref, -10) BETWEEN ? AND ? GROUP BY date`).all(from, to);
-  const exceptions = db.prepare(`SELECT date(created_at) AS date, category, COUNT(*) AS n FROM exceptions WHERE date(created_at) BETWEEN ? AND ? GROUP BY date, category`).all(from, to);
+  /* Exceptions count against the delivery date of the order they concern; others by the day they were raised (MB-OPS-001 §9). */
+  const exceptions = db.prepare(`SELECT date, category, COUNT(*) AS n FROM (
+      SELECT COALESCE(
+        CASE WHEN e.ref LIKE 'personal:%' THEN (SELECT d.date FROM order_days d WHERE d.id = CAST(substr(e.ref, 10) AS INTEGER)) END,
+        CASE WHEN e.ref LIKE 'business:%' THEN (SELECT d.date FROM business_days d WHERE d.id = CAST(substr(e.ref, 10) AS INTEGER)) END,
+        CASE WHEN e.ref LIKE 'bakery:%:____-__-__' THEN substr(e.ref, -10) END,
+        date(e.created_at)) AS date, e.category FROM exceptions e)
+    WHERE date BETWEEN ? AND ? GROUP BY date, category`).all(from, to);
   const dates = [...new Set([...personal, ...business].map(r => r.date))].sort();
   const days = dates.map(date => {
     const p = personal.find(r => r.date === date) || {}, b = business.find(r => r.date === date) || {};
@@ -123,7 +131,7 @@ opsRouter.get('/report', (req, res) => {
       date, personalMornings: p.mornings || 0, businessOrders: b.orders || 0, businessBoxes: b.boxes || 0,
       boxes: (p.mornings || 0) + (b.boxes || 0), revenue: (p.revenue || 0) + (b.revenue || 0),
       personalRevenue: p.revenue || 0, businessRevenue: b.revenue || 0, businessDiscounts: b.discounts || 0,
-      cancelled: (p.cancelled || 0) + (b.cancelled || 0), refunds: (p.refunds || 0) + (b.refunds || 0), credits: credits.find(c => c.date === date)?.n || 0,
+      cancelled: (p.cancelled || 0) + (b.cancelled || 0), refunds: (p.refunds || 0) + (b.refunds || 0), refundedOrders: (p.refundedOrders || 0) + (b.refundedOrders || 0), credits: credits.find(c => c.date === date)?.n || 0,
       delivered: (p.delivered || 0) + (b.delivered || 0), onTime: (p.onTime || 0) + (b.onTime || 0), late: (p.late || 0) + (b.late || 0), failed: (p.failed || 0) + (b.failed || 0),
       exceptions: ex(), safety: ex('Safety'), bakeryIssues: ex('Bakery'), courierIssues: ex('Courier'), customerIssues: ex('Customer/Location'),
       loved: p.loved || 0, notForMe: p.notForMe || 0
@@ -145,14 +153,20 @@ opsRouter.get('/report', (req, res) => {
     }
   }
   /* Partner performance (MB-BKY-001 §9, OPS §11): order accuracy, ready on time, quality, fulfilment reliability, feedback. */
+  /* Delayed / Unable to Fulfil come from the partner log, so a reallocated order still counts against the bakery that reported it (BKY §9). */
+  const logged = db.prepare('SELECT bakery_id, kind, COUNT(DISTINCT day_kind || day_id) AS n FROM bakery_events WHERE date BETWEEN ? AND ? GROUP BY bakery_id, kind').all(from, to);
+  const loggedOf = (id, kind) => logged.find(e => e.bakery_id === id && e.kind === kind)?.n || 0;
+  const plansIn = db.prepare("SELECT bakery_id, COUNT(*) AS total, SUM(status = 'Confirmed') AS confirmed FROM bakery_plans WHERE date BETWEEN ? AND ? GROUP BY bakery_id").all(from, to);
   const partners = db.prepare('SELECT id, name FROM bakeries ORDER BY distance_km').all().map(b => {
     const mine = all.filter(x => x.parts.some(p => p.bakeryId === b.id));
     const n = mine.length;
+    const plans = plansIn.find(x => x.bakery_id === b.id);
     return {
       id: b.id, name: b.name, mornings: n, boxes: mine.reduce((t, x) => t + (x.parts.find(p => p.bakeryId === b.id)?.boxes || 0), 0),
       delivered: mine.filter(x => x.d.stage === 3).length, late: mine.filter(x => x.d.late).length,
       readyOnTime: pct(mine.filter(x => x.readyOnTime).length, mine.filter(x => x.readyOnTime !== null).length),
-      delayed: mine.filter(x => x.d.delay_minutes).length, unable: mine.filter(x => x.d.bakery_state === 'Unable to Fulfil').length,
+      delayed: loggedOf(b.id, 'Delayed'), unable: loggedOf(b.id, 'Unable to Fulfil'),
+      plans: plans?.total || 0, planConfirmation: plans ? pct(plans.confirmed || 0, plans.total) : null,
       accuracyIssues: mine.filter(x => x.issues.includes('Wrong or missing items')).length,
       qualityIssues: mine.filter(x => x.issues.some(i => ['Quality issue', 'Packaging issue'].includes(i))).length,
       loved: mine.filter(x => x.d.feedback === 'Loved it').length, notForMe: mine.filter(x => x.d.feedback === 'Not for me').length
@@ -179,7 +193,14 @@ opsRouter.get('/report', (req, res) => {
   for (const k of Object.keys(finance)) finance[k] = Math.round(finance[k] * 100) / 100;
   const completed = all.filter(x => x.d.stage === 3 && x.d.delivery_point && x.d.recipient_type && db.prepare('SELECT 1 FROM handovers WHERE day_kind = ? AND day_id = ?').get(x.kind, x.d.id)).length;
   /* Recommendation KPIs (Master Plan §15). */
-  const cfgs = db.prepare('SELECT cfg FROM order_days WHERE date BETWEEN ? AND ? AND cancelled = 0').all(from, to).map(r => parse(r.cfg));
+  const cfgRows = db.prepare('SELECT d.cfg, o.user_id FROM order_days d JOIN orders o ON o.id = d.order_id WHERE d.date BETWEEN ? AND ? AND d.cancelled = 0').all(from, to);
+  const cfgs = cfgRows.map(r => parse(r.cfg));
+  /* Repeat breakfast: of customers with more than one morning, the share who had the same breakfast more than once. */
+  const recipesBy = {};
+  for (const r of cfgRows) (recipesBy[r.user_id] ||= []).push(parse(r.cfg).recipeId);
+  const multi = Object.values(recipesBy).filter(l => l.length > 1);
+  const supportBusiness = db.prepare("SELECT COUNT(*) AS n FROM support_requests WHERE topic = 'Business orders' AND date(created_at) BETWEEN ? AND ?").get(from, to).n;
+  const avgOf = sql => { const a = db.prepare(sql).get(from, to).a; return a ? Math.round(a) : null; };
   const events = Object.fromEntries(db.prepare(`SELECT kind, COUNT(*) AS n FROM analytics_events WHERE date(created_at) BETWEEN ? AND ? GROUP BY kind`).all(from, to).map(e => [e.kind, e.n]));
   const kpis = {
     mornings: cfgs.length,
@@ -192,11 +213,14 @@ opsRouter.get('/report', (req, res) => {
     funnel: ['visit', 'profile_completed', 'plan_started', 'recommendation_shown', 'summary_viewed', 'checkout_started', 'order_placed'].map(k => ({ step: k, count: events[k] || 0 })),
     /* Retention, B2B, delivery and economics (Master Plan §15). */
     ...retention(from, to),
-    businessInquiries: events.business_inquiry || 0,
+    businessInquiries: (events.business_inquiry || 0) + supportBusiness,
+    repeatBreakfast: pct(multi.filter(l => new Set(l).size < l.length).length, multi.length),
+    exceptionRate: pct(sum('exceptions'), all.length),
     peoplePerBusinessOrder: (() => { const b = all.filter(x => x.kind === 'business'); return b.length ? Math.round(b.reduce((t, x) => t + x.boxes, 0) / b.length) : null; })(),
     onTimeByWindow: ['w1', 'w2', 'w3'].map(w => { const m = all.filter(x => x.d.window === w && x.d.stage === 3); return { window: w, onTime: pct(m.filter(x => !x.d.late).length, m.length), delivered: m.length }; }),
     podCompletion: pct(completed, all.filter(x => x.d.stage === 3).length),
-    averageOrderValue: (() => { const o = db.prepare(`SELECT AVG(total) AS a FROM orders WHERE id IN (SELECT order_id FROM order_days WHERE date BETWEEN ? AND ?)`).get(from, to).a; return o ? Math.round(o) : null; })()
+    averageOrderValue: avgOf('SELECT AVG(total) AS a FROM orders WHERE id IN (SELECT order_id FROM order_days WHERE date BETWEEN ? AND ?)'),
+    averageOrderValueBusiness: avgOf('SELECT AVG(total) AS a FROM business_orders WHERE id IN (SELECT order_id FROM business_days WHERE date BETWEEN ? AND ?)')
   };
   /* Reconciliation (MB-OPS-001 §9): order ↔ bakery ↔ delivery records must match; only mismatches are listed. */
   const reconciliation = [];
@@ -206,7 +230,9 @@ opsRouter.get('/report', (req, res) => {
       if (d.cancelled) continue;
       if (d.stage === 3 && !d.delivery_point) reconciliation.push({ ref, kind, issue: 'Delivered without a recorded handover point' });
       if (d.stage === 3 && !d.handovers) reconciliation.push({ ref, kind, issue: 'Delivered without a bakery handover record' });
-      if (d.stage < 3 && d.delivery_state !== 'Failed') reconciliation.push({ ref, kind, issue: 'Past date not marked delivered or failed' });
+      const remedied = d.refund > 0 || !!db.prepare('SELECT 1 FROM service_recovery WHERE day_kind = ? AND day_id = ?').get(kind, d.id);
+      /* Not Fulfilled and refunded is a closed outcome, not a mismatch. */
+      if (d.stage < 3 && d.delivery_state !== 'Failed' && !(d.delivery_state === 'Not Fulfilled' && remedied)) reconciliation.push({ ref, kind, issue: 'Past date not marked delivered or failed' });
       if (d.delivery_state === 'Failed' && !d.refund && !db.prepare('SELECT 1 FROM service_recovery WHERE day_kind = ? AND day_id = ?').get(kind, d.id)) reconciliation.push({ ref, kind, issue: 'Failed delivery without a recorded remedy' });
     }
   }
@@ -214,7 +240,7 @@ opsRouter.get('/report', (req, res) => {
     from, to, days, vatRate: VAT_RATE, partners, routes, finance, completed, kpis, reconciliation,
     totals: { boxes: sum('boxes'), revenue: sum('revenue'), personalRevenue: sum('personalRevenue'), businessRevenue: sum('businessRevenue'), cancelled: sum('cancelled'), refunds: sum('refunds'), credits: sum('credits'),
       delivered: sum('delivered'), onTime: sum('onTime'), late: sum('late'), failed: sum('failed'), exceptions: sum('exceptions'), safety: sum('safety'),
-      loved: sum('loved'), notForMe: sum('notForMe'), businessBoxes: sum('businessBoxes'), businessOrders: sum('businessOrders'),
+      loved: sum('loved'), notForMe: sum('notForMe'), refundedOrders: sum('refundedOrders'), businessBoxes: sum('businessBoxes'), businessOrders: sum('businessOrders'),
       customers: db.prepare(`SELECT COUNT(DISTINCT o.user_id) AS n FROM order_days d JOIN orders o ON o.id = d.order_id WHERE d.date BETWEEN ? AND ? AND d.cancelled = 0`).get(from, to).n }
   });
 });
@@ -241,8 +267,11 @@ opsRouter.post('/exceptions/:id/resolve', (req, res) => {
   if (!x) throw new ApiError(404, 'not_found', 'Exception not found.');
   const resolution = plainText(req.body.resolution, 500);
   if (!resolution) throw bad('resolution_required', 'Write what was done to resolve it.');
-  if (!x.owner && !plainText(req.body.owner, 60)) throw bad('owner_required', 'Assign an owner before resolving.');
-  db.prepare("UPDATE exceptions SET resolved = 1, resolved_at = datetime('now'), resolution = ?, owner = COALESCE(owner, ?) WHERE id = ?").run(resolution, plainText(req.body.owner, 60) || null, x.id);
+  /* MB-OPS-001 §8: every exception is closed with an Owner, an Action and a Resolution. */
+  const owner = plainText(req.body.owner, 60) || x.owner, action = plainText(req.body.action, 200) || x.action;
+  if (!owner) throw bad('owner_required', 'Assign an owner before resolving.');
+  if (!action) throw bad('action_required', 'Record the action taken before resolving.');
+  db.prepare("UPDATE exceptions SET resolved = 1, resolved_at = datetime('now'), resolution = ?, owner = ?, action = ? WHERE id = ?").run(resolution, owner, action, x.id);
   res.json({ ok: true });
 });
 

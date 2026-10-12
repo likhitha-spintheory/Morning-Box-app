@@ -24,8 +24,9 @@ const money = (v, { min = 0, max = 1000 } = {}) => Number.isFinite(v) && v >= mi
 function validatePricing(p) {
   if (!p || typeof p !== 'object') throw bad('pricing_invalid', 'Send the full price list.');
   for (const k of Object.keys(PRICE_LEVELS)) if (!money(p.priceLevels?.[k], { min: 1 })) throw bad('pricing_invalid', `Price level ${k} must be an amount in AED.`);
-  if (!money(p.sizeAdjustment?.light, { min: -500, max: 0 })) throw bad('pricing_invalid', 'Light must be priced below Regular (0 or a negative adjustment).');
-  if (!money(p.sizeAdjustment?.large, { min: 0 })) throw bad('pricing_invalid', 'Large must be priced above Regular (0 or a positive adjustment).');
+  /* MB-BOX-001 §8: Light is priced below Regular and Large above it — never the same. */
+  if (!money(p.sizeAdjustment?.light, { min: -500, max: 0 }) || p.sizeAdjustment.light === 0) throw bad('pricing_invalid', 'Light must be priced below Regular (a negative adjustment).');
+  if (!money(p.sizeAdjustment?.large, { min: 0 }) || p.sizeAdjustment.large === 0) throw bad('pricing_invalid', 'Large must be priced above Regular (a positive adjustment).');
   const lowest = Math.min(...Object.keys(PRICE_LEVELS).map(k => p.priceLevels[k]));
   if (lowest + p.sizeAdjustment.light <= 0) throw bad('pricing_invalid', 'A Light breakfast would cost nothing — reduce the Light adjustment.');
   for (const k of ['half', 'whole']) if (!money(p.addons?.bread?.[k], { min: 1 })) throw bad('pricing_invalid', `Bread ${k} loaf price must be an amount in AED.`);

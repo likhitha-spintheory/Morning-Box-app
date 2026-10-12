@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Screen, TopBar, Icon } from '../components/ui.jsx';
 import { addDaysIso, dubaiTodayIso } from '../domain/standards.js';
 import { Live, Prep, Labels } from './OpsLive.jsx';
-import { Bakeries, Pricing, Company } from './OpsAdmin.jsx';
+import { Bakeries, Pricing, Company, Products } from './OpsAdmin.jsx';
 
 /* Operations & admin console for the Morning Box team: live deliveries, production
    plans, labels, exceptions, support, feedback, reports, closed days, and Admin
@@ -10,7 +10,7 @@ import { Bakeries, Pricing, Company } from './OpsAdmin.jsx';
    Protected by the server's OPS_KEY (kept for this browser tab only). */
 const KEY = 'morningbox.ops';
 const TABS = [['days', 'Live'], ['prep', 'Production'], ['labels', 'Labels'], ['exceptions', 'Exceptions'], ['support', 'Support'], ['feedback', 'Feedback'], ['report', 'Reports'], ['closed', 'Closed days'],
-  ['bakeries', 'Admin · Bakeries'], ['pricing', 'Admin · Prices'], ['company', 'Admin · Company']];
+  ['bakeries', 'Admin · Bakeries'], ['products', 'Admin · Products & allergens'], ['pricing', 'Admin · Prices'], ['company', 'Admin · Company']];
 
 function useOps() {
   const [key, setKey] = useState(() => { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } });
@@ -38,7 +38,7 @@ export default function Ops() {
     if (!key) return;
     setError(''); setData(null);
     const path = { days: `/dashboard?date=${date}`, prep: `/prep?date=${date}`, labels: `/labels?date=${date}`, support: '/support', feedback: '/feedback', exceptions: '/exceptions', closed: '/closed-dates',
-      report: `/report?from=${range.from}&to=${range.to}`, bakeries: '/admin/bakeries', pricing: '/admin/pricing', company: '/admin/company' }[tab];
+      report: `/report?from=${range.from}&to=${range.to}`, bakeries: '/admin/bakeries', products: '/admin/products', pricing: '/admin/pricing', company: '/admin/company' }[tab];
     try { const value = await call('GET', path); setData({ key: `${tab}|${date}|${range.from}|${range.to}`, value }); } catch (e) { setError(e.message); if (e.status === 401) save(''); }
   }, [key, tab, date, range, call]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
@@ -94,6 +94,7 @@ export default function Ops() {
       {view && tab === 'closed' && <Closed items={view} busy={busy} act={act} />}
       {view && tab === 'report' && <Report data={view} />}
       {view && tab === 'bakeries' && <Bakeries items={view} call={call} act={act} busy={busy} />}
+      {view && tab === 'products' && <Products data={view} />}
       {view && tab === 'pricing' && <Pricing data={view} act={act} busy={busy} />}
       {view && tab === 'company' && <Company data={view} act={act} busy={busy} call={call} />}
     </div>
@@ -201,7 +202,7 @@ function ExceptionCard({ x, busy, act }) {
             <button type="button" className="btn-text" disabled={busy} onClick={() => act('PATCH', `/exceptions/${x.id}`, { owner: v.owner, action: v.action, cause: v.cause, responsibleParty: v.responsibleParty })}>Save</button>
             <span className="row" style={{ gap: 8, flex: 1, minWidth: 260 }}>
               <input className="input" style={{ flex: 1 }} placeholder="Resolution — what was done" aria-label="Resolution" value={v.resolution} onChange={set('resolution')} />
-              <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 16px' }} disabled={busy || !v.resolution.trim()} onClick={() => act('POST', `/exceptions/${x.id}/resolve`, { resolution: v.resolution, owner: v.owner })}>Resolve</button>
+              <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 16px' }} disabled={busy || !v.resolution.trim() || !v.owner.trim() || !v.action.trim()} title="Owner, action and resolution are all required (MB-OPS-001 §8)" onClick={() => act('POST', `/exceptions/${x.id}/resolve`, { resolution: v.resolution, owner: v.owner, action: v.action })}>Resolve</button>
             </span>
           </div>
         </>
@@ -236,7 +237,7 @@ function Closed({ items, busy, act }) {
 
 const CSV_COLUMNS = [['date', 'Date'], ['boxes', 'Boxes'], ['personalMornings', 'Personal mornings'], ['businessOrders', 'Business orders'], ['businessBoxes', 'Business boxes'],
   ['personalRevenue', 'Personal revenue AED'], ['businessRevenue', 'Business revenue AED'], ['businessDiscounts', 'Business discounts AED'], ['revenue', 'Revenue AED (incl. VAT)'],
-  ['cancelled', 'Cancelled'], ['refunds', 'Refunds AED'], ['credits', 'Credits AED'], ['delivered', 'Delivered'], ['onTime', 'On time'], ['late', 'Late'], ['failed', 'Failed'],
+  ['cancelled', 'Cancelled'], ['refundedOrders', 'Refunded orders'], ['refunds', 'Refunds AED'], ['credits', 'Credits AED'], ['delivered', 'Delivered'], ['onTime', 'On time'], ['late', 'Late'], ['failed', 'Failed'],
   ['exceptions', 'Exceptions'], ['safety', 'Safety'], ['bakeryIssues', 'Bakery issues'], ['courierIssues', 'Courier issues'], ['customerIssues', 'Customer/location issues'],
   ['loved', 'Loved it'], ['notForMe', 'Not for me']];
 
@@ -269,13 +270,13 @@ function Report({ data }) {
         <Tile label="Exceptions (safety)" value={`${t.exceptions} (${t.safety})`} />
         <Tile label="Loved it / Not for me" value={`${t.loved} / ${t.notForMe}`} />
       </div>
-      <p className="help" style={{ margin: 0 }}>Personal AED {t.personalRevenue} · Business AED {t.businessRevenue} ({t.businessBoxes} boxes, {t.businessOrders} orders) · VAT included AED {vat(t.revenue).toFixed(2)} · Cancelled {t.cancelled} · Refunds AED {t.refunds} · Credits AED {t.credits} · {t.customers} customers</p>
+      <p className="help" style={{ margin: 0 }}>Personal AED {t.personalRevenue} · Business AED {t.businessRevenue} ({t.businessBoxes} boxes, {t.businessOrders} orders) · VAT included AED {vat(t.revenue).toFixed(2)} · Cancelled {t.cancelled} · Refunds AED {t.refunds} ({t.refundedOrders ?? 0} orders) · Credits AED {t.credits} · {t.customers} customers</p>
       <h2 className="h3">Daily snapshot</h2>
       <table className="ops-table">
         <thead><tr><th>Date</th><th>Boxes</th><th>Revenue</th><th>Delivered</th><th>On time</th><th>Late</th><th>Failed</th><th>Refunds</th><th>Exceptions</th><th>Feedback</th></tr></thead>
         <tbody>{data.days.map(d => (
           <tr key={d.date} className={d.failed || d.safety ? 'warn' : ''}><td>{d.date}</td><td>{d.boxes}{d.businessBoxes ? <small> ({d.businessBoxes} business)</small> : null}</td><td>{d.revenue}</td>
-            <td>{d.delivered}</td><td>{d.onTime}</td><td>{d.late}</td><td>{d.failed}</td><td>{d.refunds}{d.credits ? <small> + {d.credits} credit</small> : null}</td>
+            <td>{d.delivered}</td><td>{d.onTime}</td><td>{d.late}</td><td>{d.failed}</td><td>{d.refunds}{d.refundedOrders ? <small> ({d.refundedOrders} order{d.refundedOrders > 1 ? 's' : ''})</small> : null}{d.credits ? <small> + {d.credits} credit</small> : null}</td>
             <td>{d.exceptions ? <small>{d.exceptions}: {[['Safety', d.safety], ['Bakery', d.bakeryIssues], ['Courier', d.courierIssues], ['Customer', d.customerIssues]].filter(x => x[1]).map(x => `${x[0]} ${x[1]}`).join(', ')}</small> : 0}</td>
             <td>{d.loved || d.notForMe ? `${d.loved} / ${d.notForMe}` : '—'}</td></tr>
         ))}</tbody>
@@ -292,8 +293,8 @@ function Report({ data }) {
       </div>
       <h2 className="h3">Partner bakeries</h2>
       <table className="ops-table">
-        <thead><tr><th>Bakery</th><th>Mornings / boxes</th><th>Delivered</th><th>Ready on time</th><th>Delayed</th><th>Not fulfilled</th><th>Accuracy / quality issues</th><th>Loved it / Not for me</th></tr></thead>
-        <tbody>{data.partners.map(p => <tr key={p.id} className={p.unable || p.accuracyIssues ? 'warn' : ''}><td>{p.name}</td><td>{p.mornings} / {p.boxes}</td><td>{p.delivered}</td><td>{p.readyOnTime != null ? `${p.readyOnTime}%` : '—'}</td><td>{p.delayed}</td><td>{p.unable}</td><td>{p.accuracyIssues} / {p.qualityIssues}</td><td>{p.loved} / {p.notForMe}</td></tr>)}</tbody>
+        <thead><tr><th>Bakery</th><th>Mornings / boxes</th><th>Delivered</th><th>Ready on time</th><th>Delayed</th><th>Not fulfilled</th><th>Plans confirmed</th><th>Accuracy / quality issues</th><th>Loved it / Not for me</th></tr></thead>
+        <tbody>{data.partners.map(p => <tr key={p.id} className={p.unable || p.accuracyIssues ? 'warn' : ''}><td>{p.name}</td><td>{p.mornings} / {p.boxes}</td><td>{p.delivered}</td><td>{p.readyOnTime != null ? `${p.readyOnTime}%` : '—'}</td><td>{p.delayed}</td><td>{p.unable}</td><td>{p.planConfirmation != null ? `${p.planConfirmation}% of ${p.plans}` : '—'}</td><td>{p.accuracyIssues} / {p.qualityIssues}</td><td>{p.loved} / {p.notForMe}</td></tr>)}</tbody>
       </table>
       <h2 className="h3">Couriers / routes</h2>
       {data.routes.length ? (
@@ -320,7 +321,9 @@ function Report({ data }) {
         <Tile label="Active / repeat customers" value={`${k.activeCustomers} / ${k.repeatCustomers}`} />
         <Tile label="Ordered in 2+ weeks" value={k.repeatWeekCustomers} />
         <Tile label="Mornings per active customer" value={k.morningsPerActiveCustomer ?? '—'} />
-        <Tile label="Average order value" value={k.averageOrderValue != null ? `AED ${k.averageOrderValue}` : '—'} />
+        <Tile label="Average order value · personal / business" value={`${k.averageOrderValue != null ? `AED ${k.averageOrderValue}` : '—'} / ${k.averageOrderValueBusiness != null ? `AED ${k.averageOrderValueBusiness}` : '—'}`} />
+        <Tile label="Repeat breakfast (same box twice+)" value={k.repeatBreakfast != null ? `${k.repeatBreakfast}%` : '—'} />
+        <Tile label="Exception rate (per delivery)" value={k.exceptionRate != null ? `${k.exceptionRate}%` : '—'} />
         <Tile label="Business: inquiries · people/order · repeat" value={`${k.businessInquiries} · ${k.peoplePerBusinessOrder ?? '—'} · ${k.repeatBusinessCustomers}`} />
         <Tile label="Proof of delivery complete" value={k.podCompletion != null ? `${k.podCompletion}%` : '—'} />
       </div>

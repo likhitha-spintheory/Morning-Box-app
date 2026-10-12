@@ -17,7 +17,7 @@ const LOCKED = ['In Preparation', 'Ready', 'Handed Over', 'Delayed', 'Unable to 
 
 /** Production units of one delivery: what must be made, and by a bakery able to make it. */
 export function personalUnits(cfg, inputs) {
-  return [{ entry: 0, qty: 1, special: !!(inputs.dietary.length + inputs.allergies.length), needs: needsFor(inputs.dietary, inputs.allergies),
+  return [{ entry: 0, qty: 1, special: !!(inputs.dietary.length + inputs.allergies.length) || !!inputs.otherAllergies, needs: needsFor(inputs.dietary, inputs.allergies),
     glutenFree: needsGlutenFreeHandling(inputs.dietary, inputs.allergies), items: [...cfg.components, ...(cfg.addons || []).map(a => a.item)],
     flavours: [...(cfg.addons || []).filter(a => a.flavour).map(a => a.flavour), ...(cfg.danishFlavour ? [cfg.danishFlavour] : [])] }];
 }
@@ -134,6 +134,9 @@ export function allocate(date, { final = cutoffFor(date) <= new Date() } = {}) {
       if (!parts) {
         raiseException({ ref: row.ref, kind: skipped ? (skipped === 'Safety hold' ? 'Dietary/Allergy Issue' : 'Payment Issue') : 'Capacity Issue',
           note: skipped ? `${skipped}: not allocated for ${date}` : `No eligible bakery capacity on ${date}`, owner: 'Operations', action: skipped ? 'Resolve before production' : 'Contact the customer; reallocate or refund' });
+        /* The old provisional bakery must not prepare it (MB-BKY-001 §3, MB-OPS-001 §2); started orders are never touched. */
+        if (!row.locked && row.kind === 'personal') db.prepare("UPDATE order_days SET bakery_id = NULL, bakery_state = NULL, part_states = NULL WHERE id = ? AND stage = 0 AND (bakery_state IS NULL OR bakery_state = 'Confirmed')").run(row.id);
+        if (!row.locked && row.kind === 'business') db.prepare("UPDATE business_days SET allocation = NULL, bakery_state = NULL, part_states = NULL WHERE id = ? AND stage = 0 AND (bakery_state IS NULL OR bakery_state = 'Confirmed')").run(row.id);
         continue;
       }
       if (row.kind === 'personal') db.prepare('UPDATE order_days SET bakery_id = ? WHERE id = ?').run(parts[0].bakeryId, row.id);

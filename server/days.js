@@ -22,6 +22,10 @@ const hhmm = d => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-di
 const builtName = (id, variants = {}, size = 'regular', flavour = null) =>
   `${componentName(id)}${variantLabel(id, variants[id]) ? ` (${variantLabel(id, variants[id]).toLowerCase()})` : ''}${id === 'fruitDanish' && flavour ? ` — ${flavour}` : ''} · ${componentPortion(id, size === 'standard' ? 'regular' : size)}`;
 
+/* An unresolved Dietary/Allergy exception on the order (e.g. the customer's free-text allergy note):
+   the bakery must not accept, prepare or hand it over until operations resolves it (MB-BKY-001 §3). */
+export const openSafetyCheck = (kind, id) => !!db.prepare("SELECT 1 FROM exceptions WHERE ref = ? AND kind = 'Dietary/Allergy Issue' AND resolved = 0").get(`${kind}:${id}`);
+
 function fulfilment(d, date, window) {
   const firstBakery = d.kind === 'personal' ? d.bakery_id : (parse(d.allocation) || [])[0]?.bakeryId;
   return {
@@ -32,13 +36,15 @@ function fulfilment(d, date, window) {
     recipientType: d.recipient_type || null, readyBy: hhmm(readyBy(date, window, firstBakery)), windowEnds: windowEnd(date, window).toISOString(),
     handover: db.prepare('SELECT * FROM handovers WHERE day_kind = ? AND day_id = ? ORDER BY id DESC').get(d.kind, d.id) || null,
     handovers: db.prepare('SELECT * FROM handovers WHERE day_kind = ? AND day_id = ? ORDER BY id').all(d.kind, d.id),
-    attempts: db.prepare('SELECT reason, note, created_at FROM delivery_attempts WHERE day_kind = ? AND day_id = ? ORDER BY id').all(d.kind, d.id)
+    attempts: db.prepare('SELECT reason, note, created_at FROM delivery_attempts WHERE day_kind = ? AND day_id = ? ORDER BY id').all(d.kind, d.id),
+    safetyCheck: openSafetyCheck(d.kind, d.id)
   };
 }
 
 export function personalRow(d) {
   const cfg = parse(d.cfg); const inputs = parse(d.trace).inputs;
-  const special = readable([...inputs.dietary, ...inputs.allergies]);
+  /* Free-text allergies travel with the box as a special requirement, so it is counted and labelled as special (MB-BKY-001 §5). */
+  const special = [...readable([...inputs.dietary, ...inputs.allergies]), ...(inputs.otherAllergies ? [`Also avoid: ${inputs.otherAllergies}`] : [])];
   return {
     kind: 'personal', id: d.id, orderId: d.order_id, userId: d.user_id, date: d.date, window: d.window, boxes: 1, specialBoxes: special.length ? 1 : 0,
     stage: d.stage, price: d.price, bakeryId: d.bakery_id, glutenFree: needsGlutenFreeHandling(inputs.dietary, inputs.allergies),
@@ -94,7 +100,7 @@ export function health(r, now = new Date()) {
   if (now > new Date(r.windowEnds)) return 'Late';
   /* Attention: safety hold, no bakery, a delay or at-risk warning, an unconfirmed plan after cutoff, or not ready by ready-by. */
   const unconfirmed = now >= cutoffFor(r.date) && rowBakeries(r).some(b => db.prepare('SELECT status FROM bakery_plans WHERE bakery_id = ? AND date = ?').get(b, r.date)?.status !== 'Confirmed');
-  const attention = r.safetyHold || !rowBakeries(r).length || r.bakeryState === 'Delayed' || r.atRisk || (unconfirmed && !r.bakeryState?.match(/Ready|Handed/))
+  const attention = r.safetyHold || r.safetyCheck || !rowBakeries(r).length || r.bakeryState === 'Delayed' || r.atRisk || (unconfirmed && !r.bakeryState?.match(/Ready|Handed/))
     || (now > readyBy(r.date, r.window, rowBakeries(r)[0]) && !['Ready', 'Handed Over'].includes(r.bakeryState) && !r.deliveryState);
   return attention ? 'Attention Required' : 'On Track';
 }

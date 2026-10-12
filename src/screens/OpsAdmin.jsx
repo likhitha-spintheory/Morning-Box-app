@@ -101,7 +101,8 @@ function Bakery({ b, catalog, call, act, busy }) {
 function BakeryForm({ b, catalog, busy, onSave }) {
   const [v, setV] = useState(() => ({
     name: b?.name || '', area: b?.area || 'DIFC', distanceKm: b?.distanceKm ?? '', dailyCapacity: b?.dailyCapacity ?? '', effectiveCapacity: b?.effectiveCapacity ?? '',
-    glutenFreeCertified: !!b?.glutenFreeCertified, capabilities: b?.capabilities || {}, allProducts: !b?.products, products: b?.products || [],
+    /* A new bakery starts with no approved products; each is added as its onboarding sample is approved (MB-BKY-001 §8). */
+    glutenFreeCertified: !!b?.glutenFreeCertified, capabilities: b?.capabilities || {}, allProducts: b ? !b.products : false, products: b?.products || [],
     danishFlavours: b?.danishFlavours || [], contactName: b?.contactName || '', contactPhone: b?.contactPhone || '',
     licenceNo: b?.licenceNo || '', licenceExpiry: b?.licenceExpiry || '', bakesOwnBread: !!b?.bakesOwnBread, readyLeadMinutes: b?.readyLeadMinutes ?? 30, payoutPct: b?.payoutPct ?? 60
   }));
@@ -142,6 +143,36 @@ function BakeryForm({ b, catalog, busy, onSave }) {
       ))}
       <button type="button" className="btn" style={{ alignSelf: 'flex-start', width: 'auto', padding: '0 28px' }} disabled={busy || !v.name.trim()} onClick={save}>{b ? 'Save bakery' : 'Add bakery (starts Under Review)'}</button>
     </div>
+  );
+}
+
+/* ---------- Products & allergens (read-only, MB-PRO-001 §15.1) ---------- */
+export function Products({ data }) {
+  const [q, setQ] = useState('');
+  const allergen = Object.fromEntries(data.allergens.map(a => [a.id, a.label]));
+  const diet = Object.fromEntries(data.dietary.map(d => [d.id, d.label]));
+  const list = ids => ids.map(id => allergen[id] || diet[id] || id).join(', ');
+  const items = data.items.filter(i => !q.trim() || `${i.name} ${i.category}`.toLowerCase().includes(q.trim().toLowerCase()));
+  return (
+    <section className="stack gap-12">
+      <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <span className="strong">{data.items.length} products · ingredient &amp; allergen record</span>
+        <input className="input" style={{ width: 240, minHeight: 40 }} placeholder="Search products" aria-label="Search products" value={q} onChange={e => setQ(e.target.value)} />
+      </div>
+      <p className="help" style={{ margin: 0 }}>Read-only. No product enters a recommendation, swap or add-on without this record (MB-PRO-001 §15.1). SAMPLE items are for testing until approved.</p>
+      <table className="ops-table">
+        <thead><tr><th>Product</th><th>Category</th><th>Contains</th><th>Suitable for</th><th>Approved variants</th></tr></thead>
+        <tbody>{items.map(i => (
+          <tr key={i.id} className={i.sample ? 'warn' : ''}>
+            <td><b>{i.name}</b>{i.sample ? <small> · SAMPLE</small> : null}{i.note ? <><br /><small>{i.note}</small></> : null}</td>
+            <td>{i.category}</td>
+            <td>{i.allergens.length ? <b>{list(i.allergens)}</b> : 'None of the 7 listed allergens'}</td>
+            <td>{list(i.diet) || '—'}</td>
+            <td>{i.variants.length ? i.variants.map(v => <div key={v.id}><small>{v.label}{v.sample ? ' (sample)' : ''} — contains {v.allergens.length ? list(v.allergens) : 'none listed'} · suits {list(v.diet) || '—'}</small></div>) : '—'}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </section>
   );
 }
 
