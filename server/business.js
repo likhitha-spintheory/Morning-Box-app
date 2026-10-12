@@ -191,10 +191,11 @@ businessRouter.post('/orders/:id/days/:date/issue', (req, res) => {
   if (d.cancelled) throw bad('cancelled', 'This day was cancelled.');
   if (d.date > dubaiTodayIso() && d.stage < 2) throw bad('issue_too_early', 'You can report a problem on the morning of delivery.');
   const note = plain(req.body.note, 500);
+  const photo = rules.cleanPhoto(req.body.photo);
   const names = (parse(d.allocation) || []).map(p => db.prepare('SELECT name FROM bakeries WHERE id = ?').get(p.bakeryId)?.name).filter(Boolean).join(' + ');
   const exceptionId = raiseException({ ref: `business:${d.id}`, kind, note: `${req.body.reason}${note ? `: ${note}` : ''} (${o.company})`, customerCategory: 'business', dedupe: false,
     owner: 'Operations', responsibleParty: ['Not delivered', 'Arrived late'].includes(req.body.reason) ? (d.route_id ? `Route ${d.route_id}` : 'Delivery partner') : names || null, action: 'Contact the business contact; decide the remedy' });
-  db.prepare('INSERT INTO customer_issues (user_id, order_id, date, reason, note, exception_id) VALUES (?, ?, ?, ?, ?, ?)').run(req.userId, o.id, d.date, req.body.reason, note || null, exceptionId);
+  db.prepare('INSERT INTO customer_issues (user_id, order_id, date, reason, note, exception_id, photo) VALUES (?, ?, ?, ?, ?, ?, ?)').run(req.userId, o.id, d.date, req.body.reason, note || null, exceptionId, photo);
   notify(req.userId, `${o.id}:${d.date}`, 'issue_update', 'Thanks for telling us. Our team has your report and will contact you shortly.');
   res.json(serialize(o));
 });

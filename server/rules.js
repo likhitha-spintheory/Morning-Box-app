@@ -341,3 +341,11 @@ export function raiseException({ ref, kind, note = '', category, owner = null, a
     .run(String(ref || ''), kind, String(note || '').slice(0, 1000), cat, PRIORITY[cat], owner, action, cause, responsibleParty, customerCategory);
   return Number(r.lastInsertRowid);
 }
+
+/** Optional photo on a problem report (MB-OPS-001 §10: "a photo is not mandatory"): a small JPEG/PNG/WebP data URL, or null. */
+export function cleanPhoto(v) {
+  if (v === undefined || v === null || v === '') return null;
+  if (typeof v !== 'string' || !/^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(v)) throw bad('photo_invalid', 'Add the photo as a JPEG, PNG or WebP image.');
+  if (v.length > 180_000) throw bad('photo_too_large', 'That photo is too large — try a smaller one.');
+  return v;
+}

@@ -5,7 +5,7 @@
 import { db } from './db.js';
 import { dubaiHour, dubaiTodayIso, addDaysIso } from '../src/domain/standards.js';
 
-export const NOTIFICATION_KINDS = ['confirmed', 'on_the_way', 'delivered', 'late', 'refund', 'issue_update', 'reminder', 'safety_review', 'cancelled', 'support_reply', 'changed'];
+export const NOTIFICATION_KINDS = ['confirmed', 'on_the_way', 'delivered', 'late', 'refund', 'issue_update', 'reminder', 'safety_review', 'cancelled', 'support_reply', 'changed', 'prepared_by'];
 
 /** Queue a customer notification. Unknown users or kinds are ignored rather than failing the operation. */
 export function notify(userId, ref, kind, message) {

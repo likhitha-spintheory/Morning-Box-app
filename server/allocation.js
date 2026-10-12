@@ -12,6 +12,7 @@ import { db, json, parse, tx } from './db.js';
 import { bakeriesFor, bakeryCovers, bakeryMakes, danishFlavours, needsFor, needsGlutenFreeHandling, raiseException, bad, prettyDate } from './rules.js';
 import { recipeById } from '../src/domain/recipes.js';
 import { cutoffFor } from '../src/domain/standards.js';
+import { notify, alreadyNotified } from './notify.js';
 
 const LOCKED = ['In Preparation', 'Ready', 'Handed Over', 'Delayed', 'Unable to Fulfil'];
 
@@ -171,6 +172,19 @@ export function allocate(date, { final = cutoffFor(date) <= new Date() } = {}) {
       if (now !== was) [...now.split(','), ...was.split(',')].filter(Boolean).forEach(id => changed.add(Number(id)));
     }
     for (const id of changed) db.prepare(`UPDATE bakery_plans SET status = 'Changed — confirm again', updated_at = datetime('now') WHERE bakery_id = ? AND date = ? AND status = 'Confirmed'`).run(id, date);
+    /* MB-PRD-001 §11: once the bakery is final, the customer sees "Prepared by [Partner Bakery]" — once per morning. */
+    if (final) {
+      const names = Object.fromEntries(db.prepare('SELECT id, name FROM bakeries').all().map(b => [b.id, b.name]));
+      for (const { row, parts } of plan.result) {
+        if (!parts?.length) continue;
+        const owner = db.prepare(`SELECT d.order_id, o.user_id FROM ${row.kind === 'personal' ? 'order_days d JOIN orders o' : 'business_days d JOIN business_orders o'} ON o.id = d.order_id WHERE d.id = ?`).get(row.id);
+        if (!owner) continue;
+        const ref = `${owner.order_id}:${date}`;
+        if (alreadyNotified(owner.user_id, ref, 'prepared_by')) continue;
+        const who = [...new Set(parts.map(p => names[p.bakeryId]).filter(Boolean))].join(' & ');
+        notify(owner.user_id, ref, 'prepared_by', `Your breakfast for ${prettyDate(date)} will be prepared by ${who}.`);
+      }
+    }
     const failed = plan.result.filter(r => !r.parts).length;
     const key = final ? `final:${date}` : `provisional:${date}`;
     db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`)

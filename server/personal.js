@@ -10,7 +10,7 @@ import {
 } from './rules.js';
 import { creditBalance } from './fulfilment.js';
 import { assertAllocatable, personalUnits, reallocateProvisional, isFinal } from './allocation.js';
-import { activeBakeries, danishFlavours } from './rules.js';
+import { activeBakeries, danishFlavours, cleanPhoto } from './rules.js';
 import { pricingSnapshot } from '../src/domain/standards.js';
 import { LIBRARY_SETTINGS } from '../src/domain/library.js';
 import { menuSnapshot } from '../src/domain/menu.js';
@@ -435,13 +435,14 @@ personalRouter.post('/orders/:id/days/:date/issue', requireUser, (req, res) => {
     throw bad('issue_limit', 'We already have your reports for this morning — our team will be in touch.');
   }
   const note = plain(req.body.note, 500);
+  const photo = cleanPhoto(req.body.photo);
   /* Complaint data feeds partner performance (OPS §10): link it to the bakery that prepared it, or the route that delivered it. */
   const bakery = day.bakery_id ? db.prepare('SELECT name FROM bakeries WHERE id = ?').get(day.bakery_id)?.name : null;
   const courierSide = ['Not delivered', 'Arrived late'].includes(req.body.reason);
   const exceptionId = raiseException({ ref: `personal:${day.id}`, kind, note: `${req.body.reason}${note ? `: ${note}` : ''}`, customerCategory: 'personal', dedupe: false,
     owner: 'Operations', responsibleParty: courierSide ? (day.route_id ? `Route ${day.route_id}` : 'Delivery partner') : bakery, action: 'Contact the customer; decide the remedy' });
-  db.prepare('INSERT INTO customer_issues (user_id, order_id, date, reason, note, exception_id) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(req.userId, order.id, day.date, req.body.reason, note || null, exceptionId);
+  db.prepare('INSERT INTO customer_issues (user_id, order_id, date, reason, note, exception_id, photo) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(req.userId, order.id, day.date, req.body.reason, note || null, exceptionId, photo);
   logEvent(order.id, day.date, 'issue', `You reported: ${req.body.reason}`);
   notify(req.userId, `${order.id}:${day.date}`, 'issue_update', 'Thanks for telling us. Our team has your report and will contact you shortly.');
   res.json(serializeOrder(order));

@@ -388,3 +388,8 @@ export function tx(fn) {
   try { const r = fn(); db.exec('COMMIT'); return r; }
   catch (e) { db.exec('ROLLBACK'); throw e; }
 }
+
+/* Route capacity: most boxes one courier carries in a delivery window; null = no limit (MB-OPS-001 §6). */
+addColumns('couriers', { capacity: 'INTEGER' });
+/* Optional photo on a customer's problem report (MB-OPS-001 §10), a small data URL. */
+addColumns('customer_issues', { photo: 'TEXT' });

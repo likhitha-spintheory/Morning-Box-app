@@ -241,7 +241,7 @@ export const bakeryByCode = code => (code ? db.prepare('SELECT * FROM bakeries W
 
 
 /* ---------- Couriers (MB-OPS-001 §6): one courier per route, each with a Courier View access code ---------- */
-const courierOut = c => ({ id: c.id, name: c.name, phone: c.phone || '', routeId: c.route_id, active: !!c.active, hasAccessCode: !!c.access_hash, createdAt: c.created_at });
+const courierOut = c => ({ id: c.id, name: c.name, phone: c.phone || '', routeId: c.route_id, capacity: c.capacity ?? null, active: !!c.active, hasAccessCode: !!c.access_hash, createdAt: c.created_at });
 const courierById = id => {
   const c = db.prepare('SELECT * FROM couriers WHERE id = ?').get(Number(id));
   if (!c) throw new ApiError(404, 'not_found', 'Courier not found.');
@@ -255,19 +255,22 @@ function validateCourier(input, existing = {}) {
   if (!routeId) throw bad('route_required', 'Enter the route id (letters, digits, dash).');
   const taken = db.prepare('SELECT id FROM couriers WHERE route_id = ? AND id IS NOT ?').get(routeId, existing.id ?? null);
   if (taken) throw new ApiError(409, 'route_taken', `Route ${routeId} already has a courier.`);
-  return { name, phone: phone || null, route_id: routeId, active: input.active === undefined ? existing.active ?? 1 : input.active ? 1 : 0 };
+  /* Route capacity (OPS §6): boxes per delivery window; blank = no limit. */
+  const rawCap = input.capacity === undefined ? existing.capacity ?? null : input.capacity === '' || input.capacity === null ? null : Number(input.capacity);
+  if (rawCap !== null && (!Number.isInteger(rawCap) || rawCap < 1 || rawCap > 500)) throw bad('capacity_invalid', 'Route capacity is a whole number of boxes (1–500), or blank for no limit.');
+  return { name, phone: phone || null, route_id: routeId, capacity: rawCap, active: input.active === undefined ? existing.active ?? 1 : input.active ? 1 : 0 };
 }
 adminRouter.get('/couriers', (_req, res) => res.json(db.prepare('SELECT * FROM couriers ORDER BY active DESC, route_id').all().map(courierOut)));
 adminRouter.post('/couriers', (req, res) => {
   const v = validateCourier(req.body);
-  const r = db.prepare('INSERT INTO couriers (name, phone, route_id, active) VALUES (?, ?, ?, ?)').run(v.name, v.phone, v.route_id, v.active);
+  const r = db.prepare('INSERT INTO couriers (name, phone, route_id, capacity, active) VALUES (?, ?, ?, ?, ?)').run(v.name, v.phone, v.route_id, v.capacity, v.active);
   res.status(201).json(courierOut(courierById(r.lastInsertRowid)));
 });
 /** Edit, or deactivate with { active: false } — a deactivated courier can no longer sign in. */
 adminRouter.put('/couriers/:id', (req, res) => {
   const c = courierById(req.params.id);
   const v = validateCourier(req.body, c);
-  db.prepare('UPDATE couriers SET name = ?, phone = ?, route_id = ?, active = ? WHERE id = ?').run(v.name, v.phone, v.route_id, v.active, c.id);
+  db.prepare('UPDATE couriers SET name = ?, phone = ?, route_id = ?, capacity = ?, active = ? WHERE id = ?').run(v.name, v.phone, v.route_id, v.capacity, v.active, c.id);
   res.json(courierOut(courierById(c.id)));
 });
 /** A new 8-digit access code for the Courier View. Shown once; only its hash is stored. */

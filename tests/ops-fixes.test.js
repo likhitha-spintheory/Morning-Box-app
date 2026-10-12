@@ -34,7 +34,7 @@ const dates = orderableDates(new Date(), 14).map(isoDate);
 const yesterday = addDaysIso(dubaiTodayIso(), -1);
 const profile = { eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
 const address = { building: 'Gate Village, Building 3', unit: 'Level 4' };
-const QC = { order: true, components: true, size: true, addons: true, allergy: true, packaging: true, labels: true };
+const QC = { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true };
 async function order(mobile, date, p = profile) {
   const a = await signIn(mobile);
   await call('PUT', '/me/profile', p, a);

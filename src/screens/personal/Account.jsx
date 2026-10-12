@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { get, post, put, patch, del, setToken } from '../../api.js';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Screen, TopBar, Footer, Icon, Logo, TabBar, Switch, Qty, Money, Chip, PhoneField, InfoTip } from '../../components/ui.jsx';
+import { Screen, TopBar, Footer, Icon, Logo, TabBar, Switch, Qty, Money, Chip, PhoneField, InfoTip, PhotoPicker } from '../../components/ui.jsx';
 import { download, shareText } from '../../api.js';
 import { useUnread } from '../Notifications.jsx';
 import { LEGAL_PAGES } from '../Legal.jsx';
@@ -323,6 +323,7 @@ export function OrderDay() {
   const [reporting, setReporting] = useState(false);
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
+  const [photo, setPhoto] = useState('');
   const [reportError, setReportError] = useState('');
   const day = order?.days.find(d => d.date === date);
   const live = !!day && !day.cancelled && trackingStage(day) < 3 && date <= todayIso();
@@ -355,8 +356,8 @@ export function OrderDay() {
   const sendReport = async () => {
     setBusy(true); setReportError('');
     try {
-      const o = await post(`/orders/${id}/days/${date}/issue`, { reason, note: note.trim() });
-      set(s => replaceOrder(s, o)); setReporting(false); setReason(''); setNote('');
+      const o = await post(`/orders/${id}/days/${date}/issue`, { reason, note: note.trim(), ...(photo ? { photo } : {}) });
+      set(s => replaceOrder(s, o)); setReporting(false); setReason(''); setNote(''); setPhoto('');
     } catch (e) { setReportError(e.message); } finally { setBusy(false); }
   };
   const steps = [
@@ -436,6 +437,7 @@ export function OrderDay() {
             <div className="chips">{ISSUE_REASONS.map(r => <Chip key={r} on={reason === r} onClick={() => setReason(r)}>{r}</Chip>)}</div>
             <div className="field"><label htmlFor="rp-n">Tell us more <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
               <input id="rp-n" className="input" maxLength={500} value={note} onChange={e => setNote(e.target.value)} /></div>
+            <PhotoPicker value={photo} onChange={setPhoto} />
             {reason === 'Allergy concern' && <span className="help" style={{ fontSize: 15 }}>If anyone is having a reaction, call 998 for an ambulance first.</span>}
             <ErrorBanner>{reportError}</ErrorBanner>
             <div className="grid-2"><button type="button" className="btn-secondary" onClick={() => setReporting(false)}>Not now</button>

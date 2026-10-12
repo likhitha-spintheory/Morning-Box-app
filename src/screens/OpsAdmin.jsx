@@ -184,7 +184,7 @@ export function Couriers({ call }) {
           <tbody>{list.map(c => (
             <Fragment key={c.id}>
               <tr className={c.active ? '' : 'warn'}>
-                <td><b>{c.routeId}</b></td><td>{c.name}</td><td>{c.phone || '—'}</td>
+                <td><b>{c.routeId}</b>{c.capacity ? <span className="xs"><br />up to {c.capacity} boxes / window</span> : null}</td><td>{c.name}</td><td>{c.phone || '—'}</td>
                 <td><span className={`status ${c.active ? 'ok' : 'off'}`}>{c.active ? 'Active' : 'Inactive'}</span>{c.active && !c.hasAccessCode ? <><br /><small>No access code yet</small></> : null}</td>
                 <td>
                   <button type="button" className="btn-text" onClick={() => setEditing(editing === c.id ? null : c.id)}>{editing === c.id ? 'Close' : 'Edit'}</button>
@@ -203,14 +203,15 @@ export function Couriers({ call }) {
 }
 
 function CourierForm({ c, busy, onSave }) {
-  const [v, setV] = useState({ name: c?.name || '', phone: c?.phone || '', routeId: c?.routeId || '' });
+  const [v, setV] = useState({ name: c?.name || '', phone: c?.phone || '', routeId: c?.routeId || '', capacity: c?.capacity ?? '' });
   const set = k => e => setV(x => ({ ...x, [k]: e.target.value }));
   return (
     <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start', alignItems: 'flex-end' }}>
       <Field label="Name"><input className="input" style={{ width: 200 }} value={v.name} onChange={set('name')} /></Field>
       <Field label="Mobile"><input className="input" style={{ width: 170 }} inputMode="tel" value={v.phone} onChange={set('phone')} /></Field>
       <Field label="Route id"><input className="input" style={{ width: 120 }} placeholder="e.g. R1" value={v.routeId} onChange={set('routeId')} /></Field>
-      <button type="button" className="btn-secondary" style={small} disabled={busy || !v.name.trim() || !v.routeId.trim()} onClick={() => onSave(v)}>{c ? 'Save' : 'Add courier'}</button>
+      <Field label="Boxes per window"><input className="input" style={{ width: 130 }} inputMode="numeric" placeholder="No limit" value={v.capacity} onChange={e => setV(x => ({ ...x, capacity: e.target.value.replace(/D/g, '').slice(0, 3) }))} /></Field>
+      <button type="button" className="btn-secondary" style={small} disabled={busy || !v.name.trim() || !v.routeId.trim()} onClick={() => onSave({ ...v, capacity: v.capacity === '' ? '' : Number(v.capacity) })}>{c ? 'Save' : 'Add courier'}</button>
     </div>
   );
 }

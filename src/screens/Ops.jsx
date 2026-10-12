@@ -178,12 +178,20 @@ function Exceptions({ items, busy, act, call }) {
           <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px', alignSelf: 'flex-start' }} disabled={busy || !form.kind} onClick={() => act('POST', '/exceptions', form).then(ok => ok && setForm({ ref: '', kind: '', note: '', owner: '', action: '' }))}>Log it</button>
         </div>
       </details>
-      {list.slice(0, 150).map(x => <ExceptionCard key={x.id} x={x} busy={busy} act={act} />)}
+      {list.slice(0, 150).map(x => <ExceptionCard key={x.id} x={x} busy={busy} act={act} call={call} />)}
       {!list.length && <p className="help">No open exceptions.</p>}
     </section>
   );
 }
-function ExceptionCard({ x, busy, act }) {
+/** The customer's photo from a problem report, loaded on request. */
+function ExceptionPhoto({ id, call }) {
+  const [src, setSrc] = useState('');
+  const [err, setErr] = useState('');
+  if (src) return <img src={src} alt="Photo from the customer" style={{ maxWidth: 320, borderRadius: 12 }} />;
+  return <span className="row" style={{ gap: 8, justifyContent: 'flex-start' }}><button type="button" className="btn-text" onClick={() => call('GET', `/exceptions/${id}/photo`).then(r => setSrc(r.photo)).catch(e => setErr(e.message))}>View customer’s photo</button>{err && <span className="xs">{err}</span>}</span>;
+}
+
+function ExceptionCard({ x, busy, act, call }) {
   const [v, setV] = useState({ owner: x.owner || '', action: x.action || '', cause: x.cause || '', responsibleParty: x.responsible_party || '', resolution: '' });
   const set = k => e => setV(f => ({ ...f, [k]: e.target.value }));
   return (
@@ -193,6 +201,7 @@ function ExceptionCard({ x, busy, act }) {
         <span className="xs">{x.ref} · {x.created_at}</span>
       </div>
       <span className="help">{x.note}</span>
+      {!!x.has_photo && <ExceptionPhoto id={x.id} call={call} />}
       {x.resolved ? <span className="xs">Resolved {x.resolved_at} by {x.owner || '—'} — {x.resolution}{x.cause ? ` · Cause: ${x.cause}` : ''}</span> : (
         <>
           <div className="grid-2">

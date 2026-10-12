@@ -346,3 +346,47 @@ export function AreaField({ id, value, onChange, invalid }) {
       </select></div>
   );
 }
+
+/** Shrink a photo on the device to a small JPEG data URL (≤ ~120 KB) before it is sent. */
+async function shrinkPhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = url; });
+    for (const [max, q] of [[1000, 0.72], [800, 0.6], [600, 0.5]]) {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const data = c.toDataURL('image/jpeg', q);
+      if (data.length <= 170_000) return data;
+    }
+    throw new Error('too large');
+  } finally { URL.revokeObjectURL(url); }
+}
+
+/** Optional photo on a problem report (MB-OPS-001 §10 — never required). */
+export function PhotoPicker({ value, onChange }) {
+  const [err, setErr] = useState('');
+  const pick = async e => {
+    const f = e.target.files?.[0]; e.target.value = '';
+    if (!f) return;
+    setErr('');
+    try { onChange(await shrinkPhoto(f)); } catch { setErr('We couldn’t use that photo — try another one.'); }
+  };
+  return (
+    <div className="stack gap-8">
+      {value ? (
+        <div className="row" style={{ gap: 12, justifyContent: 'flex-start' }}>
+          <img src={value} alt="Your photo" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 12 }} />
+          <button type="button" className="btn-text" onClick={() => onChange('')}>Remove photo</button>
+        </div>
+      ) : (
+        <label className="btn-text" style={{ alignSelf: 'flex-start', cursor: 'pointer' }}>
+          Add a photo <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span>
+          <input type="file" accept="image/*" onChange={pick} style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }} />
+        </label>
+      )}
+      {err && <span className="xs" role="alert">{err}</span>}
+    </div>
+  );
+}

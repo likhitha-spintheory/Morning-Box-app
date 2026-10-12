@@ -102,6 +102,7 @@ function Delivery({ d, me, busy, act }) {
   const [count, setCount] = useState({});
   const [point, setPoint] = useState('');
   const [fail, setFail] = useState({ open: false, reason: '', note: '' });
+  const [late, setLate] = useState({ open: false, eta: '', note: '' });
   const [label, cls] = badge(d);
   const points = me?.points?.[d.kind] || [];
   const done = d.stage >= 3;
@@ -166,6 +167,19 @@ function Delivery({ d, me, busy, act }) {
               <input className="input" style={{ minHeight: 52 }} placeholder="What happened (optional)" aria-label="Note" value={fail.note} onChange={e => setFail(x => ({ ...x, note: e.target.value }))} />
               <button type="button" className="btn-secondary" style={big} disabled={busy || !fail.reason} onClick={() => act(`${path}/failed`, { reason: fail.reason, note: fail.note.trim() }).then(ok => ok && setFail({ open: false, reason: '', note: '' }))}>Record failed delivery</button>
               <span className="xs">Morning Box will contact the customer. Don’t leave the boxes unattended.</span>
+            </div>
+          )}
+        </div>
+      )}
+      {/* Running late (DLV §6, OPS §6): the customer is told the new time before the window ends. */}
+      {['Picked Up', 'Out for Delivery'].includes(d.deliveryState) && !done && (
+        <div className="stack gap-8">
+          {d.lateNote && <span className="xs">Customer told: arriving around <b>{d.lateNote}</b></span>}
+          {!late.open ? <button type="button" className="btn-text" style={{ alignSelf: 'flex-start' }} onClick={() => setLate(x => ({ ...x, open: true }))}>Running late?</button> : (
+            <div className="stack gap-8">
+              <input className="input" style={{ minHeight: 52 }} placeholder="New arrival time, e.g. 9:20 AM" aria-label="New arrival time" value={late.eta} onChange={e => setLate(x => ({ ...x, eta: e.target.value }))} />
+              <input className="input" style={{ minHeight: 52 }} placeholder="Why (optional), e.g. traffic" aria-label="Reason for delay" value={late.note} onChange={e => setLate(x => ({ ...x, note: e.target.value }))} />
+              <button type="button" className="btn-secondary" style={big} disabled={busy || !late.eta.trim()} onClick={() => act(`${path}/late`, { eta: late.eta.trim(), note: late.note.trim() }).then(ok => ok && setLate({ open: false, eta: '', note: '' }))}>Tell the customer</button>
             </div>
           )}
         </div>

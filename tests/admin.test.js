@@ -124,7 +124,7 @@ test('Bakery View: confirm plan, prepare, QC before Ready; handover must match; 
   assert.equal((await call('POST', '/bakery/plan/start', { date: dates[3] }, {}, B)).body.started >= 1, true);
   assert.equal((await call('GET', `/orders/${o.id}`, null, a)).body.days[0].stage, 1, 'customer sees Being prepared');
   assert.equal((await call('POST', `/bakery/days/personal/${id}/state`, { state: 'Ready', qc: { order: true } }, {}, B)).body.error, 'qc_required', 'every check is needed');
-  const qc = { order: true, components: true, size: true, addons: true, allergy: true, packaging: true, labels: true };
+  const qc = { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true };
   assert.equal((await call('POST', `/bakery/days/personal/${id}/state`, { state: 'Ready', qc }, {}, B)).status, 200);
   assert.equal((await ops('POST', `/days/personal/${id}/handover`, { boxes: 1, specialBoxes: 0 })).body.error, 'route_required', 'courier planned before pickup');
   await ops('POST', `/days/personal/${id}/route`, { routeId: 'R1' });

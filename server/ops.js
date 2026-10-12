@@ -11,7 +11,7 @@ import { dayRows, readyBy as rbBy } from './days.js';
 import { DELIVERY_COST } from './settings.js';
 import { allocate } from './allocation.js';
 export { allocate };
-import { registerFulfilmentRoutes, flagAtRisk, demoStep } from './fulfilment.js';
+import { registerFulfilmentRoutes, flagAtRisk, demoStep, reportLate } from './fulfilment.js';
 export { flagAtRisk };
 import { requireUser, checkStaffCode } from './auth.js';
 import { notify } from './notify.js';
@@ -86,18 +86,7 @@ export function allocateAtCutoff(now = new Date()) {
 
 /** Running late: tell the customer the new time. Shown on their order until it is delivered. */
 opsRouter.post('/days/:kind/:id/late', (req, res) => {
-  const kind = req.params.kind;
-  if (!['personal', 'business'].includes(kind)) throw bad('kind_invalid', 'kind must be personal or business');
-  const eta = String(req.body.eta || '').trim().slice(0, 40);
-  if (!eta) throw bad('eta_required', 'Enter the new time, e.g. 9:20 AM.');
-  const table = kind === 'business' ? 'business_days' : 'order_days';
-  const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(Number(req.params.id));
-  if (!row) throw new ApiError(404, 'not_found', 'Unknown delivery.');
-  if (row.cancelled || row.stage >= 3) throw bad('not_open', 'This delivery is already closed.');
-  db.prepare(`UPDATE ${table} SET late_note = ?, at_risk = 1 WHERE id = ?`).run(eta, row.id);
-  const owner = db.prepare(`SELECT user_id FROM ${kind === 'business' ? 'business_orders' : 'orders'} WHERE id = ?`).get(row.order_id);
-  if (kind === 'personal') logEvent(row.order_id, row.date, 'late', `Running late — now expected around ${eta}`);
-  if (owner) notify(owner.user_id, `${row.order_id}:${row.date}`, 'late', `Sorry — your breakfast for ${prettyDate(row.date)} is running late. It should arrive around ${eta}.`);
+  reportLate(req.params.kind, req.params.id, req.body.eta);
   res.json({ ok: true });
 });
 
@@ -150,7 +139,7 @@ opsRouter.get('/report', (req, res) => {
       const parts = kind === 'personal' ? (d.bakery_id ? [{ bakeryId: d.bakery_id, boxes: 1 }] : []) : (parse(d.allocation) || []);
       const ready = rbBy(d.date, d.window, parts[0]?.bakeryId);
       const picked = d.picked_up_at ? new Date(d.picked_up_at) : null;
-      all.push({ kind, d, parts, price: d[price], boxes: kind === 'personal' ? 1 : d.people,
+      all.push({ kind, d, parts, price: d[price], payBase: kind === 'business' ? (d.gross ?? d.total) : d.price, boxes: kind === 'personal' ? 1 : d.people,
         readyOnTime: d.ready_at ? new Date(d.ready_at) <= ready : null, pickupLate: picked ? picked > new Date(ready.getTime() + 15 * 60e3) : null,
         issues: db.prepare(`SELECT reason FROM customer_issues WHERE order_id = ? AND date = ?`).all(d.order_id, d.date).map(x => x.reason),
         refunds: (d.refund || 0) });
@@ -189,8 +178,9 @@ opsRouter.get('/report', (req, res) => {
   const finance = { payments: 0, refunds: 0, bakeryPayable: 0, deliveryCost: 0, margin: 0 };
   for (const x of all) {
     const fulfilled = x.d.stage === 3 || (x.d.bakery_state && x.d.bakery_state !== 'Unable to Fulfil');
-    /* Bakery payable: each bakery's share of the breakfast price at its agreed payout percentage (BKY §11). */
-    const payable = fulfilled ? x.parts.reduce((t, p) => t + x.price * (p.boxes / x.boxes) * (payout[p.bakeryId] ?? 60) / 100, 0) : 0;
+    /* Bakery payable: each bakery's share of the breakfast price at its agreed payout percentage (BKY §11).
+       Business volume discounts are Morning Box's cost, not the bakery's: payable uses the price before discount. */
+    const payable = fulfilled ? x.parts.reduce((t, p) => t + x.payBase * (p.boxes / x.boxes) * (payout[p.bakeryId] ?? 60) / 100, 0) : 0;
     finance.payments += x.price; finance.refunds += x.refunds; finance.bakeryPayable += payable; finance.deliveryCost += fulfilled ? deliveryCost : 0;
   }
   finance.margin = finance.payments - finance.refunds - finance.bakeryPayable - finance.deliveryCost;
@@ -250,7 +240,14 @@ opsRouter.get('/report', (req, res) => {
 });
 
 /* ---------- Exceptions (MB-OPS-001 §8): Safety first; every exception has an Owner, Action and Resolution ---------- */
-opsRouter.get('/exceptions', (_req, res) => res.json(db.prepare('SELECT * FROM exceptions ORDER BY resolved, priority, created_at DESC LIMIT 300').all()));
+opsRouter.get('/exceptions', (_req, res) => res.json(db.prepare(`SELECT e.*, EXISTS (SELECT 1 FROM customer_issues i WHERE i.exception_id = e.id AND i.photo IS NOT NULL) AS has_photo
+  FROM exceptions e ORDER BY resolved, priority, created_at DESC LIMIT 300`).all()));
+/* The customer's photo for an exception raised from a problem report (OPS §10). */
+opsRouter.get('/exceptions/:id/photo', (req, res) => {
+  const p = db.prepare('SELECT photo FROM customer_issues WHERE exception_id = ? AND photo IS NOT NULL ORDER BY id DESC').get(Number(req.params.id));
+  if (!p) throw new ApiError(404, 'not_found', 'No photo for this exception.');
+  res.json({ photo: p.photo });
+});
 opsRouter.get('/exceptions/kinds', (_req, res) => res.json(EXCEPTION_KINDS));
 opsRouter.post('/exceptions', (req, res) => {
   const id = raiseException({ ref: String(req.body.ref || 'manual').slice(0, 60), kind: req.body.kind, note: req.body.note, category: req.body.category,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import {
-  Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch, InfoTip, AreaField
+  Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch, InfoTip, AreaField, PhotoPicker
 } from '../../components/ui.jsx';
 import { useStore, emptyBusiness } from '../../state/store.jsx';
 import { get, post, patch, del, download, applySession, setToken, resetPersonal, newIdempotencyKey, track } from '../../api.js';
@@ -1328,10 +1328,11 @@ function ReportIssue({ order, day, set }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
+  const [photo, setPhoto] = useState('');
   const [state, setState] = useState({ busy: false, error: '', sent: false });
   const send = async () => {
     setState({ busy: true, error: '', sent: false });
-    try { const res = await post(`/business/orders/${order.id}/days/${day.date}/issue`, { reason, note }); set(s => putOrder(s, res)); setState({ busy: false, error: '', sent: true }); setOpen(false); }
+    try { const res = await post(`/business/orders/${order.id}/days/${day.date}/issue`, { reason, note, ...(photo ? { photo } : {}) }); set(s => putOrder(s, res)); setState({ busy: false, error: '', sent: true }); setOpen(false); }
     catch (e) { setState({ busy: false, error: e.message, sent: false }); }
   };
   if (state.sent) return <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2.4} />Thanks — our team has your report and will contact you.</div>;
@@ -1342,6 +1343,7 @@ function ReportIssue({ order, day, set }) {
       <div className="chips" role="radiogroup" aria-label="Problem">{BIZ_ISSUES.map(r => <Chip key={r} on={reason === r} onClick={() => setReason(r)}>{r}</Chip>)}</div>
       {reason === 'Allergy concern' && <span className="help">If anyone is having a reaction, call 998 first.</span>}
       <input className="input" maxLength={500} placeholder="Details (optional)" aria-label="Details" value={note} onChange={e => setNote(e.target.value)} />
+      <PhotoPicker value={photo} onChange={setPhoto} />
       <ApiErr error={state.error} />
       <button type="button" className="btn" disabled={!reason || state.busy} onClick={send}>{state.busy ? 'Sending…' : 'Send report'}</button>
     </section>

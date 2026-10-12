@@ -4,8 +4,8 @@ import { get, post } from '../api.js';
 import { Screen, TopBar, Icon } from '../components/ui.jsx';
 import { useStore } from '../state/store.jsx';
 
-const ICON = { confirmed: 'check', on_the_way: 'truck', delivered: 'home', late: 'clock', refund: 'card', issue_update: 'info', reminder: 'coffee', safety_review: 'shield', cancelled: 'close', support_reply: 'mail', changed: 'card' };
-const TITLE = { confirmed: 'Order confirmed', on_the_way: 'On its way', delivered: 'Delivered', late: 'Running late', refund: 'Refund', issue_update: 'Your report', reminder: 'Reminder', safety_review: 'Please review', cancelled: 'Cancelled', support_reply: 'Reply from Morning Box', changed: 'Order updated' };
+const ICON = { prepared_by: 'check', confirmed: 'check', on_the_way: 'truck', delivered: 'home', late: 'clock', refund: 'card', issue_update: 'info', reminder: 'coffee', safety_review: 'shield', cancelled: 'close', support_reply: 'mail', changed: 'card' };
+const TITLE = { prepared_by: 'Your bakery', confirmed: 'Order confirmed', on_the_way: 'On its way', delivered: 'Delivered', late: 'Running late', refund: 'Refund', issue_update: 'Your report', reminder: 'Reminder', safety_review: 'Please review', cancelled: 'Cancelled', support_reply: 'Reply from Morning Box', changed: 'Order updated' };
 
 /** Where a notification leads: the morning it is about, or Help for support replies. */
 function linkFor(n) {
