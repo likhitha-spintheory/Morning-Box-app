@@ -14,7 +14,7 @@ const small = { width: 'auto', padding: '0 14px', minHeight: 40 };
 
 export default function Bakery() {
   const [code, setCode] = useState(() => { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } });
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(() => { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } });
   const [me, setMe] = useState(null);
   const [date, setDate] = useState(() => addDaysIso(dubaiTodayIso(), 1));
   const [plan, setPlan] = useState(null);
@@ -22,6 +22,8 @@ export default function Bakery() {
   const [view, setView] = useState('plan');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const save = k => { try { sessionStorage.setItem(KEY, k); } catch { /* tab only */ } setCode(k); };
 
   const call = useCallback(async (method, path, body) => {
@@ -34,27 +36,44 @@ export default function Bakery() {
     if (!code) return;
     setError('');
     try {
-      setMe(await call('GET', '/me'));
-      setPlan(await call('GET', `/plan?date=${date}`));
-      setLabels((await call('GET', `/labels?date=${date}`)).labels);
-    } catch (e) { setError(e.message); if (e.status === 401) save(''); }
+      const [bakery, production, labelData] = await Promise.all([
+        call('GET', '/me'),
+        call('GET', `/plan?date=${date}`),
+        call('GET', `/labels?date=${date}`)
+      ]);
+      setMe(bakery);
+      setPlan(production);
+      setLabels(labelData.labels);
+    } catch (e) {
+      setError(e.message);
+      if (e.status === 401) { save(''); setMe(null); }
+    }
   }, [code, date, call]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!code) { setOpening(false); return; }
+    let active = true;
+    setOpening(true);
+    load().finally(() => { if (active) setOpening(false); });
+    return () => { active = false; };
+  }, [load, attempt]);
   const act = async (method, path, body) => {
     setBusy(true); setError('');
     try { await call(method, path, body); await load(); return true; } catch (e) { setError(e.message); return false; } finally { setBusy(false); }
   };
 
-  if (!code) {
+  if (!me) {
     return (
       <Screen>
         <TopBar back="/" close={null}><span className="topbar-title">Partner bakery</span></TopBar>
         <main className="screen-main" style={{ paddingTop: 24, gap: 18 }}>
           <h1 className="h-display" style={{ fontSize: 34 }}>Bakery sign-in</h1>
           <p className="help">Use the access code Morning Box gave your bakery.</p>
-          <div className="field"><label htmlFor="bk-c">Access code</label>
-            <input id="bk-c" className="input" inputMode="numeric" autoComplete="off" value={draft} onChange={e => setDraft(e.target.value.replace(/\D/g, '').slice(0, 8))} onKeyDown={e => e.key === 'Enter' && draft && save(draft)} /></div>
-          <button type="button" className="btn" disabled={draft.length < 8} onClick={() => save(draft)}>Open my production plan</button>
+          <form className="stack gap-12" onSubmit={e => { e.preventDefault(); if (draft.length === 8) { setOpening(true); save(draft); setAttempt(n => n + 1); } }}>
+            <div className="field"><label htmlFor="bk-c">Access code</label>
+              <input id="bk-c" className="input" inputMode="numeric" autoComplete="off" value={draft} onChange={e => setDraft(e.target.value.replace(/\D/g, '').slice(0, 8))} /></div>
+            <button type="submit" className="btn" disabled={draft.length < 8 || opening}>{opening ? 'Opening your production plan…' : 'Open my production plan'}</button>
+          </form>
+          {error && <div className="banner-err" role="alert"><Icon name="alert" size={18} stroke={2} />{error}</div>}
         </main>
       </Screen>
     );
