@@ -51,8 +51,8 @@ run('node scripts/android-native.mjs');
 const wrapper = join('android', 'gradle', 'wrapper', 'gradle-wrapper.properties');
 writeFileSync(wrapper, readFileSync(wrapper, 'utf8').replace(/-all\.zip/, '-bin.zip'));
 run('npx cap sync android');
-writeFileSync(join('android', 'local.properties'), `sdk.dir=${sdk}\n`);
-const gradlew = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
+writeFileSync(join('android', 'local.properties'), `sdk.dir=${sdk.replace(/\\/g, '/')}\n`);
+const gradlew = process.platform === 'win32' ? '.\\gradlew.bat' : './gradlew';
 mkdirSync('apk', { recursive: true });
 if (release) {
   run(`${gradlew} assembleRelease bundleRelease --console=plain`, { cwd: 'android' });
