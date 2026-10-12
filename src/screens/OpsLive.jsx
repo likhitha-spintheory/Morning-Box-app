@@ -207,7 +207,7 @@ export function ProductionPlan({ plan, date, children }) {
     <div className="card stack gap-12 print-block" style={{ padding: 18 }}>
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <h2 className="h3">{plan.bakery} <span className="xs">· {date}</span></h2>
-        <span className="xs">{plan.boxes} boxes{plan.special ? ` · ${plan.special} special` : ''}{plan.readyBy ? ` · first ready by ${plan.readyBy}` : ''}{plan.status ? ` · plan ${plan.status.toLowerCase()}` : ''}</span>
+        <span className="xs">{plan.boxes} boxes{plan.special ? ` · ${plan.special} special` : ''}{plan.readyBy ? ` · first ready by ${plan.readyBy}` : ''}{plan.status?.status ? ` · plan ${plan.status.status.toLowerCase()}` : ''}</span>
       </div>
       {children}
       <span className="eyebrow grey">Production</span>
