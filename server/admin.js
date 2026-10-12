@@ -17,7 +17,9 @@ adminRouter.get('/pricing', (_req, res) => {
   /* Which breakfasts sit at each internal price level (never shown to customers, MB-BOX-001 §8). */
   const levels = {};
   for (const r of BASE_RECOMMENDATIONS) (levels[priceLevel(r)] ||= []).push(describe(r));
-  res.json({ pricing: getPricing(), levels, history: pricingHistory() });
+  /* Bread add-ons are priced per bread (MB-BOX-001 §8, MB-PRO-001 §14.1). */
+  const breads = ADDON_BREAD.filter(id => COMPONENTS[id]).map(id => ({ id, name: COMPONENTS[id].name, sample: !!COMPONENTS[id].sample }));
+  res.json({ pricing: getPricing(), levels, breads, history: pricingHistory() });
 });
 adminRouter.put('/pricing', (req, res) => res.json({ pricing: savePricing(req.body) }));
 adminRouter.post('/pricing/reset', (_req, res) => res.json({ pricing: resetPricing() }));

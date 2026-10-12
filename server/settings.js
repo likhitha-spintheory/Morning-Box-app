@@ -2,9 +2,9 @@
    and company / support details. Saved values are applied to the shared
    objects in place, so every route prices and prints from the same numbers. */
 import { db, json, parse } from './db.js';
-import { applyPricing, pricingSnapshot, DEFAULT_PRICING, PRICE_LEVELS, ADDON_PRICES } from '../src/domain/standards.js';
+import { applyPricing, pricingSnapshot, DEFAULT_PRICING, PRICE_LEVELS, ADDON_PRICES, expandBreadPrices } from '../src/domain/standards.js';
 import { SUPPLIER, SUPPORT } from './company.js';
-import { LIBRARY_SETTINGS, setLibrarySettings } from '../src/domain/library.js';
+import { LIBRARY_SETTINGS, setLibrarySettings, COMPONENTS } from '../src/domain/library.js';
 import { menuSnapshot, applyMenu, validateMenu, DEFAULT_MENU } from '../src/domain/menu.js';
 import { bad, DELIVERY_CAPACITY } from './rules.js';
 
@@ -30,7 +30,11 @@ function validatePricing(p) {
   if (!money(p.sizeAdjustment?.large, { min: 0 }) || p.sizeAdjustment.large === 0) throw bad('pricing_invalid', 'Large must be priced above Regular (a positive adjustment).');
   const lowest = Math.min(...Object.keys(PRICE_LEVELS).map(k => p.priceLevels[k]));
   if (lowest + p.sizeAdjustment.light <= 0) throw bad('pricing_invalid', 'A Light breakfast would cost nothing — reduce the Light adjustment.');
-  for (const k of ['half', 'whole']) if (!money(p.addons?.bread?.[k], { min: 1 })) throw bad('pricing_invalid', `Bread ${k} loaf price must be an amount in AED.`);
+  /* Each bread has its own half / whole price; a single { half, whole } (older saves) applies to every bread. */
+  const bread = expandBreadPrices(p.addons?.bread);
+  for (const id of Object.keys(ADDON_PRICES.breads)) for (const k of ['half', 'whole']) {
+    if (!money(bread[id]?.[k], { min: 1 })) throw bad('pricing_invalid', `${COMPONENTS[id]?.name || id} ${k} loaf price must be an amount in AED.`);
+  }
   for (const k of Object.keys(ADDON_PRICES.pastry)) if (!money(p.addons?.pastry?.[k], { min: 1 })) throw bad('pricing_invalid', `${k} price must be an amount in AED.`);
   if (!Array.isArray(p.volumeDiscount) || p.volumeDiscount.length > 6) throw bad('pricing_invalid', 'Up to 6 discount tiers.');
   for (const t of p.volumeDiscount) {
@@ -42,7 +46,7 @@ function validatePricing(p) {
     indicative: !!p.indicative,
     priceLevels: Object.fromEntries(Object.keys(PRICE_LEVELS).map(k => [k, p.priceLevels[k]])),
     sizeAdjustment: { light: p.sizeAdjustment.light, regular: 0, large: p.sizeAdjustment.large },
-    addons: { bread: { half: p.addons.bread.half, whole: p.addons.bread.whole }, pastry: Object.fromEntries(Object.keys(ADDON_PRICES.pastry).map(k => [k, p.addons.pastry[k]])) },
+    addons: { bread: Object.fromEntries(Object.keys(ADDON_PRICES.breads).map(id => [id, { half: bread[id].half, whole: bread[id].whole }])), pastry: Object.fromEntries(Object.keys(ADDON_PRICES.pastry).map(k => [k, p.addons.pastry[k]])) },
     volumeDiscount: p.volumeDiscount.map(t => ({ min: t.min, pct: Math.round(t.pct * 10000) / 10000 })).sort((a, b) => b.min - a.min)
   };
 }
@@ -96,6 +100,7 @@ function menuChanges(before, after) {
   for (const id of Object.keys(before.items)) if (!after.items[id]) out.push(`Removed item ${menuName(before, id)}`);
   for (const [id, b] of Object.entries(after.breakfasts)) {
     if (JSON.stringify(before.breakfasts[id]?.components) !== JSON.stringify(b.components)) out.push(`${id}: ${b.components.map(x => menuName(after, x)).join(' + ')}`);
+    if ((before.breakfasts[id]?.level || '') !== (b.level || '')) out.push(`${id}: price level ${before.breakfasts[id]?.level || 'Auto'} → ${b.level || 'Auto'}`);
   }
   for (const [c, list] of Object.entries(after.priority)) if (JSON.stringify(before.priority[c]) !== JSON.stringify(list)) out.push(`Priority ${c}: ${list.join(' → ')}`);
   return out;

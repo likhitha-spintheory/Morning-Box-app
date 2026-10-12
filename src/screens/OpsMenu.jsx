@@ -3,6 +3,8 @@
    what is inside each one, and the priority order per Morning Type.
    Saved changes apply to the next recommendation (MB-PRO-001 §12, §15.1; MB-REC-001 §7). */
 import { useEffect, useMemo, useState } from 'react';
+import { autoPriceLevel, LEVEL_IDS } from '../domain/recipes.js';
+import { PRICE_LEVELS } from '../domain/standards.js';
 
 const Field = ({ label, children }) => <div className="field" style={{ gap: 6 }}><label>{label}</label>{children}</div>;
 const STYLES = { health: 'Health-Conscious', flexible: 'Flexible' };
@@ -145,14 +147,17 @@ function Breakfasts({ m, lists, name, prefLabel, ctxLabel, setBreakfast }) {
       <div className="row" style={{ gap: 8, justifyContent: 'flex-start', flexWrap: 'wrap' }}>
         {[{ id: 'all', label: 'All' }, ...lists.preferences].map(p => <button key={p.id} type="button" className={`chip${pref === p.id ? ' on' : ''}`} aria-pressed={pref === p.id} onClick={() => setPref(p.id)}>{p.label}</button>)}
       </div>
-      <span className="xs">Portions are set per item; these are the Regular-size compositions. Health-Conscious breakfasts can’t contain Flexible-only items.</span>
+      <span className="xs">Portions are set per item; these are the Regular-size compositions. Health-Conscious breakfasts can’t contain Flexible-only items.
+        Price level: Auto follows the composition (items plus pastry, protein and cheese); choose L1–L4 to set it. Level prices are set in Admin → Pricing and are never shown to customers.</span>
       <div style={{ overflowX: 'auto' }}>
         <table className="ops-table">
-          <thead><tr><th>Breakfast</th><th>What’s inside</th><th>Format note</th></tr></thead>
+          <thead><tr><th>Breakfast</th><th>What’s inside</th><th>Format note</th><th>Price level</th></tr></thead>
           <tbody>{ids.map(id => {
             const [p, style, ctx] = id.split('.');
             const b = m.breakfasts[id];
             const blocked = x => style === 'health' && m.items[x]?.flexibleOnly;
+            const auto = autoPriceLevel(b.components, x => m.items[x]?.category);
+            const level = b.level || auto;
             return (
               <tr key={id}>
                 <td className="xs" style={{ minWidth: 170 }}><b>{prefLabel(p)}</b><br />{STYLES[style]} · {ctxLabel(ctx)}</td>
@@ -174,6 +179,13 @@ function Breakfasts({ m, lists, name, prefLabel, ctxLabel, setBreakfast }) {
                   </div>
                 </td>
                 <td style={{ minWidth: 200 }}><input className="input" style={{ minHeight: 40 }} aria-label="Format note" placeholder="e.g. Ready-to-eat sandwich" value={b.format} onChange={e => setBreakfast(id, { format: e.target.value })} /></td>
+                <td style={{ minWidth: 150 }}>
+                  <select className="input" style={{ minHeight: 40 }} aria-label="Price level" value={b.level || ''} onChange={e => setBreakfast(id, { level: e.target.value })}>
+                    <option value="">Auto ({auto})</option>
+                    {LEVEL_IDS.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                  <span className="xs">{level} · AED {PRICE_LEVELS[level]} Regular{b.level ? '' : ' (auto)'}</span>
+                </td>
               </tr>
             );
           })}</tbody>

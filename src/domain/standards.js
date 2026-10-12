@@ -9,6 +9,8 @@
    is invented; where a standard defers a number, it is marked.
    ============================================================ */
 
+import { ADDON_BREAD, COMPONENTS } from './library.js';
+
 export const CURRENCY = 'AED';
 
 /* ---------- MB-PER-001 Q1 · Eating Style ---------- */
@@ -129,8 +131,13 @@ export const PRICE_LEVELS = { L1: 32, L2: 39, L3: 46, L4: 54 };   // AED, indica
 /* Light is below the Regular base; Large is above it. */
 export const SIZE_ADJUSTMENT = { light: -7, regular: 0, large: 11 };   // AED, indicative
 
+/* MB-BOX-001 §8 / MB-PRO-001 §14.1: every add-on has its own price, so each
+   bread has its own half- and whole-loaf price (keyed by bread id).
+   `bread` keeps the lowest half / whole price ("from" prices) for older screens. */
+const BREAD_DEFAULT = { half: 12, whole: 20 };
 export const ADDON_PRICES = {                                     // AED, indicative
-  bread: { half: 12, whole: 20 },
+  bread: { ...BREAD_DEFAULT },
+  breads: Object.fromEntries(ADDON_BREAD.map(id => [id, { ...BREAD_DEFAULT }])),
   pastry: { 'Plain Croissant': 11, 'Cheese Croissant': 13, 'Pain au Chocolat': 13, 'Fruit Danish': 14, 'Gluten-Free Blueberry Muffin': 15 /* SAMPLE */ }
 };
 
@@ -155,16 +162,29 @@ export const pricingSnapshot = () => ({
   indicative: PRICING.indicative,
   priceLevels: { ...PRICE_LEVELS },
   sizeAdjustment: { ...SIZE_ADJUSTMENT },
-  addons: { bread: { ...ADDON_PRICES.bread }, pastry: { ...ADDON_PRICES.pastry } },
+  addons: { bread: Object.fromEntries(Object.entries(ADDON_PRICES.breads).map(([id, b]) => [id, { ...b }])), pastry: { ...ADDON_PRICES.pastry } },
   volumeDiscount: VOLUME_DISCOUNT.map(t => ({ ...t }))
 });
 export const DEFAULT_PRICING = pricingSnapshot();
+/** Bread prices per bread id. A saved/legacy { half, whole } (one price for every bread) is expanded to each bread. */
+export function expandBreadPrices(b) {
+  if (!b || typeof b !== 'object') return {};
+  if ('half' in b || 'whole' in b) return Object.fromEntries(ADDON_BREAD.map(id => [id, { half: b.half, whole: b.whole }]));
+  return b;
+}
+/** Price of one add-on unit by item id: a bread's half / whole loaf, or a pastry (MB-BOX-001 §8). */
+export function addonPrice(group, item, unit) {
+  if (group === 'bread') return ADDON_PRICES.breads[item]?.[unit] ?? ADDON_PRICES.bread[unit];
+  return ADDON_PRICES.pastry[COMPONENTS[item]?.name] || 12;
+}
 export function applyPricing(p) {
   if (!p || typeof p !== 'object') return;
   if (typeof p.indicative === 'boolean') PRICING.indicative = p.indicative;
   for (const k of Object.keys(PRICE_LEVELS)) if (Number.isFinite(p.priceLevels?.[k])) PRICE_LEVELS[k] = p.priceLevels[k];
   for (const k of ['light', 'large']) if (Number.isFinite(p.sizeAdjustment?.[k])) SIZE_ADJUSTMENT[k] = p.sizeAdjustment[k];
-  for (const k of ['half', 'whole']) if (Number.isFinite(p.addons?.bread?.[k])) ADDON_PRICES.bread[k] = p.addons.bread[k];
+  const bread = expandBreadPrices(p.addons?.bread);
+  for (const id of Object.keys(ADDON_PRICES.breads)) for (const k of ['half', 'whole']) if (Number.isFinite(bread[id]?.[k])) ADDON_PRICES.breads[id][k] = bread[id][k];
+  for (const k of ['half', 'whole']) ADDON_PRICES.bread[k] = Math.min(...Object.values(ADDON_PRICES.breads).map(b => b[k]));
   for (const k of Object.keys(ADDON_PRICES.pastry)) if (Number.isFinite(p.addons?.pastry?.[k])) ADDON_PRICES.pastry[k] = p.addons.pastry[k];
   if (Array.isArray(p.volumeDiscount)) {
     const tiers = p.volumeDiscount.filter(t => Number.isInteger(t?.min) && t.min > 0 && Number.isFinite(t?.pct) && t.pct >= 0 && t.pct < 1)

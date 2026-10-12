@@ -131,10 +131,17 @@ export function describe(recipe) {
  *  product composition and cost, but these levels are not shown as
  *  user-facing budget categories."
  */
+export const LEVEL_IDS = ['L1', 'L2', 'L3', 'L4'];
 export function priceLevel(recipe) {
-  const n = recipe.components.length;
-  const premium = recipe.components.filter(id =>
-    ['Pastry', 'Savory Protein', 'Dairy & Cheese'].includes(COMPONENTS[id].category)).length;
+  /* Admin may set the level per breakfast (Admin → Menu rules); otherwise it follows the composition. */
+  if (LEVEL_IDS.includes(recipe.level)) return recipe.level;
+  return autoPriceLevel(recipe.components);
+}
+/** The default level from the composition: item count plus premium items (pastry, savoury protein, dairy & cheese). */
+export function autoPriceLevel(components, categoryOf = id => COMPONENTS[id]?.category) {
+  const n = components.length;
+  const premium = components.filter(id =>
+    ['Pastry', 'Savory Protein', 'Dairy & Cheese'].includes(categoryOf(id))).length;
   const score = n + premium;
   return score >= 7 ? 'L4' : score >= 6 ? 'L3' : score >= 5 ? 'L2' : 'L1';
 }

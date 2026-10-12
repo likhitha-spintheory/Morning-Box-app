@@ -7,6 +7,7 @@ import { componentName, componentPortion } from '../src/domain/app.js';
 import { recipeById, describe } from '../src/domain/recipes.js';
 import { variantLabel } from '../src/domain/engine.js';
 import { DIETARY, ALLERGENS, cutoffFor } from '../src/domain/standards.js';
+import { COMPONENTS } from '../src/domain/library.js';
 
 /* Readable requirement names for bakery sheets and labels: "Vegan", "Tree nuts". */
 const NAMES = Object.fromEntries([...DIETARY, ...ALLERGENS.map(a => ({ ...a, label: `${a.label.split(' /')[0]}-free` }))].map(x => [x.id, x.label]));
@@ -21,6 +22,16 @@ const hhmm = d => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-di
 /** "Overnight Oats (plant milk base) · 150 g" — the build and approved portion the bakery must make (MB-PRO-001 §15.3). */
 const builtName = (id, variants = {}, size = 'regular', flavour = null) =>
   `${componentName(id)}${variantLabel(id, variants[id]) ? ` (${variantLabel(id, variants[id]).toLowerCase()})` : ''}${id === 'fruitDanish' && flavour ? ` — ${flavour}` : ''} · ${componentPortion(id, size === 'standard' ? 'regular' : size)}`;
+
+/* Preparation standard per item for the bakery sheet (MB-PRO-001 §1, §4): the item's approved note,
+   and bread is served untoasted by default. Not sent to courier or customer views. */
+const prepNote = id => {
+  const k = COMPONENTS[id];
+  if (!k) return '';
+  const note = (k.note || '').trim();
+  return k.category === 'Bread' && !/untoasted/i.test(note) ? [note, 'Served untoasted.'].filter(Boolean).join(' ') : note;
+};
+export const prepStandards = ids => [...new Set(ids)].map(id => ({ item: componentName(id), note: prepNote(id) })).filter(s => s.note);
 
 /* An unresolved Dietary/Allergy exception on the order (e.g. the customer's free-text allergy note):
    the bakery must not accept, prepare or hand it over until operations resolves it (MB-BKY-001 §3). */
@@ -54,7 +65,7 @@ export function personalRow(d) {
       components: cfg.components.map(id => builtName(id, cfg.variants, cfg.size, cfg.danishFlavour)), componentIds: cfg.components,
       swaps: (cfg.userSwaps || []).map(s => `${componentName(s.to)} instead of ${componentName(s.from)}`),
       substitutions: (cfg.substitutions || []).map(s => `${componentName(s.to)} instead of ${componentName(s.from)}`),
-      addons: cfg.addons || [], special
+      addons: cfg.addons || [], special, standards: prepStandards([...cfg.components, ...(cfg.addons || []).map(a => a.item)])
     }],
     items: [...cfg.components, ...(cfg.addons || []).map(a => a.item)], flavours: [...(cfg.addons || []).filter(a => a.flavour).map(a => a.flavour), ...(cfg.danishFlavour ? [cfg.danishFlavour] : [])],
     address: parse(d.address), ...fulfilment({ ...d, kind: 'personal' }, d.date, d.window)
@@ -69,11 +80,12 @@ export function businessRow(d) {
     stage: d.stage, price: d.total, allocation: parse(d.allocation), glutenFree: specials.some(s => needsGlutenFreeHandling(s.dietary, s.allergies)),
     needs: needsFor([...new Set(specials.flatMap(s => s.dietary))], [...new Set(specials.flatMap(s => s.allergies))]),
     production: [
-      ...lines.map(l => ({ qty: l.qty, size: l.size, recipeId: l.recipeId, box: describe(recipeById[l.recipeId] || { components: [] }), format: recipeById[l.recipeId]?.format || null, components: (recipeById[l.recipeId]?.components || []).map(id => builtName(id, {}, l.size)), componentIds: recipeById[l.recipeId]?.components || [], addons: [] })),
+      ...lines.map(l => ({ qty: l.qty, size: l.size, recipeId: l.recipeId, box: describe(recipeById[l.recipeId] || { components: [] }), format: recipeById[l.recipeId]?.format || null, components: (recipeById[l.recipeId]?.components || []).map(id => builtName(id, {}, l.size)), componentIds: recipeById[l.recipeId]?.components || [], addons: [], standards: prepStandards(recipeById[l.recipeId]?.components || []) })),
       ...specials.map(s => ({
         qty: s.qty, size: s.size || 'regular', recipeId: s.recipeId, box: describe({ ...recipeById[s.recipeId], components: s.components || recipeById[s.recipeId]?.components || [] }), format: recipeById[s.recipeId]?.format || null,
         components: (s.components || recipeById[s.recipeId]?.components || []).map(id => builtName(id, s.variants, s.size || 'regular')), componentIds: s.components || recipeById[s.recipeId]?.components || [],
-        substitutions: (s.substitutions || []).map(x => `${componentName(x.to)} instead of ${componentName(x.from)}`), addons: [], special: readable([...s.dietary, ...s.allergies])
+        substitutions: (s.substitutions || []).map(x => `${componentName(x.to)} instead of ${componentName(x.from)}`), addons: [], special: readable([...s.dietary, ...s.allergies]),
+        standards: prepStandards(s.components || recipeById[s.recipeId]?.components || [])
       }))
     ],
     items: [...new Set([...lines.flatMap(l => recipeById[l.recipeId]?.components || []), ...specials.flatMap(s => s.components || recipeById[s.recipeId]?.components || [])])], flavours: [],

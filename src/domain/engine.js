@@ -16,7 +16,7 @@
    unsupported AI claims.
    ============================================================ */
 
-import { CONTEXT_PRIORITY, REASON, PRICE_LEVELS, SIZE_ADJUSTMENT, ADDON_PRICES, volumeDiscount } from './standards.js';
+import { CONTEXT_PRIORITY, REASON, PRICE_LEVELS, SIZE_ADJUSTMENT, addonPrice as unitPrice, volumeDiscount } from './standards.js';
 import { COMPONENTS, SWAP_GROUPS, NO_DIRECT_SWAP, ADDON_BREAD, ADDON_PASTRY,
          isComponentEligible, resolveBuild, portion } from './library.js';
 import { BASE_RECOMMENDATIONS, recipeById, describe, priceLevel } from './recipes.js';
@@ -272,8 +272,7 @@ export function priceBox(config) {
 }
 
 export function addonPrice(a) {
-  if (a.group === 'bread') return ADDON_PRICES.bread[a.unit] * a.qty;
-  return (ADDON_PRICES.pastry[COMPONENTS[a.item].name] || 12) * a.qty;
+  return unitPrice(a.group, a.item, a.unit) * a.qty;
 }
 
 /* ============================================================

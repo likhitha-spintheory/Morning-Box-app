@@ -8,7 +8,7 @@
    server all recommend from one source — exactly like applyPricing().
    ============================================================ */
 import { COMPONENTS, SWAP_GROUPS } from './library.js';
-import { BASE_RECOMMENDATIONS, recipeById } from './recipes.js';
+import { BASE_RECOMMENDATIONS, recipeById, LEVEL_IDS } from './recipes.js';
 import { CONTEXT_PRIORITY, ALLERGENS, DIETARY, PREFERENCES, CONTEXTS } from './standards.js';
 
 export const CATEGORIES = [...new Set(Object.values(COMPONENTS).map(c => c.category))];
@@ -25,7 +25,7 @@ const itemOut = k => ({
 });
 export const menuSnapshot = () => ({
   items: Object.fromEntries(Object.entries(COMPONENTS).map(([id, k]) => [id, itemOut(k)])),
-  breakfasts: Object.fromEntries(BASE_RECOMMENDATIONS.map(r => [r.id, { components: [...r.components], format: r.format || '' }])),
+  breakfasts: Object.fromEntries(BASE_RECOMMENDATIONS.map(r => [r.id, { components: [...r.components], format: r.format || '', level: r.level || '' }])),
   priority: Object.fromEntries(Object.entries(CONTEXT_PRIORITY).map(([c, list]) => [c, [...list]]))
 });
 
@@ -60,6 +60,8 @@ export function applyMenu(m) {
     if (!recipeById[id]) continue;
     recipeById[id].components = [...b.components];
     if (b.format) recipeById[id].format = b.format; else delete recipeById[id].format;
+    /* Price level set by Admin (MB-BOX-001 §8); empty = Auto, from the composition. */
+    if (LEVEL_IDS.includes(b.level)) recipeById[id].level = b.level; else delete recipeById[id].level;
   }
   for (const [c, list] of Object.entries(m.priority || {})) if (CONTEXT_PRIORITY[c]) CONTEXT_PRIORITY[c].splice(0, 4, ...list);
 }
@@ -74,6 +76,7 @@ const slug = name => `x${text(name, 40).replace(/[^A-Za-z0-9]+(.)?/g, (_, ch) =>
  *  - allergens / dietary flags only from the standard lists (MB-PRO-001 §15.1);
  *  - each of the 32 breakfasts keeps 1–6 distinct known items; Health-Conscious
  *    breakfasts never contain Flexible-only items (MB-REC-001 §4.1);
+ *  - a breakfast's price level is L1–L4, or empty for Auto (MB-BOX-001 §8);
  *  - the priority for each Morning Type ranks all four preferences once (MB-REC-001 §7);
  *  - approved items can't be deleted; added items only while no breakfast uses them.
  */
@@ -116,7 +119,9 @@ export function validateMenu(input, fail) {
     if (new Set(comps).size !== comps.length) fail(`${r.id}: the same item is listed twice.`);
     for (const id of comps) if (!items[id]) fail(`${r.id}: unknown item “${id}”.`);
     if (r.eatingStyle === 'health') for (const id of comps) if (flexibleOnly(id)) fail(`${r.id} is a Health-Conscious breakfast, so it can't include ${items[id].name} (Flexible only).`);
-    breakfasts[r.id] = { components: comps, format: text(b.format, 120) };
+    const level = b.level ?? '';
+    if (level !== '' && !LEVEL_IDS.includes(level)) fail(`${r.id}: price level must be ${LEVEL_IDS.join(', ')} or Auto.`);
+    breakfasts[r.id] = { components: comps, format: text(b.format, 120), level };
   }
   /* A removed (added) item still used by a breakfast fails above as an unknown item. */
   const priority = {};

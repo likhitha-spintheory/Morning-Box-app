@@ -274,9 +274,17 @@ export function Pricing({ data, act, busy }) {
       </div>
       <div className="card stack gap-12" style={{ padding: 18 }}>
         <h2 className="h3">Add-ons (AED each)</h2>
+        <span className="xs">Each bread has its own price, multiplied by the quantity ordered (MB-BOX-001 §8).</span>
+        <table className="ops-table">
+          <thead><tr><th>Bread</th><th>Half loaf</th><th>Whole loaf</th></tr></thead>
+          <tbody>{Object.keys(p.addons.bread).map(id => (
+            <tr key={id}>
+              <td>{data.breads?.find(b => b.id === id)?.name || id}{data.breads?.find(b => b.id === id)?.sample ? <small> (sample)</small> : null}</td>
+              {['half', 'whole'].map(u => <td key={u}><input className="input" style={{ minHeight: 40, maxWidth: 110 }} inputMode="decimal" aria-label={`${data.breads?.find(b => b.id === id)?.name || id} ${u} loaf`} value={p.addons.bread[id][u]} onChange={e => num(['addons', 'bread', id, u], e.target.value)} /></td>)}
+            </tr>
+          ))}</tbody>
+        </table>
         <div className="grid-2">
-          {box(['addons', 'bread', 'half'], p.addons.bread.half, 'Bread — half loaf')}
-          {box(['addons', 'bread', 'whole'], p.addons.bread.whole, 'Bread — whole loaf')}
           {Object.keys(p.addons.pastry).map(k => <Fragment key={k}>{box(['addons', 'pastry', k], p.addons.pastry[k], k)}</Fragment>)}
         </div>
       </div>
