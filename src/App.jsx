@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Home from './screens/Home.jsx';
 import Splash from './screens/Splash.jsx';
@@ -6,9 +6,19 @@ import { EatingStyle, Preferences, Dietary } from './screens/personal/Profile.js
 import { Start, ChooseDates, DailyContext, MorningBox, Extras, NextMorning, WeeklySummary } from './screens/personal/Plan.jsx';
 import { SignIn, Delivery, ReviewPay, Confirmed } from './screens/personal/Checkout.jsx';
 import { Today, Orders, OrderDay, EditMorning, Feedback, Me } from './screens/personal/Account.jsx';
-import {
-  BizWelcome, People, Specials, Selection, ChooseBoxes, BizDates, BizDelivery, BizAccount, BizReview, BizConfirmed, BizManage
-} from './screens/business/Business.jsx';
+import Legal from './screens/Legal.jsx';
+import Help from './screens/Help.jsx';
+import Notifications from './screens/Notifications.jsx';
+import { ErrorBoundary, OfflineBanner, UpdateBanner } from './components/Safety.jsx';
+
+/* Business Breakfast loads on demand, so personal customers download less. */
+const biz = name => lazy(() => import('./screens/business/Business.jsx').then(m => ({ default: m[name] })));
+const BizWelcome = biz('BizWelcome'), People = biz('People'), Specials = biz('Specials'), Selection = biz('Selection');
+const ChooseBoxes = biz('ChooseBoxes'), BizDates = biz('BizDates'), BizDelivery = biz('BizDelivery'), BizAccount = biz('BizAccount');
+const BizReview = biz('BizReview'), BizConfirmed = biz('BizConfirmed'), BizManage = biz('BizManage');
+/* The operations console is for the Morning Box team only. */
+const Ops = lazy(() => import('./screens/Ops.jsx'));
+const Bakery = lazy(() => import('./screens/Bakery.jsx'));
 
 function ScrollTop() {
   const { pathname } = useLocation();
@@ -18,9 +28,12 @@ function ScrollTop() {
 
 export default function App() {
   return (
-    <>
+    <ErrorBoundary>
       <ScrollTop />
       <Splash />
+      <OfflineBanner />
+      <UpdateBanner />
+      <Suspense fallback={null}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/start" element={<Start />} />
@@ -60,8 +73,15 @@ export default function App() {
         <Route path="/business/orders/:id/confirmed" element={<BizConfirmed />} />
         <Route path="/business/orders/:id" element={<BizManage />} />
 
+        <Route path="/legal/:doc" element={<Legal />} />
+        <Route path="/help" element={<Help />} />
+        <Route path="/notifications" element={<Notifications />} />
+        <Route path="/ops" element={<Ops />} />
+        <Route path="/bakery" element={<Bakery />} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </>
+      </Suspense>
+    </ErrorBoundary>
   );
 }

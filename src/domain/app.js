@@ -2,11 +2,11 @@
    recipes.js, standards.js are the MVP implementations of the standards and
    are used unchanged). */
 import { recommend, configure, priceBox, hasSizeSelector, addonPrice } from './engine.js';
-import { COMPONENTS, portion } from './library.js';
+import { COMPONENTS, portion, resolveBuild } from './library.js';
 import { recipeById } from './recipes.js';
 import {
   EATING_STYLES, PREFERENCES, DIETARY, ALLERGENS, CONTEXTS, DELIVERY_WINDOWS,
-  orderableDates, isoDate, cutoffFor, isBeforeCutoff, SIZE_ADJUSTMENT, PRICE_LEVELS
+  orderableDates, isoDate, cutoffFor, isBeforeCutoff, SIZE_ADJUSTMENT, PRICE_LEVELS, dubaiTodayIso, addDaysIso, dubaiIsoOf
 } from './standards.js';
 import { priceLevel } from './recipes.js';
 
@@ -35,12 +35,16 @@ export function planningWeeks(now = new Date(), weeks = 4) {
   return Array.from({ length: weeks }, (_, i) => dates.slice(i * 7, i * 7 + 7));
 }
 
-export const todayIso = () => isoDate(new Date());
+/** Today and tomorrow in Dubai — delivery mornings are Dubai dates. */
+export const todayIso = () => dubaiTodayIso();
+export const tomorrowIso = () => addDaysIso(dubaiTodayIso(), 1);
+/** Dubai calendar date of a server timestamp ("YYYY-MM-DD HH:MM:SS", UTC). */
+export const serverDateIso = ts => dubaiIsoOf(new Date(String(ts).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(ts) ? '' : 'Z')));
 
 export function cutoffLabel(iso) {
-  const c = cutoffFor(iso);
-  const sameDay = isoDate(c) === todayIso();
-  return sameDay ? '9:00 PM tonight' : `9:00 PM, ${dateInfo(isoDate(c)).label}`;
+  const evening = addDaysIso(iso, -1);
+  const note = typeof window === 'undefined' ? '' : dubaiNote();
+  return evening === todayIso() ? `9:00 PM tonight${note}` : `9:00 PM, ${dateInfo(evening).label}${note}`;
 }
 
 export function timeLeft(iso, now = new Date()) {
@@ -79,7 +83,8 @@ export function serialize(config, context, which) {
     recipeId: config.recipe.id, context, which,
     components: config.components.slice(), substitutions: config.substitutions || [],
     userSwaps: config.userSwaps || [], size: config.size, addons: config.addons || [],
-    label: config.label, format: config.recipe.format || null
+    label: config.label, format: config.recipe.format || null,
+    variants: { ...(config.variants || {}) }
   };
 }
 
@@ -137,7 +142,7 @@ export const sizeLabel = s => ({ light: 'Light', regular: 'Regular', large: 'Lar
 
 export function extrasText(addons) {
   if (!addons?.length) return '';
-  return addons.map(a => `${componentName(a.item)}${a.group === 'bread' ? ` (${a.unit} loaf)` : ''} × ${a.qty}`).join(', ');
+  return addons.map(a => `${componentName(a.item)}${a.group === 'bread' ? ` (${a.unit} loaf)` : a.flavour ? ` (${a.flavour})` : ''} × ${a.qty}`).join(', ');
 }
 
 /* ---------- Customer-facing tracking (MB-DLV-001 §5) ----------
@@ -162,3 +167,61 @@ export function trackingStage(day, now = new Date()) {
 export const STAGES = ['Order confirmed', 'Being prepared', 'Out for delivery', 'Delivered'];
 
 export const newId = prefix => `${prefix}-${Math.floor(10000 + Math.random() * 89999)}`;
+
+/**
+ * Safety re-check of an already-built morning against a (changed) Morning
+ * Profile (MB-BOX-001 §9): the build the bakery will make — the recorded
+ * variant, or the default build — must still meet every allergy and dietary
+ * requirement, for each component and extra. Returns the unsafe ids.
+ */
+export function unsafeComponents(cfg, profile) {
+  if (!cfg) return [];
+  const allergies = profile.allergies || [], dietary = profile.dietary || [];
+  const fits = b => b && !allergies.some(a => (b.allergens || []).includes(a)) && dietary.every(d => (b.diet || []).includes(d));
+  const recordedBuild = id => {
+    const k = COMPONENTS[id];
+    if (!k) return null;
+    /* A draft plan without recorded builds: any approved build will be chosen when it is ordered. */
+    if (!cfg.variants) return resolveBuild(id, { allergies, dietary });
+    const v = cfg.variants[id];
+    return v ? [].concat(k.variant || []).find(x => x.id === v) || null : { allergens: k.allergens, diet: k.diet };
+  };
+  const ids = [...(cfg.components || []), ...(cfg.addons || []).map(a => a.item)];
+  return [...new Set(ids.filter(id => !fits(recordedBuild(id))))];
+}
+
+/** Allergens in a breakfast as it will be made (recorded builds, or the build the profile would get). */
+export function containsAllergens(cfg, profile = {}) {
+  if (!cfg) return [];
+  const found = new Set();
+  for (const id of [...(cfg.components || []), ...(cfg.addons || []).map(a => a.item)]) {
+    const k = COMPONENTS[id];
+    if (!k) continue;
+    const v = cfg.variants?.[id];
+    const build = v ? [].concat(k.variant || []).find(x => x.id === v) : cfg.variants ? k : resolveBuild(id, { allergies: profile.allergies || [], dietary: profile.dietary || [] }) || k;
+    (build?.allergens || []).forEach(a => found.add(a));
+  }
+  return ALLERGENS.filter(a => found.has(a.id)).map(a => a.label);
+}
+
+/* ---------- Customer-facing helpers ---------- */
+/** Lowest breakfast price (smallest price level, Light size), for "from AED …". */
+export const fromPrice = () => Math.min(...Object.values(PRICE_LEVELS)) + Math.min(...Object.values(SIZE_ADJUSTMENT));
+
+/** True when this device already shows Dubai time (UTC+4, no daylight saving). */
+export const deviceOnDubaiTime = (now = new Date()) => now.getTimezoneOffset() === -240;
+/** " (Dubai time)" when the customer's phone is on another timezone, else "". */
+export const dubaiNote = () => (deviceOnDubaiTime() ? '' : ' (Dubai time)');
+
+/** WhatsApp support link when the build sets VITE_SUPPORT_WHATSAPP (digits, e.g. 9715XXXXXXXX), else null. */
+export function whatsappLink(message = '') {
+  const n = String(import.meta.env?.VITE_SUPPORT_WHATSAPP || '').replace(/\D/g, '');
+  return n ? `https://wa.me/${n}${message ? `?text=${encodeURIComponent(message)}` : ''}` : null;
+}
+
+/**
+ * Photos of each breakfast, by recipe id, e.g. { 'savory.flexible.regular': './assets/boxes/savory-flexible.jpg' }.
+ * Add the approved photography here; until a box has a photo its component icons are shown.
+ */
+export const BOX_PHOTOS = {};
+export const boxPhoto = recipeId => BOX_PHOTOS[recipeId] || null;

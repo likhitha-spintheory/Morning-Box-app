@@ -27,6 +27,10 @@ const GL = ['vegetarian', 'vegan', 'dairyFree', 'halal'];                   // g
 const c = (id, name, category, portions, allergens, diet, swapGroup, opts = {}) =>
   ({ id, name, category, portions, allergens, diet, swapGroup, ...opts });
 
+/* Admin setting: allow SAMPLE (testing-only) items. Off in production until the client approves them. */
+export const LIBRARY_SETTINGS = { samples: true };
+export const setLibrarySettings = v => { if (typeof v?.samples === 'boolean') LIBRARY_SETTINGS.samples = v.samples; };
+
 export const COMPONENTS = {
   /* ---- §3 Egg & hot savory ---- */
   scrambledEggs: c('scrambledEggs', 'Scrambled Eggs', 'Egg & Hot Savory',
@@ -42,7 +46,7 @@ export const COMPONENTS = {
     { light: '80 g', regular: '120 g', large: '160 g' }, [], V, 'eggHotMain',
     { note: 'White beans, light tomato sauce, seasoning.', notBusyFormat: true }),
 
-  chickenSausage: c('chickenSausage', 'Halal Chicken Sausage', 'Savory Protein',
+  chickenSausage: c('chickenSausage', 'Halal Chicken Breakfast Sausage', 'Savory Protein',
     { light: '1 pc', regular: '2 pcs', large: '3 pcs' }, [], ['dairyFree', 'glutenFree', 'halal'], 'savoryProtein',
     { flexibleOnly: true, note: 'Approx. 35–45 g per unit.' }),
   beefBacon: c('beefBacon', 'Halal Beef Bacon', 'Savory Protein',
@@ -104,10 +108,10 @@ export const COMPONENTS = {
   /* ---- §7 Fruit ---- */
   seasonalFruit: c('seasonalFruit', 'Seasonal Fruit Mix', 'Fruit',
     { light: '100 g', regular: '150 g', large: '200 g' }, [], V, 'fruit',
-    { note: 'Minimum 3 fruits from melon, watermelon, pineapple, grapes, orange, apple, kiwi.' }),
+    { needsContainer: true, note: 'Minimum 3 fruits from melon, watermelon, pineapple, grapes, orange, apple, kiwi.' }),
   berries: c('berries', 'Berries', 'Fruit',
     { light: '50 g', regular: '75 g', large: '100 g' }, [], V, 'fruit',
-    { note: 'Strawberry, blueberry, raspberry.' }),
+    { needsContainer: true, note: 'Strawberry, blueberry, raspberry.' }),
   banana: c('banana', 'Banana', 'Fruit',
     { light: 'Small', regular: 'Medium', large: 'Large' }, [], V, 'fruit',
     { note: 'Whole and unpeeled.' }),
@@ -209,9 +213,16 @@ export const PACKING_RULES = {
   bread:     'Protect from crushing and moisture.',
   spread:    'Portioned and packed separately unless the specification defines a ready-to-eat format.'
 };
-export function packingNote(componentId) {
+/* MB-PRO-001 §15.2: hot and cold components are separated where needed; §14.1 bread add-ons are packed apart from the breakfast. */
+PACKING_RULES.hot = 'Hot item: pack in its own sealed section, separate from cold and dry components.';
+PACKING_RULES.addonBread = 'Bread add-on: wrap and pack separately from the breakfast box.';
+const HOT = ['Egg & Hot Savory', 'Savory Protein'];
+export function packingNote(componentId, { addon = false, readyToEat = false } = {}) {
   const k = COMPONENTS[componentId];
   if (!k) return null;
+  if (addon && k.category === 'Bread') return PACKING_RULES.addonBread;
+  if (HOT.includes(k.category)) return PACKING_RULES.hot;
+  if (readyToEat && k.category === 'Spreads') return null;
   if (k.swapGroup === 'dryGrain') return PACKING_RULES.dryGrain;
   if (k.category === 'Pastry') return PACKING_RULES.pastry;
   if (k.category === 'Bread') return PACKING_RULES.bread;
@@ -247,12 +258,14 @@ export function isComponentEligible(id, ctx) {
 export function resolveBuild(id, { dietary = [], allergies = [], eatingStyle } = {}) {
   const k = COMPONENTS[id];
   if (!k) return null;
+  /* SAMPLE items have no approved ingredient record yet (MB-PRO-001 §15.1): only used while Admin allows them. */
+  if (k.sample && !LIBRARY_SETTINGS.samples) return null;
   /* Eating Style defines the recommendation branch (MB-REC-001 §4). */
   if (eatingStyle === 'health' && (k.flexibleOnly || k.standardPastry)) return null;
 
   const builds = [{ variant: null, allergens: k.allergens, diet: k.diet }];
   /* `variant` is one approved alternative build or a list of them, tried in order. */
-  for (const v of [].concat(k.variant || [])) builds.push({ variant: v, allergens: v.allergens, diet: v.diet });
+  for (const v of [].concat(k.variant || []).filter(v => !v.sample || LIBRARY_SETTINGS.samples)) builds.push({ variant: v, allergens: v.allergens, diet: v.diet });
 
   for (const b of builds) {
     if (allergies.some(a => b.allergens.includes(a))) continue;

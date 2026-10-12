@@ -144,6 +144,29 @@ addColumns('business_orders', { payment_status: "TEXT NOT NULL DEFAULT 'captured
 /* capabilities: JSON { glutenFree, nutFree, dairyFree, eggFree, vegan, sesameFree, soyFree, peanutFree }.
    status: Active | Under Review | Suspended — only Active partners are allocated (MB-BKY-001). */
 addColumns('bakeries', { capabilities: 'TEXT', status: "TEXT NOT NULL DEFAULT 'Active'" });
+/* Admin → Bakeries (MB-BKY-001 §6, §10): effective capacity Morning Box allocates up to,
+   approved products (null = every Morning Box product), Fruit Danish variants, contact,
+   status note and the bakery's own access code for the Bakery View. */
+addColumns('bakeries', {
+  effective_capacity: 'INTEGER', products: 'TEXT', danish_flavours: 'TEXT', contact_name: 'TEXT', contact_phone: 'TEXT',
+  status_note: 'TEXT', access_hash: 'TEXT', updated_at: 'TEXT'
+});
+/* Session expiry (sliding), OTP abuse limits, payment idempotency, safety review, profile notes. */
+addColumns('sessions', { expires_at: 'INTEGER' });
+addColumns('otp_codes', { sends: 'INTEGER NOT NULL DEFAULT 0', window_start: 'INTEGER', last_sent: 'INTEGER', failures: 'INTEGER NOT NULL DEFAULT 0' });
+addColumns('orders', { idempotency_key: 'TEXT', credit_used: 'REAL NOT NULL DEFAULT 0' });
+addColumns('business_orders', { idempotency_key: 'TEXT' });
+addColumns('order_days', { safety_hold: 'INTEGER NOT NULL DEFAULT 0', feedback_note: 'TEXT', feedback_at: 'TEXT' });
+addColumns('profiles', { other_allergies: 'TEXT' });
+/* Terms acceptance, marketing consent; rating/feedback_tags are no longer written (kept for old rows). */
+addColumns('users', { terms_version: 'TEXT', terms_accepted_at: 'TEXT', marketing_opt_in: 'INTEGER NOT NULL DEFAULT 0' });
+addColumns('order_days', { rating: 'INTEGER', feedback_tags: 'TEXT', late_note: 'TEXT' });
+addColumns('business_days', { late_note: 'TEXT' });
+/* Fulfilment detail: per-bakery parts, timestamps for Ready-on-Time and Pickup vs Courier delay, at-risk flag, route. */
+const FULFIL_DETAIL = { part_states: 'TEXT', ready_at: 'TEXT', handed_over_at: 'TEXT', picked_up_at: 'TEXT', at_risk: 'INTEGER NOT NULL DEFAULT 0', route_id: 'TEXT' };
+addColumns('order_days', FULFIL_DETAIL);
+addColumns('business_days', FULFIL_DETAIL);
+addColumns('bakeries', { ready_lead_minutes: 'INTEGER NOT NULL DEFAULT 30', licence_no: 'TEXT', licence_expiry: 'TEXT', bakes_own_bread: 'INTEGER NOT NULL DEFAULT 0', payout_pct: 'REAL NOT NULL DEFAULT 60' });
 addColumns('exceptions', {
   category: 'TEXT', priority: 'INTEGER NOT NULL DEFAULT 3', owner: 'TEXT', action: 'TEXT', resolution: 'TEXT',
   cause: 'TEXT', responsible_party: 'TEXT', customer_category: 'TEXT', resolved_at: 'TEXT'
@@ -179,12 +202,112 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   read_at TEXT
 );
+CREATE TABLE IF NOT EXISTS customer_issues (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  order_id TEXT NOT NULL,
+  date TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  note TEXT,
+  exception_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+/* Help & support requests; operations replies in the ops console. */
+CREATE TABLE IF NOT EXISTS support_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  topic TEXT NOT NULL,
+  order_ref TEXT,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  reply TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  replied_at TEXT
+);
+/* What happened to each morning, in order: shown to the customer as the order's activity. */
+CREATE TABLE IF NOT EXISTS order_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id TEXT NOT NULL,
+  date TEXT,
+  kind TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+/* Days Morning Box does not deliver (public holidays, closures). */
+CREATE TABLE IF NOT EXISTS closed_dates (
+  date TEXT PRIMARY KEY,
+  reason TEXT NOT NULL DEFAULT 'Closed'
+);
+CREATE TABLE IF NOT EXISTS nps_responses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  score INTEGER NOT NULL,
+  comment TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS payment_adjustments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   order_day_id INTEGER NOT NULL REFERENCES order_days(id),
   amount INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+/* Onboarding sample production results per product (MB-BKY-001 §8). */
+CREATE TABLE IF NOT EXISTS bakery_samples (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bakery_id INTEGER NOT NULL REFERENCES bakeries(id),
+  product TEXT NOT NULL,
+  result TEXT NOT NULL,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+/* Temporary conditions a bakery reports for a date (MB-BKY-001 §6). */
+CREATE TABLE IF NOT EXISTS bakery_conditions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bakery_id INTEGER NOT NULL REFERENCES bakeries(id),
+  date TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  item TEXT,
+  capacity INTEGER,
+  need TEXT,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+/* Partner status changes and corrective actions (MB-BKY-001 §10). */
+CREATE TABLE IF NOT EXISTS bakery_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bakery_id INTEGER NOT NULL REFERENCES bakeries(id),
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+/* Product analytics for the MVP KPIs (Master Plan §15): funnel steps and no-match events. */
+CREATE TABLE IF NOT EXISTS analytics_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  user_id INTEGER,
+  data TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS business_payment_adjustments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  business_day_id INTEGER NOT NULL REFERENCES business_days(id),
+  amount REAL NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+
+/* Indexes for the hot paths: capacity checks, order lists, sessions, outbox. */
+db.exec(`
+CREATE INDEX IF NOT EXISTS idx_order_days_date_window ON order_days(date, window, cancelled);
+CREATE INDEX IF NOT EXISTS idx_business_days_date_window ON business_days(date, window, cancelled);
+CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_business_orders_user ON business_orders(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_exceptions_open ON exceptions(ref, kind, resolved);
+CREATE INDEX IF NOT EXISTS idx_support_user ON support_requests(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_order_events_order ON order_events(order_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idem ON orders(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_business_orders_idem ON business_orders(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 `);
 
 /* Launch partner set for the DIFC pilot (MB-BKY-001). Names are placeholders
@@ -210,7 +333,20 @@ for (const b of db.prepare('SELECT id, name, gluten_free_certified FROM bakeries
   db.prepare('UPDATE bakeries SET capabilities = ? WHERE id = ?').run(JSON.stringify(c), b.id);
 }
 
+/* Placeholder onboarding facts for the launch partners until real records are entered in Admin. */
+db.prepare("UPDATE bakeries SET bakes_own_bread = 1, licence_no = COALESCE(licence_no, 'PENDING') WHERE name IN ('Partner Bakery A', 'Partner Bakery B', 'Partner Bakery C') AND bakes_own_bread = 0").run();
+/* Placeholder Fruit Danish variants for the launch partners (MB-PRO-001 §14.2) until confirmed in Admin. */
+const PLACEHOLDER_DANISH = { 'Partner Bakery A': ['Apple', 'Berry', 'Apricot'], 'Partner Bakery B': ['Apple', 'Berry'], 'Partner Bakery C': ['Apricot'] };
+for (const b of db.prepare('SELECT id, name FROM bakeries WHERE danish_flavours IS NULL').all()) {
+  db.prepare('UPDATE bakeries SET danish_flavours = ? WHERE id = ?').run(JSON.stringify(PLACEHOLDER_DANISH[b.name] || []), b.id);
+}
+
 export const json = v => JSON.stringify(v ?? null);
+
+/** Record something that happened to an order (shown as its activity). */
+export function logEvent(orderId, date, kind, message) {
+  db.prepare('INSERT INTO order_events (order_id, date, kind, message) VALUES (?, ?, ?, ?)').run(orderId, date ?? null, kind, String(message).slice(0, 300));
+}
 export const parse = s => (s == null ? null : JSON.parse(s));
 
 /** Run fn inside a transaction; rolls back on throw. */

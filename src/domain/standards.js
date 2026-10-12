@@ -16,7 +16,7 @@ export const EATING_STYLES = [
   { id: 'health',   label: 'Health-Conscious',
     blurb: 'I usually prefer wholesome, balanced and less processed foods.' },
   { id: 'flexible', label: 'Flexible',
-    blurb: "I enjoy a wider variety and don't limit myself to health-focused choices." }
+    blurb: "I enjoy a wider variety of foods and don't specifically limit myself to health-focused choices." }
 ];
 
 /* ---------- MB-PER-001 Q2 · Breakfast Preference (multi-select) ---------- */
@@ -54,8 +54,8 @@ export const ALLERGENS = [
 export const CONTEXTS = [
   { id: 'active',  label: 'Active Morning',    blurb: 'A more active or physically demanding morning.' },
   { id: 'regular', label: 'Regular Workday',   blurb: 'A typical workday morning.' },
-  { id: 'busy',    label: 'Busy & On the Go',  blurb: 'Time-sensitive. Convenience matters.' },
-  { id: 'relaxed', label: 'Relaxed Morning',   blurb: 'Less rushed, with more flexibility.' }
+  { id: 'busy',    label: 'Busy & On the Go',  blurb: 'A time-sensitive morning where convenience matters strongly.' },
+  { id: 'relaxed', label: 'Relaxed Morning',   blurb: 'A less rushed morning with greater flexibility.' }
 ];
 
 /* ---------- MB-REC-001 §7 · Context priority (tie-break only) ----------
@@ -145,6 +145,34 @@ export function volumeDiscount(qty) {
   return t ? t.pct : 0;
 }
 
+/* ---------- Admin-editable pricing ----------
+   The numbers above are the defaults. Morning Box sets the real prices in the
+   ops console (Admin → Pricing); the server stores them and sends them to the
+   app, and applyPricing() updates these same objects in place so the engine,
+   the screens and the server all price from one source. */
+export const PRICING = { indicative: PRICES_ARE_INDICATIVE };
+export const pricingSnapshot = () => ({
+  indicative: PRICING.indicative,
+  priceLevels: { ...PRICE_LEVELS },
+  sizeAdjustment: { ...SIZE_ADJUSTMENT },
+  addons: { bread: { ...ADDON_PRICES.bread }, pastry: { ...ADDON_PRICES.pastry } },
+  volumeDiscount: VOLUME_DISCOUNT.map(t => ({ ...t }))
+});
+export const DEFAULT_PRICING = pricingSnapshot();
+export function applyPricing(p) {
+  if (!p || typeof p !== 'object') return;
+  if (typeof p.indicative === 'boolean') PRICING.indicative = p.indicative;
+  for (const k of Object.keys(PRICE_LEVELS)) if (Number.isFinite(p.priceLevels?.[k])) PRICE_LEVELS[k] = p.priceLevels[k];
+  for (const k of ['light', 'large']) if (Number.isFinite(p.sizeAdjustment?.[k])) SIZE_ADJUSTMENT[k] = p.sizeAdjustment[k];
+  for (const k of ['half', 'whole']) if (Number.isFinite(p.addons?.bread?.[k])) ADDON_PRICES.bread[k] = p.addons.bread[k];
+  for (const k of Object.keys(ADDON_PRICES.pastry)) if (Number.isFinite(p.addons?.pastry?.[k])) ADDON_PRICES.pastry[k] = p.addons.pastry[k];
+  if (Array.isArray(p.volumeDiscount)) {
+    const tiers = p.volumeDiscount.filter(t => Number.isInteger(t?.min) && t.min > 0 && Number.isFinite(t?.pct) && t.pct >= 0 && t.pct < 1)
+      .sort((a, b) => b.min - a.min).map(t => ({ min: t.min, pct: t.pct }));
+    VOLUME_DISCOUNT.splice(0, VOLUME_DISCOUNT.length, ...tiers);
+  }
+}
+
 export const fmtAED = n =>
   new Intl.NumberFormat('en-AE', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Math.round(n));
 
@@ -159,27 +187,38 @@ export const fmtDateLong = d => d.toLocaleDateString('en-GB',
 export const isoDate = d =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-/** The earliest orderable morning, honouring the 9:00 PM cutoff. */
+/* Cutoffs and delivery mornings are Dubai time (UTC+4, no daylight saving),
+   whatever timezone the customer's phone or the server is set to. */
+export const DUBAI_OFFSET_MS = 4 * 3.6e6;
+function dubaiParts(now) {
+  const w = new Date(now.getTime() + DUBAI_OFFSET_MS);
+  return { y: w.getUTCFullYear(), m: w.getUTCMonth(), d: w.getUTCDate(), h: w.getUTCHours() };
+}
+/** Hour of the day (0–23) in Dubai. */
+export const dubaiHour = (now = new Date()) => dubaiParts(now).h;
+/** Today's calendar date in Dubai, as YYYY-MM-DD. */
+export const dubaiTodayIso = (now = new Date()) => { const p = dubaiParts(now); return isoDate(new Date(p.y, p.m, p.d)); };
+/** Shift an ISO calendar date by whole days. */
+export const addDaysIso = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); return isoDate(new Date(y, m - 1, d + n)); };
+/** Dubai calendar date of an instant (e.g. a UTC timestamp from the server). */
+export const dubaiIsoOf = instant => dubaiTodayIso(instant instanceof Date ? instant : new Date(instant));
+
+/** The earliest orderable morning, honouring the 9:00 PM cutoff (Dubai time).
+    Returned as a local Date at midnight of that calendar day. */
 export function firstOrderableDate(now = new Date()) {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + (now.getHours() >= CUTOFF_HOUR ? 2 : 1));
-  return d;
+  const p = dubaiParts(now);
+  return new Date(p.y, p.m, p.d + (p.h >= CUTOFF_HOUR ? 2 : 1));
 }
 
-/** The orderable horizon: the next 14 mornings from the first available. */
+/** The orderable horizon: the next `days` mornings from the first available. */
 export function orderableDates(now = new Date(), days = 14) {
   const start = firstOrderableDate(now);
-  return Array.from({ length: days }, (_, i) => {
-    const d = new Date(start); d.setDate(start.getDate() + i); return d;
-  });
+  return Array.from({ length: days }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
 }
 
-/** A planned day may be edited or cancelled until 9:00 PM the evening before. */
+/** A planned day may be edited or cancelled until 9:00 PM (Dubai) the evening before. */
 export function cutoffFor(dateIso) {
-  const d = new Date(dateIso + 'T00:00:00');
-  d.setDate(d.getDate() - 1);
-  d.setHours(CUTOFF_HOUR, 0, 0, 0);
-  return d;
+  const [y, m, d] = dateIso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d - 1, CUTOFF_HOUR) - DUBAI_OFFSET_MS);
 }
 export const isBeforeCutoff = (dateIso, now = new Date()) => now < cutoffFor(dateIso);

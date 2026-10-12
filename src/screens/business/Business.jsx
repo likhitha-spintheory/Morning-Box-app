@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import {
-  Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch
+  Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch, InfoTip
 } from '../../components/ui.jsx';
 import { useStore, emptyBusiness } from '../../state/store.jsx';
-import { get, post, patch, download, applySession, setToken } from '../../api.js';
+import { get, post, patch, del, download, applySession, setToken, resetPersonal, newIdempotencyKey, track } from '../../api.js';
+import { pastedCode, Agreement } from '../personal/Checkout.jsx';
+import { useConfig, closedOn } from '../../state/config.js';
+
+const SHOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_DEMO === '1';
 import { businessModels, morningBoxMix, resolveSpecial, priceBusinessDay } from '../../domain/engine.js';
 import { recipeById, describe, priceLevel } from '../../domain/recipes.js';
 import { COMPONENTS } from '../../domain/library.js';
 import { DIETARY, ALLERGENS, DELIVERY_WINDOWS, SIZE_ADJUSTMENT, PRICE_LEVELS } from '../../domain/standards.js';
 import {
   dateInfo, planningWeeks, cutoffLabel, isBeforeCutoff, windowLabel, componentName, dietLabel, allergyLabel,
-  sizeLabel, todayIso
+  sizeLabel, todayIso, serverDateIso
 } from '../../domain/app.js';
 
 /* ============================================================
@@ -21,7 +25,9 @@ import {
    lines are { recipeId, size, qty }, specials are { dietary, allergies, qty }.
    ============================================================ */
 
-const MAX_PEOPLE = 500;
+/* No fixed maximum headcount (MB-DLV-001 §8): real bakery and delivery capacity is checked
+   before payment. This is only the input limit of the people field. */
+const MAX_PEOPLE = 999;
 const PREF_NAME = { savory: 'Savory Box', bakery: 'Bakery Box', fresh: 'Fresh Box', sweet: 'Sweet Box' };
 const SIZES = ['light', 'regular', 'large'];
 const SEG2 = { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' };
@@ -37,13 +43,78 @@ const mixLines = (general, sizes = {}) =>
   general > 0 ? morningBoxMix(general, 'regular').map(l => ({ recipeId: l.model.recipe.id, size: sizes[l.model.recipe.id] || 'regular', qty: l.qty })) : [];
 const fmtMobile = d => `+971 ${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5)}`;
 const mobileDigits = v => v.replace(/\D/g, '').replace(/^971/, '').replace(/^0/, '');
-const emailOk = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+const emailOk = v => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
+const trnOk = v => { const d = v.replace(/\D/g, ''); return !d || d.length === 15; };
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const activeSpecials = b => (b.hasSpecial ? b.specials : []);
 const specialQty = b => sum(activeSpecials(b));
-const specialText = s => [...s.dietary.map(dietLabel), ...s.allergies.map(a => `${allergyLabel(a).split(' /')[0]}-free`)].join(', ');
+const specialText = s => [...s.dietary.map(dietLabel), ...s.allergies.map(a => `${allergyLabel(a).split(' /')[0]}-free`)].join(', ') + (s.size && s.size !== 'regular' ? ` (${sizeLabel(s.size)})` : '');
 const linesText = lines => lines.filter(l => l.qty > 0)
   .map(l => `${modelName(recipeById[l.recipeId])} × ${l.qty} (${sizeLabel(l.size)})`).join(' · ');
+
+/**
+ * Edit one day's breakfasts: every model × size × quantity, plus Special Breakfast groups
+ * (add, change requirements or size, remove). Used for "Customize Each Day" and when
+ * managing a confirmed order (MB-FLW-001 §14, MB-B2B-001 §10).
+ */
+function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
+  const models = useMemo(() => businessModels('regular'), []);
+  const [adding, setAdding] = useState(null);       // null | { recipeId, size } | { special: { dietary, allergies, size } }
+  const set = (nextLines, nextSpecials) => onChange(nextLines.filter(l => l.qty > 0), nextSpecials.filter(x => x.qty > 0));
+  const toggleNeed = (k, id) => setAdding(a => ({ special: { ...a.special, [k]: a.special[k].includes(id) ? a.special[k].filter(x => x !== id) : [...a.special[k], id] } }));
+  const resolved = adding?.special && (adding.special.dietary.length + adding.special.allergies.length) ? resolveSpecial({ ...adding.special, qty: 1 }, 'regular') : null;
+  return (
+    <div className="stack gap-10">
+      {lines.map((l, i) => (
+        <div key={`${l.recipeId}-${l.size}-${i}`} className="stack gap-6" style={{ paddingBottom: 8, borderBottom: '1px solid var(--line-soft)' }}>
+          <div className="row">
+            <span className="stack"><span className="strong">{modelName(recipeById[l.recipeId])}</span><span className="xs">{describe(recipeById[l.recipeId])} · AED {linePrice(l)}</span></span>
+            <Qty value={l.qty} max={max} label={modelName(recipeById[l.recipeId])} onChange={v => set(lines.map((x, k) => (k === i ? { ...x, qty: v } : x)), specials)} />
+          </div>
+          <SizeSeg value={l.size} label={`Size for ${modelName(recipeById[l.recipeId])}`} onChange={sz => set(lines.map((x, k) => (k === i ? { ...x, size: sz } : x)), specials)} />
+        </div>
+      ))}
+      {specials.map((x, i) => (
+        <div key={`sp${i}`} className="stack gap-6" style={{ paddingBottom: 8, borderBottom: '1px solid var(--line-soft)' }}>
+          <div className="row">
+            <span className="row" style={{ gap: 10 }}><Icon name="shield" size={18} stroke={1.6} /><span className="stack"><span className="strong">Special Breakfast</span><span className="xs">{specialText({ ...x, size: 'regular' })}</span></span></span>
+            <Qty value={x.qty} min={0} max={max} label={`special breakfasts (${specialText(x)})`} onChange={v => set(lines, specials.map((y, k) => (k === i ? { ...y, qty: v } : y)))} />
+          </div>
+          <SizeSeg value={x.size || 'regular'} label="Special Breakfast size" onChange={sz => set(lines, specials.map((y, k) => (k === i ? { ...y, size: sz } : y)))} />
+        </div>
+      ))}
+      {!adding && (
+        <div className="row" style={{ justifyContent: 'flex-start', gap: 18, flexWrap: 'wrap' }}>
+          <button type="button" className="link" onClick={() => setAdding({ recipeId: '', size: 'regular' })}>+ Add a breakfast</button>
+          <button type="button" className="link" onClick={() => setAdding({ special: { dietary: [], allergies: [], size: 'regular' } })}>+ Add a Special Breakfast</button>
+        </div>
+      )}
+      {adding && !adding.special && (
+        <div className="card stack gap-8" style={{ padding: 14 }}>
+          <select className="input" aria-label="Breakfast" value={adding.recipeId} onChange={e => setAdding(a => ({ ...a, recipeId: e.target.value }))}>
+            <option value="">Choose a breakfast…</option>{models.map(m => <option key={m.recipe.id} value={m.recipe.id}>{modelName(m.recipe)} — {m.label}</option>)}</select>
+          <SizeSeg value={adding.size} label="Size" onChange={sz => setAdding(a => ({ ...a, size: sz }))} />
+          <div className="row"><button type="button" className="link" onClick={() => setAdding(null)}>Cancel</button>
+            <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} disabled={!adding.recipeId}
+              onClick={() => { const at = lines.findIndex(l => l.recipeId === adding.recipeId && l.size === adding.size); set(at >= 0 ? lines.map((l, k) => (k === at ? { ...l, qty: l.qty + 1 } : l)) : [...lines, { recipeId: adding.recipeId, size: adding.size, qty: 1 }], specials); setAdding(null); }}>Add</button></div>
+        </div>
+      )}
+      {adding?.special && (
+        <div className="card stack gap-8" style={{ padding: 14 }}>
+          <span className="label">Dietary</span>
+          <div className="chips">{DIETARY.map(x => <Chip key={x.id} on={adding.special.dietary.includes(x.id)} onClick={() => toggleNeed('dietary', x.id)}>{x.label}</Chip>)}</div>
+          <span className="label">Allergens</span>
+          <div className="chips">{ALLERGENS.map(x => <Chip key={x.id} on={adding.special.allergies.includes(x.id)} onClick={() => toggleNeed('allergies', x.id)}>{x.label}</Chip>)}</div>
+          {resolved && !resolved.resolved && <Err>No approved breakfast can safely meet this combination yet.</Err>}
+          <div className="row"><button type="button" className="link" onClick={() => setAdding(null)}>Cancel</button>
+            <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} disabled={!resolved?.resolved}
+              onClick={() => { set(lines, [...specials, { ...adding.special, qty: 1 }]); setAdding(null); }}>Add</button></div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Price one day from serializable lines and specials. */
 function priceDay(lines, specials) {
@@ -63,10 +134,13 @@ function scaleLines(lines, target) {
 }
 
 const dayPeople = (b, iso) => (!b.sameForAll && b.perDay?.[iso]?.people ? b.perDay[iso].people : b.people);
+/* Customize Each Day (MB-FLW-001 §14): a date may have its own boxes and Special Breakfasts. */
+const daySpecials = (b, iso) => (!b.sameForAll && b.perDay?.[iso]?.specials ? b.perDay[iso].specials : activeSpecials(b));
 
 /** The general lines for one date, rescaled when that date has its own headcount. */
 function dayLines(b, iso, people = dayPeople(b, iso)) {
-  const general = Math.max(0, people - specialQty(b));
+  if (!b.sameForAll && b.perDay?.[iso]?.lines) return b.perDay[iso].lines;
+  const general = Math.max(0, people - sum(daySpecials(b, iso)));
   const base = b.lines || [];
   if (general === sum(base)) return base;
   if (b.mode === 'mix' || !sum(base)) return mixLines(general, Object.fromEntries(base.map(l => [l.recipeId, l.size])));
@@ -97,7 +171,7 @@ function SizeSeg({ value, onChange, label }) {
     <div className="seg" style={SEG3} role="radiogroup" aria-label={label}>
       {SIZES.map(sz => (
         <button key={sz} type="button" role="radio" aria-checked={value === sz} className={value === sz ? 'on' : ''}
-          style={{ fontSize: 14, minHeight: 40 }} onClick={() => onChange(sz)}>{sizeLabel(sz)}</button>
+          style={{ fontSize: 14, minHeight: 44 }} onClick={() => onChange(sz)}>{value === sz && <Icon name="check" size={14} stroke={2.4} style={{ marginRight: 4 }} />}{sizeLabel(sz)}</button>
       ))}
     </div>
   );
@@ -152,17 +226,18 @@ function getInvoice(order, signedIn) {
 }
 
 function downloadInvoice(order) {
-  const rows = order.days.map(d => `<tr><td>${dateInfo(d.date).label}${d.cancelled ? ' (cancelled, refunded)' : ''}</td><td>${d.people} people</td><td>${linesText(d.lines)}${d.specials.length ? ` · Special × ${sum(d.specials)}` : ''}</td><td style="text-align:right">AED ${d.cancelled ? 0 : d.total}</td></tr>`).join('');
+  /* Offline copy only: the tax invoice itself always comes from the server. */
+  const rows = order.days.map(d => `<tr><td>${esc(dateInfo(d.date).label)}${d.cancelled ? ' (cancelled, refunded)' : ''}</td><td>${esc(d.people)} people</td><td>${esc(linesText(d.lines))}${d.specials.length ? ` · Special × ${sum(d.specials)}` : ''}</td><td style="text-align:right">AED ${d.cancelled ? 0 : esc(d.total)}</td></tr>`).join('');
   const inv = order.invoice || {};
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${order.id}</title>
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Order summary ${esc(order.id)}</title>
 <style>body{font-family:Arial,sans-serif;color:#3B2D22;max-width:720px;margin:40px auto;padding:0 20px}td,th{padding:8px;border-bottom:1px solid #EADCC1;text-align:left;font-size:14px}table{border-collapse:collapse;width:100%}</style></head>
-<body><h1>Morning Box — Tax Invoice</h1><p>Order ${order.id}<br>Issued ${new Date(order.createdAt).toLocaleDateString('en-GB')}</p>
-<p><b>Billed to:</b> ${inv.billingName || order.company}<br>${inv.address || ''}${inv.trn ? `<br>TRN ${inv.trn}` : ''}</p>
+<body><h1>Morning Box — Order summary</h1><p>Order ${esc(order.id)}<br>Placed ${esc(dateInfo(serverDateIso(order.createdAt)).label)}</p>
+<p><b>Billed to:</b> ${esc(inv.billingName || order.company)}<br>${esc(inv.address || '')}${inv.trn ? `<br>TRN ${esc(inv.trn)}` : ''}${inv.po ? `<br>PO number: ${esc(inv.po)}` : ''}</p>
 <table><thead><tr><th>Date</th><th>Headcount</th><th>Breakfasts</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table>
-<p style="text-align:right"><b>Total: AED ${order.total}</b><br>Delivery included</p><p style="font-size:12px">Demo invoice — prices are indicative.</p></body></html>`;
+<p style="text-align:right"><b>Total: AED ${esc(order.total)}</b><br>Delivery included</p><p style="font-size:12px">Saved offline — this summary is not a tax invoice. Download the invoice again when you’re back online.</p></body></html>`;
   const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
   const a = document.createElement('a');
-  a.href = url; a.download = `MorningBox-Invoice-${order.id}.html`;
+  a.href = url; a.download = `MorningBox-Order-${order.id}.html`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -174,6 +249,13 @@ export function BizWelcome() {
   useSyncOrders();
   const user = state.businessUser;
   const orders = state.businessOrders || [];
+  const [plans, setPlans] = useState([]);
+  useEffect(() => {
+    if (!state.session) return undefined;
+    let live = true;
+    get('/business/plans').then(p => { if (live && Array.isArray(p)) setPlans(p); }).catch(() => {});
+    return () => { live = false; };
+  }, [state.session]);
   if (!user && !orders.length) return <Navigate to="/business/people" replace />;
 
   const today = todayIso();
@@ -185,20 +267,37 @@ export function BizWelcome() {
     set(s => { s.business = { ...emptyBusiness(), delivery: { ...emptyBusiness().delivery, company: user?.company || '' } }; });
     nav('/business/people');
   };
-  const reorder = which => {
+  /* FLW §18: reorder any previous order; a multi-day order keeps each day's boxes for the dates chosen next. */
+  const reorder = (which, orderId = s0 => s0.businessOrders[0].id) => {
     set(s => {
-      const o = s.businessOrders[0];
-      const d = o.days.find(x => !x.cancelled) || o.days[0];
+      const id = typeof orderId === 'function' ? orderId(s) : orderId;
+      const o = s.businessOrders.find(x => x.id === id) || s.businessOrders[0];
+      const live = o.days.filter(x => !x.cancelled);
+      const d = live[0] || o.days[0];
       s.business = {
         ...emptyBusiness(),
         people: d.people, hasSpecial: d.specials.length > 0, specials: structuredClone(d.specials),
         mode: o.mode || 'mix', lines: structuredClone(d.lines),
-        delivery: { ...emptyBusiness().delivery, ...structuredClone(d.delivery || {}), area: 'DIFC', window: d.window || 'w1' },
-        source: { orderId: o.id, kind: which }
+        delivery: { ...emptyBusiness().delivery, ...structuredClone(d.delivery || {}), area: 'DIFC', window: d.window || null },
+        source: { orderId: o.id, kind: which },
+        sourceDays: live.length > 1 ? live.map(x => ({ lines: structuredClone(x.lines), specials: structuredClone(x.specials) })) : null
       };
     });
     nav('/business/dates');
   };
+  const fromPlan = pl => {
+    const p = pl.plan;
+    set(s => {
+      s.business = {
+        ...emptyBusiness(),
+        people: p.people, hasSpecial: p.specials.length > 0, specials: structuredClone(p.specials), mode: p.mode, lines: structuredClone(p.lines),
+        delivery: { ...emptyBusiness().delivery, ...structuredClone(p.delivery), area: 'DIFC', window: p.delivery.window || null },
+        source: { planId: pl.id, kind: 'plan' }
+      };
+    });
+    nav('/business/dates');
+  };
+  const removePlan = id => del(`/business/plans/${id}`).then(() => setPlans(ps => ps.filter(p => p.id !== id))).catch(() => {});
 
   return (
     <Screen>
@@ -223,22 +322,34 @@ export function BizWelcome() {
         <div className="stack gap-10">
           {last ? (
             <>
-              <button type="button" className="option" onClick={() => reorder('reorder')}>
-                <span className="ico"><Icon name="repeat" size={22} stroke={1.6} /></span>
-                <span className="stack gap-4"><span style={{ fontWeight: 600, fontSize: 17 }}>Reorder a Previous Order</span>
-                  <span className="sm">Copy order {last.id} — {(last.days.find(d => !d.cancelled) || last.days[0]).people} people. You choose the dates.</span></span>
-                <Icon name="chevron" size={20} stroke={1.8} style={{ marginLeft: 'auto' }} />
-              </button>
-              <button type="button" className="option" onClick={() => reorder('plan')}>
-                <span className="ico"><Icon name="bookmark" size={22} stroke={1.6} /></span>
-                <span className="stack gap-4"><span style={{ fontWeight: 600, fontSize: 17 }}>Use a Saved Plan</span>
-                  <span className="sm">Your saved team setup (from your last order). Headcount, special breakfasts and boxes are copied.</span></span>
-                <Icon name="chevron" size={20} stroke={1.8} style={{ marginLeft: 'auto' }} />
-              </button>
+              <span className="eyebrow grey">Reorder a Previous Order</span>
+              {orders.slice(0, 5).map(o => {
+                const live = o.days.filter(d => !d.cancelled);
+                const d = live[0] || o.days[0];
+                return (
+                  <button key={o.id} type="button" className="option" onClick={() => reorder('reorder', o.id)}>
+                    <span className="ico"><Icon name="repeat" size={22} stroke={1.6} /></span>
+                    <span className="stack gap-4"><span style={{ fontWeight: 600, fontSize: 17 }}>Order {o.id}</span>
+                      <span className="sm">{live.length > 1 ? `${live.length} days · ` : ''}{d.people} people · {dateInfo(d.date).label}. You choose the dates.</span></span>
+                    <Icon name="chevron" size={20} stroke={1.8} style={{ marginLeft: 'auto' }} />
+                  </button>
+                );
+              })}
             </>
           ) : <p className="sm" style={{ margin: 0 }}>Your past orders will appear here so you can reorder in a few taps.</p>}
+          {plans.map(pl => (
+            <div key={pl.id} className="stack" style={{ gap: 2 }}>
+              <button type="button" className="option" onClick={() => fromPlan(pl)}>
+                <span className="ico"><Icon name="bookmark" size={22} stroke={1.6} /></span>
+                <span className="stack gap-4"><span style={{ fontWeight: 600, fontSize: 17 }}>Use a Saved Plan · {pl.name}</span>
+                  <span className="sm">{pl.plan.people} people. Headcount, special breakfasts and boxes are copied — you choose the dates.</span></span>
+                <Icon name="chevron" size={20} stroke={1.8} style={{ marginLeft: 'auto' }} />
+              </button>
+              <button type="button" className="btn-text" style={{ alignSelf: 'flex-end', fontSize: 13, color: 'var(--text-3)' }} onClick={() => removePlan(pl.id)}>Remove saved plan</button>
+            </div>
+          ))}
         </div>
-        <Note>Nothing is ordered automatically. Every Business Breakfast is a one-off order — never a subscription.</Note>
+        <Note>Every order is one-off — never a subscription.</Note>
       </main>
       <Footer><button className="btn" onClick={fresh}><Icon name="plus" size={18} stroke={2} />New Business Breakfast</button></Footer>
     </Screen>
@@ -263,8 +374,7 @@ export function People() {
       <main className="screen-main" style={{ paddingTop: 28 }}>
         <div className="stack gap-10">
           <span className="eyebrow">Business Breakfast</span>
-          <h1 className="q">How many people are you ordering for?</h1>
-          <p className="help">Include everyone — you can add special breakfasts in the next step.</p>
+          <h1 className="q">How many people are you ordering for? <InfoTip label="Who to include">Include everyone. You can add special breakfasts for dietary needs or allergies in the next step.</InfoTip></h1>
         </div>
         <div className="row" style={{ justifyContent: 'center', gap: 20, padding: '12px 0' }}>
           <button type="button" className="icon-btn" style={big} aria-label="Fewer people" disabled={b.people <= 1} onClick={() => setPeople(b.people - 1)}><Icon name="minus" size={22} stroke={2} /></button>
@@ -281,7 +391,7 @@ export function People() {
         <div className="chips" style={{ justifyContent: 'center' }} aria-label="Quick pick">
           {[5, 10, 20, 30, 50].map(n => <Chip key={n} on={b.people === n} onClick={() => setPeople(n)}>{n}</Chip>)}
         </div>
-        <Note icon="info">Larger orders get an automatic volume discount — no code needed.</Note>
+        <Note icon="info">Volume discount applies automatically.</Note>
       </main>
       <Footer><button className="btn" onClick={() => nav('/business/special')}>Continue</button></Footer>
     </Screen>
@@ -317,8 +427,8 @@ export function Specials() {
           <h1 className="q">Does anyone have dietary requirements or allergies?</h1>
         </div>
         <div className="seg" style={SEG2} role="radiogroup" aria-label="Dietary requirements or allergies">
-          <button type="button" role="radio" aria-checked={b.hasSpecial === false} className={b.hasSpecial === false ? 'on' : ''} onClick={() => setHas(false)}>No</button>
-          <button type="button" role="radio" aria-checked={b.hasSpecial === true} className={b.hasSpecial === true ? 'on' : ''} onClick={() => setHas(true)}>Yes</button>
+          <button type="button" role="radio" aria-checked={b.hasSpecial === false} className={b.hasSpecial === false ? 'on' : ''} onClick={() => setHas(false)}>{b.hasSpecial === false && <Icon name="check" size={14} stroke={2.4} style={{ marginRight: 6 }} />}No</button>
+          <button type="button" role="radio" aria-checked={b.hasSpecial === true} className={b.hasSpecial === true ? 'on' : ''} onClick={() => setHas(true)}>{b.hasSpecial === true && <Icon name="check" size={14} stroke={2.4} style={{ marginRight: 6 }} />}Yes</button>
         </div>
 
         {b.hasSpecial && (
@@ -341,8 +451,13 @@ export function Specials() {
                     <span className="label">Qty</span>
                     <Qty value={s.qty} min={1} max={b.people} label="special breakfasts" onChange={v => upd(d => { d.specials[i].qty = v; })} />
                   </div>
+                  <SizeSeg value={s.size || 'regular'} label={`Size for Special Breakfast ${i + 1}`} onChange={sz => upd(d => { d.specials[i].size = sz; })} />
                   {!err && resolved[i].resolved && <span className="xs">{describe(resolved[i].resolved.recipe)}</span>}
-                  {unsafe && <Err>No approved breakfast can safely meet this combination yet — please contact us</Err>}
+                  {unsafe && <>
+                    <Err>No approved breakfast can safely meet this combination yet.</Err>
+                    {/* Master Plan §16: a safe no-match, with a way to reach us; recorded as a business inquiry (§15). */}
+                    <Link to={`/help?topic=business&note=${encodeURIComponent(`Special Breakfast for: ${specialText(s)}`)}`} className="link" onClick={() => track('business_inquiry', { dietary: s.dietary, allergies: s.allergies })}>Ask our team about this requirement</Link>
+                  </>}
                   {touched && err && <Err>{err}</Err>}
                 </section>
               );
@@ -351,7 +466,8 @@ export function Specials() {
               <Icon name="plus" size={16} stroke={2} />Add another Special Breakfast
             </button>
             {overLimit && <Err>Special Breakfasts ({sq}) can’t be more than the {b.people} people in the order</Err>}
-            <Note icon="shield">Please check requirements with your guests. Special Breakfasts are packed and labelled separately.</Note>
+            <Note icon="shield">Special Breakfasts are packed and labelled separately.</Note>
+            <Note icon="info">Please confirm dietary needs and allergies with your attendees before ordering — we prepare exactly what you enter here.</Note>
           </>
         )}
       </main>
@@ -392,18 +508,18 @@ export function Selection() {
       <main className="screen-main" style={{ paddingTop: 28 }}>
         <div className="stack gap-10">
           <span className="eyebrow">Breakfast selection</span>
-          <h1 className="q">How should we choose the {general} general breakfasts?</h1>
+          <h1 className="q">How should we choose the {general} general breakfasts? <InfoTip label="About the options"><b>Morning Box Mix</b> gives a balanced spread across our breakfasts. <b>Choose Your Boxes</b> lets you pick each breakfast, size and quantity.</InfoTip></h1>
         </div>
         <div className="grid-2" role="radiogroup" aria-label="Selection method">
           <button type="button" className={`tile${mode === 'mix' ? ' on' : ''}`} role="radio" aria-checked={mode === 'mix'}
             onClick={() => { if (mode !== 'mix') { setMode('mix'); setLines(mixLines(general)); } }}>
             <span className="ico"><Icon name="box" size={22} stroke={1.6} /></span>
-            <span className="stack gap-4"><span className="strong">Morning Box Mix</span><span className="xs">A balanced spread across our breakfasts</span></span>
+            <span className="strong">Morning Box Mix</span>
             <Tick on={mode === 'mix'} />
           </button>
           <button type="button" className={`tile${mode === 'choose' ? ' on' : ''}`} role="radio" aria-checked={mode === 'choose'} onClick={() => nav('/business/boxes')}>
             <span className="ico"><Icon name="edit" size={22} stroke={1.6} /></span>
-            <span className="stack gap-4"><span className="strong">Choose Your Boxes</span><span className="xs">Pick each breakfast and quantity</span></span>
+            <span className="strong">Choose Your Boxes</span>
             <Tick on={mode === 'choose'} />
           </button>
         </div>
@@ -431,8 +547,8 @@ export function Selection() {
           {specials.length > 0 && (
             <div className="list-row">
               <span className="ci"><Icon name="shield" size={20} stroke={1.6} /></span>
-              <span className="stack"><span className="strong">Special Breakfasts × {sq}</span>
-                <span className="xs">{specials.map(specialText).join(' · ')} — packed and labelled separately</span></span>
+              <span className="stack"><span className="strong">Special Breakfasts × {sq} <InfoTip label="About special breakfasts">Packed and labelled separately for each person.</InfoTip></span>
+                <span className="xs">{specials.map(specialText).join(' · ')}</span></span>
             </div>
           )}
         </section>
@@ -471,7 +587,6 @@ export function ChooseBoxes() {
         <div className="stack gap-10">
           <span className="eyebrow">Choose your boxes</span>
           <h1 className="q">Pick breakfasts for {general} people</h1>
-          <p className="help">Choose a size and quantity for each. Special Breakfasts are already arranged separately.</p>
         </div>
         {groups.map(([style, label]) => (
           <section key={style} className="stack gap-12" aria-label={label}>
@@ -509,7 +624,14 @@ export function ChooseBoxes() {
             <span>{chosen} of {general} chosen. {diff > 0 ? 'Add' : 'Remove'} {Math.abs(diff)} to match your headcount.</span>
           </div>
         )}
-        <div className="sr"><span className="sm">{chosen} of {general} chosen</span><span className="money">AED {running}</span></div>
+        {diff !== 0 && chosen > 0 && (
+          <button type="button" className="btn-secondary" onClick={() => {
+            /* Keep the chosen mix, rescaled to exactly the headcount. */
+            const scaled = scaleLines(lines, general);
+            setPick(p => ({ ...p, ...Object.fromEntries(scaled.map(l => [l.recipeId, { size: l.size, qty: l.qty }])) }));
+          }}>Match my headcount ({general})</button>
+        )}
+        {diff === 0 ? <PriceSummary price={priceDay(lines, activeSpecials(b))} /> : <div className="sr"><span className="sm">{chosen} of {general} chosen</span><span className="money">AED {running}</span></div>}
         <button className="btn" disabled={diff !== 0} onClick={() => { upd(d => { d.mode = 'choose'; d.lines = lines; }); nav('/business/dates'); }}>Confirm</button>
       </Footer>
     </Screen>
@@ -523,20 +645,30 @@ export function BizDates() {
   const weeks = useMemo(() => planningWeeks(), []);
   const all = weeks.flat().map(d => d.iso);
   const [week, setWeek] = useState(0);
+  const config = useConfig();
   const [picked, setPicked] = useState(() => (b.dates || []).filter(d => all.includes(d)));
   const [same, setSame] = useState(b.sameForAll !== false);
   const [dp, setDp] = useState(() => Object.fromEntries(all.map(iso => [iso, b.perDay?.[iso]?.people || b.people])));
+  /* Per-date boxes and Special Breakfasts, once the customer edits that date. */
+  const [own, setOwn] = useState(() => Object.fromEntries(all.filter(iso => b.perDay?.[iso]?.lines).map(iso => [iso, { lines: b.perDay[iso].lines, specials: b.perDay[iso].specials || activeSpecials(b) }])));
+  const [editing, setEditing] = useState(null);
   const sq = specialQty(b);
   const minPeople = Math.max(1, sq);
   if (!b.lines?.length && b.people - sq > 0) return <Navigate to="/business/selection" replace />;
 
   const toggle = iso => setPicked(p => (p.includes(iso) ? p.filter(x => x !== iso) : [...p, iso].sort()));
   const custom = picked.length > 1 && !same;
+  const emptyDay = custom && picked.some(iso => own[iso] && sum(own[iso].lines) + sum(own[iso].specials) < 1);
   const proceed = () => {
+    if (emptyDay) return;
+    if (picked.some(iso => closedOn(config, iso))) { setPicked(p => p.filter(iso => !closedOn(config, iso))); return; }
     upd(d => {
       d.dates = picked;
       d.sameForAll = !custom;
-      picked.forEach(iso => { d.perDay[iso] = { ...(d.perDay[iso] || {}), people: custom ? dp[iso] : d.people }; });
+      picked.forEach(iso => {
+        const mine = custom && own[iso];
+        d.perDay[iso] = { ...(d.perDay[iso] || {}), people: mine ? sum(mine.lines) + sum(mine.specials) : custom ? dp[iso] : d.people, lines: mine ? mine.lines : null, specials: mine ? mine.specials : null };
+      });
     });
     nav('/business/delivery');
   };
@@ -548,23 +680,23 @@ export function BizDates() {
         <div className="stack gap-10">
           <span className="eyebrow">{b.source ? 'Reorder' : 'Delivery dates'}</span>
           <h1 className="q">Which mornings should we deliver?</h1>
-          <p className="help">Choose one or more dates for {b.people} people.</p>
         </div>
         <div className="seg" style={SEG2} role="tablist" aria-label="Week">
           {weeks.map((w, i) => (
             <button key={i} role="tab" aria-selected={week === i} className={week === i ? 'on' : ''} onClick={() => setWeek(i)}>
-              {i === 0 ? 'This week' : 'Next week'} · {w[0].day}–{w[6].day} {w[6].mon}
+              {i === 0 ? 'This week · ' : i === 1 ? 'Next week · ' : ''}{w[0].day}{w[0].mon === w[6].mon ? '' : ` ${w[0].mon}`}–{w[6].day} {w[6].mon}
             </button>
           ))}
         </div>
         <div className="grid-4">
           {weeks[week].map(d => {
             const on = picked.includes(d.iso);
+            const shut = closedOn(config, d.iso);
             return (
-              <button key={d.iso} type="button" className={`day${on ? ' on' : ''}`} aria-pressed={on}
-                aria-label={`${d.long}${on ? ', selected' : ''}`} onClick={() => toggle(d.iso)}>
+              <button key={d.iso} type="button" className={`day${on ? ' on' : ''}`} aria-pressed={on} disabled={!!shut}
+                aria-label={`${d.long}${shut ? `, closed (${shut})` : on ? ', selected' : ''}`} onClick={() => toggle(d.iso)}>
                 {on && <span className="ck"><Icon name="check" size={11} stroke={3.5} /></span>}
-                <span className="wd">{d.wd}</span><span className="dn">{d.day}</span><span className="mo">{d.mon}</span>
+                <span className="wd">{d.wd}</span><span className="dn">{d.day}</span><span className="mo">{shut ? 'Closed' : d.mon}</span>
               </button>
             );
           })}
@@ -580,7 +712,7 @@ export function BizDates() {
             <div className="stack gap-8" role="radiogroup" aria-label="Order across days">
               {[[true, 'Same Order for All Days', `${b.people} people every day`], [false, 'Customize Each Day', 'Set the headcount for each date']].map(([v, l, d]) => (
                 <button key={l} type="button" className={`win${same === v ? ' on' : ''}`} role="radio" aria-checked={same === v} onClick={() => setSame(v)}>
-                  <span className="dot" /><span className="stack"><span className="strong">{l}</span><span className="xs">{d}</span></span>
+                  <span className="dot" /><span className="strong">{l}</span>
                 </button>
               ))}
             </div>
@@ -590,18 +722,35 @@ export function BizDates() {
         {custom && (
           <section className="card list" aria-label="Headcount per day">
             {picked.map((iso, k) => {
-              const people = dp[iso];
-              const price = priceDay(dayLines(b, iso, people), activeSpecials(b));
+              const mine = own[iso];
+              const lines = mine ? mine.lines : dayLines({ ...b, sameForAll: true }, iso, dp[iso]);
+              const sp = mine ? mine.specials : activeSpecials(b);
+              const people = mine ? sum(lines) + sum(sp) : dp[iso];
+              const price = priceDay(lines, sp);
               return (
-                <div key={iso} className="row" style={{ padding: '14px 0', borderTop: k ? '1px solid var(--line-soft)' : 0 }}>
-                  <span className="stack"><span className="strong">{dateInfo(iso).label}</span><span className="xs">{people} people · AED {price.total}</span></span>
-                  <Qty value={people} min={minPeople} max={MAX_PEOPLE} label={`people on ${dateInfo(iso).label}`} onChange={v => setDp(p => ({ ...p, [iso]: v }))} />
+                <div key={iso} className="stack gap-8" style={{ padding: '14px 0', borderTop: k ? '1px solid var(--line-soft)' : 0 }}>
+                  <div className="row">
+                    <span className="stack"><span className="strong">{dateInfo(iso).label}</span><span className="xs">{people} people · AED {price.total}</span></span>
+                    {mine ? <span className="strong">{people}</span> : <Qty value={people} min={minPeople} max={MAX_PEOPLE} label={`people on ${dateInfo(iso).label}`} onChange={v => setDp(p => ({ ...p, [iso]: v }))} />}
+                  </div>
+                  <button type="button" className="link-hit" style={{ alignSelf: 'flex-start', fontWeight: 600, fontSize: 14 }} onClick={() => setEditing(editing === iso ? null : iso)}>{editing === iso ? 'Done' : 'Change boxes for this day'}</button>
+                  {editing === iso && (
+                    <div className="stack gap-6">
+                      <DayBoxes lines={lines} specials={sp} onChange={(l, x) => setOwn(o => ({ ...o, [iso]: { lines: l, specials: x } }))} />
+                      {mine && <button type="button" className="link-hit" style={{ alignSelf: 'flex-start', fontSize: 14, color: 'var(--text-3)' }} onClick={() => { setOwn(o => { const n = { ...o }; delete n[iso]; return n; }); setEditing(null); }}>Use the main order for this day</button>}
+                    </div>
+                  )}
                 </div>
               );
             })}
           </section>
         )}
-        {custom && <Note>Each day’s boxes are rescaled to its headcount. Volume discount is calculated per day.</Note>}
+        {picked.length > 1 && b.sourceDays && (
+          <button type="button" className="link" style={{ alignSelf: 'flex-start' }} onClick={() => { setSame(false); setOwn(Object.fromEntries(picked.map((iso, k) => [iso, structuredClone(b.sourceDays[k % b.sourceDays.length])]))); }}>
+            Copy each day as in order {b.source?.orderId} ({b.sourceDays.length} days)
+          </button>
+        )}
+        {custom && <Note>Change a day’s headcount and its boxes are rescaled — or change the boxes for that day directly. Volume discount is calculated per day.</Note>}
         {picked.length > 0 && !custom && (
           <div className="card stack gap-4" style={{ padding: 16 }}>
             <span className="strong">{picked.length} morning{picked.length > 1 ? 's' : ''} selected</span>
@@ -610,7 +759,7 @@ export function BizDates() {
         )}
       </main>
       <Footer>
-        <button className="btn" disabled={!picked.length} onClick={proceed}>{picked.length ? 'Continue' : 'Choose at least one date'}</button>
+        <button className="btn" disabled={!picked.length || emptyDay} onClick={proceed}>{!picked.length ? 'Choose at least one date' : emptyDay ? 'Each day needs at least one box' : 'Continue'}</button>
       </Footer>
     </Screen>
   );
@@ -621,7 +770,12 @@ export function BizDelivery() {
   const { state, b, upd } = useBiz();
   const nav = useNavigate();
   const [touched, setTouched] = useState(false);
+  /* Live window availability: a window is offered only if it can take the whole headcount (MB-DLV-001 §8). */
+  const [avail, setAvail] = useState({});
+  const key = (b.dates || []).join(',');
+  useEffect(() => { if (key) get(`/availability?dates=${key}`).then(setAvail).catch(() => {}); }, [key]);
   if (!b.dates?.length) return <Navigate to="/business/dates" replace />;
+  const fullOn = (iso, w) => { const r = avail[iso]?.[w]?.remaining; return typeof r === 'number' && r < dayPeople(b, iso); };
   const dl = b.delivery;
   const same = b.deliverySameForAll !== false || b.dates.length < 2;
   const digits = mobileDigits(dl.mobile || '');
@@ -631,9 +785,10 @@ export function BizDelivery() {
     office: !dl.office.trim() && 'Enter the office, floor or unit',
     contact: !dl.contact.trim() && 'Enter who will receive the delivery',
     mobile: !/^5\d{8}$/.test(digits) && 'Enter a UAE mobile number, e.g. 50 123 4567',
-    window: !(same ? dl.window : b.dates.every(iso => windowFor(b, iso))) && 'Choose a delivery window'
+    window: (!(same ? dl.window : b.dates.every(iso => windowFor(b, iso))) && 'Choose a delivery window')
+      || (b.dates.some(iso => fullOn(iso, same ? dl.window : windowFor(b, iso))) && 'That window is full for your headcount — choose another')
   };
-  const ok = !Object.values(errs).some(Boolean);
+  const ok = !Object.values(errs).some(Boolean) && (same || !b.dates.some(iso => ownBad(iso)));
   const field = (key, label, placeholder, extra = {}) => (
     <div className="field">
       <label htmlFor={`bd-${key}`}>{label}</label>
@@ -647,16 +802,23 @@ export function BizDelivery() {
     const cur = iso ? windowFor(b, iso) : dl.window;
     return (
       <div className="grid-3" role="radiogroup" aria-label={`Delivery window${iso ? ` for ${dateInfo(iso).label}` : ''}`}>
-        {DELIVERY_WINDOWS.map(w => (
-          <button key={w.id} type="button" className={`win${cur === w.id ? ' on' : ''}`} role="radio" aria-checked={cur === w.id}
-            style={{ flexDirection: 'column', justifyContent: 'center', gap: 2, padding: '10px 6px', minHeight: 64, textAlign: 'center' }}
-            onClick={() => upd(d => { if (iso) d.perDay[iso] = { ...(d.perDay[iso] || {}), window: w.id }; else d.delivery.window = w.id; })}>
-            <span className="strong" style={{ fontSize: 14 }}>{w.label.replace(' AM', '')}</span><span className="xs">AM</span>
-          </button>
-        ))}
+        {DELIVERY_WINDOWS.map(w => {
+          const full = iso ? fullOn(iso, w.id) : b.dates.some(d => fullOn(d, w.id));
+          return (
+            <button key={w.id} type="button" className={`win${cur === w.id ? ' on' : ''}`} role="radio" aria-checked={cur === w.id} disabled={full}
+              style={{ flexDirection: 'column', justifyContent: 'center', gap: 2, padding: '10px 6px', minHeight: 64, textAlign: 'center' }}
+              onClick={() => upd(d => { if (iso) d.perDay[iso] = { ...(d.perDay[iso] || {}), window: w.id }; else d.delivery.window = w.id; })}>
+              <span className="strong row" style={{ fontSize: 14, gap: 4 }}>{cur === w.id && <Icon name="check" size={13} stroke={2.6} />}{w.label.replace(' AM', '')}</span><span className="xs">{full ? 'Full' : 'AM'}</span>
+            </button>
+          );
+        })}
       </div>
     );
   };
+  /* FLW §15: a day can have its own location and contact when "Set per day" is chosen. */
+  const own = iso => b.perDay?.[iso]?.delivery || null;
+  const setOwn = (iso, patch) => upd(d => { d.perDay[iso] = { ...(d.perDay[iso] || {}), delivery: patch === null ? null : { ...(d.perDay[iso]?.delivery || { building: d.delivery.building, office: d.delivery.office, contact: d.delivery.contact, mobile: d.delivery.mobile, notes: d.delivery.notes }), ...patch } }; });
+  const ownBad = iso => { const o = own(iso); return o && (!o.building?.trim() || !o.office?.trim() || !o.contact?.trim() || !/^5\d{8}$/.test(mobileDigits(o.mobile || ''))); };
 
   return (
     <Screen>
@@ -668,17 +830,17 @@ export function BizDelivery() {
         </div>
         {b.dates.length > 1 && (
           <div className="seg" style={SEG2} role="radiogroup" aria-label="Delivery across days">
-            <button type="button" role="radio" aria-checked={same} className={same ? 'on' : ''} onClick={() => upd(d => { d.deliverySameForAll = true; })}>Same for all days</button>
-            <button type="button" role="radio" aria-checked={!same} className={!same ? 'on' : ''} onClick={() => upd(d => { d.deliverySameForAll = false; d.dates.forEach(iso => { d.perDay[iso] = { ...(d.perDay[iso] || {}), window: d.perDay[iso]?.window || d.delivery.window }; }); })}>Set per day</button>
+            <button type="button" role="radio" aria-checked={same} className={same ? 'on' : ''} onClick={() => upd(d => { d.deliverySameForAll = true; })}>{same && <Icon name="check" size={14} stroke={2.4} style={{ marginRight: 6 }} />}Same for all days</button>
+            <button type="button" role="radio" aria-checked={!same} className={!same ? 'on' : ''} onClick={() => upd(d => { d.deliverySameForAll = false; d.dates.forEach(iso => { d.perDay[iso] = { ...(d.perDay[iso] || {}), window: d.perDay[iso]?.window || d.delivery.window }; }); })}>{!same && <Icon name="check" size={14} stroke={2.4} style={{ marginRight: 6 }} />}Set per day</button>
           </div>
         )}
         <section className="stack gap-12">
           {field('company', 'Company name', 'e.g. Gulf Capital Partners', { autoComplete: 'organization' })}
           {field('building', 'Building / Tower', 'e.g. Gate Village, Building 3')}
           {field('office', 'Office / Floor / Unit', 'e.g. Level 4, Office 402')}
-          <div className="field"><label htmlFor="bd-area">Area</label>
-            <input id="bd-area" className="input" value="DIFC" readOnly aria-describedby="bd-area-h" />
-            <span id="bd-area-h" className="xs">Morning Box currently delivers within DIFC.</span></div>
+          <div className="field"><label htmlFor="bd-area">Area <InfoTip label="Delivery area">Morning Box currently delivers within DIFC.</InfoTip></label>
+            <input id="bd-area" className="input" value="DIFC" readOnly />
+</div>
         </section>
         <hr className="divider" />
         <section className="stack gap-12">
@@ -697,13 +859,23 @@ export function BizDelivery() {
         </section>
         {same ? (
           <section className="stack gap-10">
-            <div className="row"><h2 className="h3">Delivery window</h2><span className="xs">We arrive within your hour</span></div>
+            <div className="row"><h2 className="h3">Delivery window</h2></div>
             <Windows />
           </section>
         ) : b.dates.map(iso => (
           <section key={iso} className="stack gap-10">
             <h2 className="h3">{dateInfo(iso).long}</h2>
             <Windows iso={iso} />
+            {own(iso) ? (
+              <div className="card stack gap-10" style={{ padding: 16 }}>
+                {[['building', 'Building / Tower'], ['office', 'Office / Floor / Unit'], ['contact', 'Contact person'], ['mobile', 'Mobile number'], ['notes', 'Delivery notes (optional)']].map(([k, label]) => (
+                  <div key={k} className="field"><label htmlFor={`bd-${iso}-${k}`}>{label}</label>
+                    <input id={`bd-${iso}-${k}`} className={`input${touched && k !== 'notes' && ownBad(iso) && !(own(iso)[k] || '').trim() ? ' invalid' : ''}`} inputMode={k === 'mobile' ? 'tel' : undefined} value={own(iso)[k] || ''} onChange={e => setOwn(iso, { [k]: e.target.value })} /></div>
+                ))}
+                {touched && ownBad(iso) && <Err>Complete this day’s location and contact (UAE mobile, e.g. 50 123 4567)</Err>}
+                <button type="button" className="link" style={{ alignSelf: 'flex-start' }} onClick={() => setOwn(iso, null)}>Use the main location and contact</button>
+              </div>
+            ) : <button type="button" className="link" style={{ alignSelf: 'flex-start' }} onClick={() => setOwn(iso, {})}>Different location or contact this day</button>}
           </section>
         ))}
         {touched && errs.window && <Err>{errs.window}</Err>}
@@ -728,12 +900,18 @@ export function BizAccount() {
   const [email, setEmail] = useState(state.businessUser?.email || state.user?.email || '');
   const [sent, setSent] = useState(false);
   const [devCode, setDevCode] = useState('');
-  const [existing, setExisting] = useState(false);
+  const [needName, setNeedName] = useState(false);
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [wait, setWait] = useState(0);
   const refs = useRef([]);
+  useEffect(() => {
+    if (wait <= 0) return undefined;
+    const t = setTimeout(() => setWait(w => w - 1), 1000);
+    return () => clearTimeout(t);
+  }, [wait]);
   if (signedIn && state.businessUser) return <Navigate to="/business/review" replace />;
   if (!b.dates?.length) return <Navigate to="/business/dates" replace />;
 
@@ -743,10 +921,17 @@ export function BizAccount() {
   const companyOk = company.trim().length > 0;
   const mailOk = emailOk(email);
   const typeDigit = (i, v) => {
-    const d = v.replace(/\D/g, '').slice(-1);
-    setCode(c => { const n = c.slice(); n[i] = d; return n; });
-    if (d && i < 5) refs.current[i + 1]?.focus();
+    const all = v.replace(/\D/g, '');
+    if (all.length > 1) { // pasted or auto-filled code
+      const ds = all.slice(0, 6).split('');
+      setCode(c => c.map((_, k) => ds[k] || ''));
+      refs.current[Math.min(ds.length, 5)]?.focus();
+      return;
+    }
+    setCode(c => { const n = c.slice(); n[i] = all; return n; });
+    if (all && i < 5) refs.current[i + 1]?.focus();
   };
+  const onPaste = e => { const t = pastedCode(e); if (t) { e.preventDefault(); typeDigit(0, t); } };
   const run = async fn => {
     setBusy(true); setError('');
     try { await fn(); } catch (e) { setError(e.message); } finally { setBusy(false); }
@@ -765,20 +950,27 @@ export function BizAccount() {
     run(async () => {
       const res = await post('/auth/otp', { mobile: digits });
       setDevCode(res.devCode || '');
-      setExisting(!!res.existingUser);
-      setSent(true);
+      setSent(true); setWait(30); setCode(['', '', '', '', '', '']);
       setTimeout(() => refs.current[0]?.focus(), 50);
     });
   };
   const verify = () => {
     setTouched(true);
-    if ((!existing && !nameOk) || !companyOk || !mailOk || code.join('').length < 6) return;
-    run(async () => {
-      const res = await post('/auth/verify', { mobile: digits, code: code.join(''), firstName: existing ? undefined : name.trim() });
-      setToken(res.token);
-      set(s => applySession(s, res));
-      await saveAccount();
-    });
+    if ((needName && !nameOk) || !companyOk || !mailOk || code.join('').length < 6) return;
+    setBusy(true); setError('');
+    (async () => {
+      try {
+        const res = await post('/auth/verify', { mobile: digits, code: code.join(''), firstName: nameOk ? name.trim() : undefined });
+        setToken(null);
+        /* A different customer signing in on this device: drop the previous customer's data (the business draft stays). */
+        set(s => { if (s.owner && s.owner !== res.user.mobile) resetPersonal(s); applySession(s, res); });
+        await saveAccount();
+      } catch (e) {
+        if (e.code === 'name_required') { setNeedName(true); setError('New to Morning Box? Enter your first name to create your account.'); }
+        else setError(e.message);
+        if (e.code === 'otp_wrong') { setCode(['', '', '', '', '', '']); refs.current[0]?.focus(); }
+      } finally { setBusy(false); }
+    })();
   };
   const continueSignedIn = () => {
     setTouched(true);
@@ -796,7 +988,6 @@ export function BizAccount() {
         </div>
         <div className="stack gap-8">
           <h1 className="h-display" style={{ fontSize: 34 }}>Save your business order</h1>
-          <p className="help">A few details so we can confirm and send your tax invoice. Trade License and TRN are not needed now.</p>
         </div>
         {signedIn ? (
           <section className="card list" aria-label="Signed in as">
@@ -822,15 +1013,21 @@ export function BizAccount() {
                 </div>
                 <div className="otp">
                   {code.map((c, i) => (
-                    <input key={i} ref={el => (refs.current[i] = el)} inputMode="numeric" maxLength={1} aria-label={`Digit ${i + 1}`}
-                      value={c} onChange={e => typeDigit(i, e.target.value)}
+                    <input key={i} ref={el => (refs.current[i] = el)} inputMode="numeric" maxLength={i === 0 ? 6 : 1} aria-label={`Digit ${i + 1}`}
+                      autoComplete={i === 0 ? 'one-time-code' : 'off'} value={c} onChange={e => typeDigit(i, e.target.value)} onPaste={onPaste}
                       onKeyDown={e => { if (e.key === 'Backspace' && !c && i > 0) refs.current[i - 1]?.focus(); }} />
                   ))}
+                </div>
+                <div className="row">
+                  <span className="help" style={{ fontSize: 15 }}>Didn’t get it?</span>
+                  {wait > 0
+                    ? <span className="strong" style={{ fontSize: 15 }}>Resend in 0:{String(wait).padStart(2, '0')}</span>
+                    : <button type="button" className="link" disabled={busy} onClick={sendCode}>Resend code</button>}
                 </div>
                 {devCode && <span className="demo-note">Development build — your code is <b>{devCode}</b>. In production it arrives by SMS.</span>}
               </div>
             )}
-            {sent && !existing && (
+            {sent && needName && (
               <div className="field">
                 <label htmlFor="ba-fn">Your first name</label>
                 <input id="ba-fn" className={`input${touched && !nameOk ? ' invalid' : ''}`} value={name} autoComplete="given-name" onChange={e => setName(e.target.value)} />
@@ -850,7 +1047,6 @@ export function BizAccount() {
               <label htmlFor="ba-em">Business email</label>
               <input id="ba-em" type="email" className={`input${touched && !mailOk ? ' invalid' : ''}`} value={email} autoComplete="email" placeholder="name@company.com" onChange={e => setEmail(e.target.value)} />
               {touched && !mailOk && <Err>Enter a valid email, e.g. name@company.com</Err>}
-              <span className="xs">Your confirmation and tax invoice are sent here.</span>
             </div>
           </>
         )}
@@ -862,7 +1058,7 @@ export function BizAccount() {
           : !sent
             ? <button className="btn" disabled={busy} onClick={sendCode}>{busy ? 'Sending…' : 'Send code'}</button>
             : <button className="btn" disabled={busy || code.join('').length < 6} onClick={verify}>{busy ? 'Verifying…' : 'Verify & Continue'}</button>}
-        <p className="xs center" style={{ margin: 0 }}>By continuing you agree to the Terms and Privacy Policy.</p>
+        <Agreement className="xs center" style={{ fontSize: undefined }} />
       </Footer>
     </Screen>
   );
@@ -874,35 +1070,44 @@ export function BizReview() {
   const nav = useNavigate();
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState('');
+  const [trnTouched, setTrnTouched] = useState(false);
+  /* One key per checkout: double taps and retries never create a second order. */
+  const [idemKey] = useState(newIdempotencyKey);
+  const [serverTotal, setServerTotal] = useState(null);
   if (!state.session || !state.businessUser) return <Navigate to="/business/account" replace />;
   if (!b.dates?.length) return <Navigate to="/business/dates" replace />;
 
   const user = state.businessUser;
   const dl = b.delivery;
-  const specials = activeSpecials(b);
   const days = b.dates.map(iso => {
     const people = dayPeople(b, iso);
     const lines = dayLines(b, iso, people).filter(l => l.qty > 0);
-    return { iso, people, lines, window: windowFor(b, iso), price: priceDay(lines, specials) };
+    const specials = daySpecials(b, iso).filter(x => x.qty > 0);
+    return { iso, people, lines, specials, window: windowFor(b, iso), price: priceDay(lines, specials), delivery: b.deliverySameForAll === false ? b.perDay?.[iso]?.delivery || null : null };
   });
   const gross = sum(days, d => d.price.gross);
   const discount = sum(days, d => d.price.discount);
   const total = sum(days, d => d.price.total);
   const inv = b.invoice;
+  const payTotal = serverTotal ?? total;
+  const trnBad = inv.wanted && !trnOk(inv.trn);
 
   const pay = async () => {
+    setTrnTouched(true);
+    if (trnBad) return;
     setPaying(true); setError('');
     const snap = { company: dl.company.trim(), building: dl.building.trim(), office: dl.office.trim(),
       contact: dl.contact.trim(), mobile: fmtMobile(mobileDigits(dl.mobile)), notes: dl.notes.trim() };
     try {
       const order = await post('/business/orders', {
+        idempotencyKey: idemKey, expectedTotal: payTotal,
         mode: b.mode === 'choose' ? 'choose' : 'mix',
-        invoice: { wanted: inv.wanted, billingName: inv.billingName.trim() || snap.company, address: inv.address.trim(), trn: inv.trn.trim() },
+        invoice: { wanted: inv.wanted, billingName: inv.billingName.trim() || snap.company, address: inv.address.trim(), trn: inv.trn.trim(), po: (inv.po || '').trim() },
         days: days.map(d => ({
           date: d.iso, window: d.window, people: d.people,
           lines: d.lines.filter(l => l.qty > 0).map(l => ({ recipeId: l.recipeId, size: l.size, qty: l.qty })),
-          specials: specials.map(x => ({ dietary: x.dietary.slice(), allergies: x.allergies.slice(), qty: x.qty })),
-          delivery: snap
+          specials: d.specials.map(x => ({ dietary: x.dietary.slice(), allergies: x.allergies.slice(), qty: x.qty, size: x.size || 'regular' })),
+          delivery: d.delivery ? { ...snap, building: d.delivery.building.trim(), office: d.delivery.office.trim(), contact: d.delivery.contact.trim(), mobile: fmtMobile(mobileDigits(d.delivery.mobile)), notes: (d.delivery.notes || '').trim() } : snap
         }))
       });
       set(s => {
@@ -911,6 +1116,7 @@ export function BizReview() {
       });
       nav(`/business/orders/${order.id}/confirmed`, { replace: true });
     } catch (e) {
+      if (e.code === 'price_changed' && typeof e.details?.total === 'number') setServerTotal(e.details.total);
       setError(e.message);
       setPaying(false);
     }
@@ -923,11 +1129,11 @@ export function BizReview() {
         <h1 className="h-display" style={{ fontSize: 34 }}>One last look</h1>
         {days.map(d => (
           <section key={d.iso} className="card stack gap-8" aria-label={dateInfo(d.iso).label}>
-            <div className="sr"><strong>{dateInfo(d.iso).label}</strong><Link to="/business/selection" style={{ fontWeight: 600, fontSize: 14 }}>Edit</Link></div>
+            <div className="sr"><strong>{dateInfo(d.iso).label}</strong><Link to={b.sameForAll === false && b.dates.length > 1 ? '/business/dates' : '/business/selection'} className="link-hit" style={{ fontWeight: 600, fontSize: 14 }}>Edit</Link></div>
             <span className="sm" style={{ color: 'var(--espresso)' }}>{d.people} people · {windowLabel(d.window)}</span>
             <span className="xs">{linesText(d.lines) || 'No general breakfasts'}</span>
-            {specials.length > 0 && <span className="xs"><Icon name="shield" size={12} stroke={2} style={{ verticalAlign: '-2px', marginRight: 4 }} />Special × {sum(specials)}: {specials.map(s => `${specialText(s)} × ${s.qty}`).join(' · ')}</span>}
-            <span className="xs">{dl.building}, {dl.office}, DIFC · {dl.contact}, {fmtMobile(mobileDigits(dl.mobile))}</span>
+            {d.specials.length > 0 && <span className="xs"><Icon name="shield" size={12} stroke={2} style={{ verticalAlign: '-2px', marginRight: 4 }} />Special × {sum(d.specials)}: {d.specials.map(s => `${specialText(s)} × ${s.qty}`).join(' · ')}</span>}
+            <span className="xs">{(d.delivery || dl).building}, {(d.delivery || dl).office}, DIFC · {(d.delivery || dl).contact}, {fmtMobile(mobileDigits((d.delivery || dl).mobile))}</span>
             <div className="sr">
               <span className="xs" style={d.price.discount ? { color: 'var(--ok)' } : undefined}>{d.price.discount ? `Includes ${Math.round(d.price.discountPct * 100)}% volume discount` : ''}</span>
               <span className="money">AED {d.price.total}</span>
@@ -937,10 +1143,9 @@ export function BizReview() {
         <section className="panel">
           <div className="sr"><span>Breakfast total</span><span className="money">AED {gross}</span></div>
           <div className="sr"><span>Delivery</span><span>Included</span></div>
-          {discount > 0 && <div className="sr" style={{ color: 'var(--ok)' }}><span>Volume discount</span><span className="money">− AED {discount}</span></div>}
+          {discount > 0 && <div className="sr" style={{ color: 'var(--ok)' }}><span>Volume discount <InfoTip label="About the volume discount">Calculated separately for each day, based on that day’s headcount.</InfoTip></span><span className="money">− AED {discount}</span></div>}
           <hr className="divider" />
-          <div className="sr total"><span>Final total</span><span>AED {total}</span></div>
-          <span className="xs">Volume discount is calculated for each day separately. Prices are indicative until final costing is approved.</span>
+          <div className="sr total"><span>Final total</span><span>AED {payTotal}</span></div>
         </section>
         <section className="stack gap-12">
           <div className="row">
@@ -954,16 +1159,20 @@ export function BizReview() {
               <div className="field"><label htmlFor="bi-a">Billing address</label>
                 <input id="bi-a" className="input" placeholder={`${dl.building}, DIFC, Dubai`} value={inv.address} onChange={e => upd(d => { d.invoice.address = e.target.value; })} /></div>
               <div className="field"><label htmlFor="bi-t">TRN <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
-                <input id="bi-t" className="input" inputMode="numeric" value={inv.trn} onChange={e => upd(d => { d.invoice.trn = e.target.value; })} /></div>
+                <input id="bi-t" className={`input${trnTouched && trnBad ? ' invalid' : ''}`} inputMode="numeric" maxLength={20} value={inv.trn}
+                  aria-invalid={trnTouched && trnBad} onBlur={() => setTrnTouched(true)} onChange={e => upd(d => { d.invoice.trn = e.target.value; })} />
+                {trnTouched && trnBad && <Err>A UAE TRN has 15 digits — check it or leave it empty</Err>}</div>
+              <div className="field"><label htmlFor="bi-p">PO number <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
+                <input id="bi-p" className="input" maxLength={40} value={inv.po || ''} onChange={e => upd(d => { d.invoice.po = e.target.value; })} /></div>
             </>
           )}
         </section>
-        <p className="xs" style={{ margin: 0 }}>Business orders are prepaid. Each day can be edited or cancelled until 9:00 PM the evening before.</p>
-        <span className="demo-note">Demo build: no payment is taken. The payment gateway is connected in the technical build.</span>
+        <p className="xs" style={{ margin: 0 }}>Free changes until 9:00 PM the night before.</p>
+        {SHOW_DEMO && <span className="demo-note">Development build: no payment is taken.</span>}
       </main>
       <Footer>
         <ApiErr error={error} />
-        <button className="btn" onClick={pay} disabled={paying}><Icon name="lock" size={16} stroke={2} />{paying ? 'Processing…' : `Pay AED ${total}`}</button>
+        <button className="btn" onClick={pay} disabled={paying}><Icon name="lock" size={16} stroke={2} />{paying ? 'Processing…' : `Pay AED ${payTotal}`}</button>
       </Footer>
     </Screen>
   );
@@ -973,9 +1182,18 @@ export function BizReview() {
 export function BizConfirmed() {
   const { id } = useParams();
   const { state } = useStore();
+  const [planSaved, setPlanSaved] = useState('');
   const order = (state.businessOrders || []).find(o => o.id === id);
   if (!order) return <Navigate to="/business" replace />;
   const first = order.days[0];
+  /* Save this team setup as a named plan for next time (never a subscription). */
+  const savePlan = () => {
+    const d = order.days.find(x => !x.cancelled) || first;
+    post('/business/plans', {
+      name: `${order.company} · ${d.people} people`.slice(0, 60),
+      plan: { people: d.people, mode: order.mode, lines: d.lines, specials: d.specials, delivery: { ...d.delivery, window: d.window } }
+    }).then(() => setPlanSaved('Saved — find it under Use a Saved Plan next time.')).catch(e => setPlanSaved(e.message));
+  };
   const heads = [...new Set(order.days.map(d => d.people))];
   const wins = [...new Set(order.days.map(d => windowLabel(d.window)))];
   const rows = [
@@ -992,7 +1210,7 @@ export function BizConfirmed() {
         <div className="stack center" style={{ alignItems: 'center', gap: 14 }}>
           <span style={{ width: 80, height: 80, borderRadius: 999, background: 'var(--gold)', color: 'var(--on-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={38} stroke={2.4} /></span>
           <h1 className="h-display">Breakfast is arranged for the team</h1>
-          <p className="help">Confirmation and tax invoice sent to {order.email}</p>
+          <p className="help">{order.invoice?.wanted === false ? `Confirmation sent to ${order.email}` : `Confirmation and tax invoice sent to ${order.email}`}</p>
         </div>
         <section className="card list">
           {rows.map(([k, v], i) => (
@@ -1001,11 +1219,14 @@ export function BizConfirmed() {
             </div>
           ))}
         </section>
-        <Note icon="shield">{first.delivery.contact} will receive the delivery on the day. Special Breakfasts are packed and labelled separately.</Note>
+        <Note icon="shield">{first.delivery.contact} will receive the delivery.</Note>
       </main>
       <Footer>
         <Link to={`/business/orders/${order.id}`} className="btn">Manage Order</Link>
         <button type="button" className="btn-secondary" onClick={() => getInvoice(order, !!state.session)}><Icon name="download" size={18} />Download Invoice</button>
+        {state.session && (planSaved
+          ? <span className="hint" role="status" style={{ justifyContent: 'center', fontSize: 15 }}><Icon name="check" size={18} stroke={1.8} />{planSaved}</span>
+          : <button type="button" className="btn-text" style={{ alignSelf: 'center' }} onClick={savePlan}>Save as a plan</button>)}
       </Footer>
     </Screen>
   );
@@ -1046,19 +1267,76 @@ export function BizManage() {
   );
 }
 
+/** Report a problem (MB-OPS-001 §10): Morning Box investigates and decides the remedy. */
+const BIZ_ISSUES = ['Not delivered', 'Arrived late', 'Wrong or missing items', 'Allergy concern', 'Quality issue', 'Packaging issue', 'Something else'];
+function ReportIssue({ order, day, set }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
+  const [state, setState] = useState({ busy: false, error: '', sent: false });
+  const send = async () => {
+    setState({ busy: true, error: '', sent: false });
+    try { const res = await post(`/business/orders/${order.id}/days/${day.date}/issue`, { reason, note }); set(s => putOrder(s, res)); setState({ busy: false, error: '', sent: true }); setOpen(false); }
+    catch (e) { setState({ busy: false, error: e.message, sent: false }); }
+  };
+  if (state.sent) return <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2.4} />Thanks — our team has your report and will contact you.</div>;
+  if (!open) return <button type="button" className="link" style={{ alignSelf: 'flex-start' }} onClick={() => setOpen(true)}>Report a problem</button>;
+  return (
+    <section className="card stack gap-10" aria-label="Report a problem">
+      <span className="strong">What went wrong?</span>
+      <div className="chips" role="radiogroup" aria-label="Problem">{BIZ_ISSUES.map(r => <Chip key={r} on={reason === r} onClick={() => setReason(r)}>{r}</Chip>)}</div>
+      {reason === 'Allergy concern' && <span className="help">If anyone is having a reaction, call 998 first.</span>}
+      <input className="input" maxLength={500} placeholder="Details (optional)" aria-label="Details" value={note} onChange={e => setNote(e.target.value)} />
+      <ApiErr error={state.error} />
+      <button type="button" className="btn" disabled={!reason || state.busy} onClick={send}>{state.busy ? 'Sending…' : 'Send report'}</button>
+    </section>
+  );
+}
+
+/** Delivery tracking for one business day (MB-DLV-001 §5) and who prepared it (MB-FLW-001 §17). */
+const TRACK = ['Confirmed', 'Being prepared', 'Out for delivery', 'Delivered'];
+function Tracking({ day }) {
+  const st = Math.max(0, day.stage);
+  const time = day.deliveredAt ? new Date(`${day.deliveredAt.replace(' ', 'T')}Z`).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' }) : '';
+  return (
+    <section className="card stack gap-10" aria-label="Delivery status">
+      <div className="row" style={{ gap: 6 }}>
+        {TRACK.map((t, i) => <span key={t} className={`status ${i <= st ? (i === 3 ? 'ok' : 'prep') : 'done'}`} style={{ opacity: i <= st ? 1 : 0.55, fontSize: 12 }}>{t}</span>)}
+      </div>
+      {st === 3 && <span className="strong">Delivered to {day.deliveryPoint || 'Reception'}{time ? ` · ${time}` : ''}</span>}
+      {day.lateNote && st < 3 && !day.problem && <span className="help">Running late · now around {day.lateNote}</span>}
+      {day.problem && <span className="help" style={{ color: 'var(--err)' }}>{day.problem === 'Not Fulfilled' ? 'We couldn’t prepare this order.' : 'We couldn’t complete the handover — our team will contact you.'}</span>}
+      {day.refund > 0 && <span className="help">AED {day.refund} refunded to your original payment method.</span>}
+      {day.bakeries?.length > 0 && <span className="help">Prepared by {day.bakeries.join(' & ')}</span>}
+    </section>
+  );
+}
+
 function DayEditor({ order, day, set, signedIn }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [people, setPeople] = useState(day.people);
   const [lines, setLines] = useState(day.lines.map(l => ({ ...l })));
+  const [specials, setSpecials] = useState(day.specials.map(x => ({ ...x })));
+  const [win, setWin] = useState(day.window);
+  const [contact, setContact] = useState({ building: day.delivery.building || '', office: day.delivery.office || '', contact: day.delivery.contact || '', mobile: day.delivery.mobile || '', notes: day.delivery.notes || '' });
+  const [avail, setAvail] = useState({});
   const [saved, setSaved] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const info = dateInfo(day.date);
-  const open = !day.cancelled && isBeforeCutoff(day.date);
-  const sq = sum(day.specials);
+  const open = !day.cancelled && (day.editable ?? (isBeforeCutoff(day.date) && day.stage <= 0));
+  useEffect(() => { if (open) get(`/availability?dates=${day.date}`).then(a => setAvail(a[day.date] || {})).catch(() => {}); }, [open, day.date]);
+  const sq = sum(specials);
   const boxes = sum(lines) + sq;
   const diff = people - boxes;
-  const changed = people !== day.people || lines.some((l, i) => l.qty !== day.lines[i]?.qty);
-  const price = priceDay(lines, day.specials);
+  const contactChanged = ['building', 'office', 'contact', 'mobile', 'notes'].some(k => (contact[k] || '') !== (day.delivery[k] || ''));
+  const changed = people !== day.people || win !== day.window || contactChanged
+    || JSON.stringify(lines.map(l => [l.recipeId, l.size, l.qty])) !== JSON.stringify(day.lines.map(l => [l.recipeId, l.size, l.qty]))
+    || JSON.stringify(specials.map(x => [x.dietary, x.allergies, x.size || 'regular', x.qty])) !== JSON.stringify(day.specials.map(x => [x.dietary, x.allergies, x.size || 'regular', x.qty]));
+  const price = priceDay(lines, specials);
+  const contactOk = contact.building.trim() && contact.office.trim() && contact.contact.trim() && /^5\d{8}$/.test(mobileDigits(contact.mobile));
+  /* A window is offered only if it can take this day's headcount (its own boxes don't count against it). */
+  const winFull = w => { const r = avail[w]?.remaining; return typeof r === 'number' && r + (w === day.window ? day.people : 0) < people; };
 
   const base = `/business/orders/${order.id}/days/${day.date}`;
   const run = async fn => {
@@ -1067,35 +1345,29 @@ function DayEditor({ order, day, set, signedIn }) {
   };
   const save = () => run(async () => {
     const kept = lines.filter(l => l.qty > 0);
-    if (signedIn) {
-      const res = await patch(base, { people, lines: kept });
-      set(s => putOrder(s, res));
-    } else {
-      set(s => {
-        const o = s.businessOrders.find(x => x.id === order.id);
-        const d = o.days.find(x => x.date === day.date);
-        Object.assign(d, { people, lines: kept, total: price.total, gross: price.gross, discount: price.discount });
-        o.total = sum(o.days.filter(x => !x.cancelled), x => x.total);
-      });
-    }
+    const res = await patch(base, {
+      people, lines: kept, window: win,
+      specials: specials.map(x => ({ dietary: x.dietary, allergies: x.allergies, qty: x.qty, size: x.size || 'regular' })),
+      ...(contactChanged ? { delivery: { building: contact.building.trim(), office: contact.office.trim(), contact: contact.contact.trim(), mobile: contact.mobile.trim(), notes: contact.notes.trim() } } : {})
+    });
+    set(s => putOrder(s, res));
     setLines(kept);
     setSaved(true);
   });
-  const cancel = () => {
-    if (!window.confirm(`Cancel breakfast on ${info.long}? You’ll receive a full refund for this day. Other days are not affected.`)) return;
-    run(async () => {
-      if (signedIn) {
-        const res = await post(`${base}/cancel`);
-        set(s => putOrder(s, res));
-      } else {
-        set(s => {
-          const o = s.businessOrders.find(x => x.id === order.id);
-          o.days.find(x => x.date === day.date).cancelled = true;
-          o.total = sum(o.days.filter(x => !x.cancelled), x => x.total);
-        });
-      }
-    });
-  };
+  const cancel = () => run(async () => {
+    const res = await post(`${base}/cancel`);
+    set(s => putOrder(s, res));
+    setConfirmCancel(false);
+  });
+
+  if (!signedIn) {
+    return (
+      <div className="card stack gap-12">
+        <span className="strong">Sign in to manage this order</span>
+        <Link to={`/sign-in?next=/business/orders/${order.id}`} className="btn-secondary">Sign in</Link>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -1108,6 +1380,8 @@ function DayEditor({ order, day, set, signedIn }) {
             ? <span className="status ok" style={{ alignSelf: 'flex-start' }}><Icon name="clock" size={13} stroke={2} />Editable until {cutoffLabel(day.date)}</span>
             : <span className="status done" style={{ alignSelf: 'flex-start' }}><Icon name="lock" size={13} stroke={2} />Changes closed</span>}
       </div>
+      {!day.cancelled && <Tracking day={day} />}
+      {!day.cancelled && signedIn && (day.stage >= 2 || day.date <= todayIso()) && <ReportIssue order={order} day={day} set={set} />}
 
       {!day.cancelled && (
         <>
@@ -1119,26 +1393,45 @@ function DayEditor({ order, day, set, signedIn }) {
           </section>
           <section className="card list" aria-label="Boxes">
             <div className="row" style={{ padding: '14px 0 4px' }}><h2 className="h3">Boxes</h2><span className="xs">{boxes} total</span></div>
-            {lines.map((l, i) => {
-              const r = recipeById[l.recipeId];
-              return (
-                <div key={l.recipeId} className="list-row">
-                  <span className="stack"><span className="strong">{modelName(r)}</span><span className="xs">{sizeLabel(l.size)} · AED {linePrice(l)}</span></span>
-                  <span style={{ marginLeft: 'auto' }}>
-                    {open ? <Qty value={l.qty} max={MAX_PEOPLE} label={modelName(r)} onChange={v => { setLines(ls => ls.map((x, k) => (k === i ? { ...x, qty: v } : x))); setSaved(false); }} />
-                      : <span className="strong">× {l.qty}</span>}
-                  </span>
-                </div>
-              );
-            })}
-            {day.specials.length > 0 && (
-              <div className="list-row">
-                <span className="ci"><Icon name="shield" size={20} stroke={1.6} /></span>
-                <span className="stack"><span className="strong">Special Breakfasts × {sq}</span><span className="xs">{day.specials.map(s => `${specialText(s)} × ${s.qty}`).join(' · ')}</span></span>
-                {open && <Link to="/business/special" className="link" style={{ marginLeft: 'auto' }}>Update</Link>}
-              </div>
-            )}
+            {open ? <DayBoxes lines={lines} specials={specials} onChange={(l, x) => { setLines(l); setSpecials(x); setSaved(false); }} />
+              : <>
+                {lines.map(l => <div key={`${l.recipeId}-${l.size}`} className="list-row"><span className="stack"><span className="strong">{modelName(recipeById[l.recipeId])}</span><span className="xs">{sizeLabel(l.size)}</span></span><span className="strong" style={{ marginLeft: 'auto' }}>× {l.qty}</span></div>)}
+                {specials.map((x, i) => <div key={`sp${i}`} className="list-row"><span className="ci"><Icon name="shield" size={20} stroke={1.6} /></span><span className="stack"><span className="strong">Special Breakfast</span><span className="xs">{specialText(x)}</span></span><span className="strong" style={{ marginLeft: 'auto' }}>× {x.qty}</span></div>)}
+              </>}
           </section>
+
+          {open && (
+            <section className="stack gap-10">
+              <h2 className="h3">Delivery window</h2>
+              <div className="grid-3" role="radiogroup" aria-label="Delivery window">
+                {DELIVERY_WINDOWS.map(w => {
+                  const full = winFull(w.id);
+                  return (
+                    <button key={w.id} type="button" className={`win${win === w.id ? ' on' : ''}`} role="radio" aria-checked={win === w.id} disabled={full && win !== w.id}
+                      style={{ flexDirection: 'column', justifyContent: 'center', gap: 2, padding: '10px 6px', minHeight: 64, textAlign: 'center' }}
+                      onClick={() => { setWin(w.id); setSaved(false); }}>
+                      <span className="strong" style={{ fontSize: 14 }}>{w.label.replace(' AM', '')}</span><span className="xs">{full ? 'Full' : 'AM'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+          {open && (
+            <section className="stack gap-12">
+              <h2 className="h3">Location &amp; contact on the day</h2>
+              {[['building', 'Building / Tower', 'Enter the building or tower'], ['office', 'Office / Floor / Unit', 'Enter the office, floor or unit'], ['contact', 'Contact person', 'Enter who will receive the delivery']].map(([k, label, msg]) => (
+                <div key={k} className="field"><label htmlFor={`d${k}-${day.date}`}>{label}</label>
+                  <input id={`d${k}-${day.date}`} className={`input${!contact[k].trim() ? ' invalid' : ''}`} aria-invalid={!contact[k].trim()} value={contact[k]} onChange={e => { setContact(c => ({ ...c, [k]: e.target.value })); setSaved(false); }} />
+                  {!contact[k].trim() && <Err>{msg}</Err>}</div>
+              ))}
+              <div className="field"><label htmlFor={`dm-${day.date}`}>Mobile number</label>
+                <input id={`dm-${day.date}`} className={`input${!/^5\d{8}$/.test(mobileDigits(contact.mobile)) ? ' invalid' : ''}`} inputMode="tel" value={contact.mobile} onChange={e => { setContact(c => ({ ...c, mobile: e.target.value })); setSaved(false); }} />
+                {!/^5\d{8}$/.test(mobileDigits(contact.mobile)) && <Err>Enter a UAE mobile number, e.g. 50 123 4567</Err>}</div>
+              <div className="field"><label htmlFor={`dn-${day.date}`}>Delivery notes <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
+                <input id={`dn-${day.date}`} className="input" maxLength={200} value={contact.notes} onChange={e => { setContact(c => ({ ...c, notes: e.target.value })); setSaved(false); }} /></div>
+            </section>
+          )}
 
           {open && diff !== 0 && (
             <div className="banner-warn" role="status">
@@ -1146,15 +1439,30 @@ function DayEditor({ order, day, set, signedIn }) {
               <span>{diff > 0 ? `${diff} ${diff === 1 ? 'person' : 'people'} without a breakfast — add ${diff} box${diff === 1 ? '' : 'es'}` : `${-diff} extra box${diff === -1 ? '' : 'es'} — remove ${-diff}`}</span>
             </div>
           )}
+          {open && diff !== 0 && sum(lines) > 0 && people - sq > 0 && (
+            <button type="button" className="btn-secondary" onClick={() => { setLines(scaleLines(lines, people - sq)); setSaved(false); }}>Match my headcount ({people})</button>
+          )}
           {diff === 0 && <PriceSummary price={price} />}
+          {/* B2B §10: show the effect of the change before reconfirming. */}
+          {open && changed && diff === 0 && price.total !== day.total && (
+            <div className="note" role="status"><Icon name="card" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{price.total > day.total ? `AED ${price.total - day.total} will be charged` : `AED ${day.total - price.total} will be refunded`} to your original payment method when you confirm.</span></div>
+          )}
           {saved && !changed && <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2.4} />Changes saved for {info.label}</div>}
-          {open && <button className="btn" disabled={busy || diff !== 0 || !changed} onClick={save}>{busy ? 'Saving…' : 'Confirm Changes'}</button>}
+          {open && <button className="btn" disabled={busy || diff !== 0 || !changed || !contactOk || winFull(win)} onClick={save}>{busy ? 'Saving…' : 'Confirm Changes'}</button>}
         </>
       )}
 
       <ApiErr error={error} />
       <button type="button" className="btn-secondary" onClick={() => getInvoice(order, signedIn)}><Icon name="download" size={18} />Download invoice</button>
-      {open && <button type="button" className="btn-danger" disabled={busy} onClick={cancel}>Cancel {info.label} · full refund</button>}
+      {open && !confirmCancel && <button type="button" className="btn-danger" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel {info.label} · full refund</button>}
+      {open && confirmCancel && (
+        <div className="card stack gap-12" role="alertdialog" aria-labelledby={`bc-${day.date}`}>
+          <strong id={`bc-${day.date}`} style={{ fontSize: 18 }}>Cancel breakfast on {info.long}?</strong>
+          <span className="help" style={{ fontSize: 15.5 }}>You’ll receive a full refund of AED {day.total} for this day. Other days are not affected.</span>
+          <div className="grid-2"><button type="button" className="btn-secondary" onClick={() => setConfirmCancel(false)}>Keep it</button>
+            <button type="button" className="btn-danger" disabled={busy} onClick={cancel}>Yes, cancel</button></div>
+        </div>
+      )}
     </>
   );
 }

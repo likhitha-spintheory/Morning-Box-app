@@ -1,17 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { get, post, put, applySession, setToken } from '../../api.js';
-import { Screen, TopBar, Footer, Icon, Chip, Switch, Logo, PhoneField, Go, IconButton } from '../../components/ui.jsx';
+import { get, post, put, applySession, setToken, resetPersonal, newIdempotencyKey, download, track } from '../../api.js';
+import { Screen, TopBar, Footer, Icon, Chip, Switch, Logo, PhoneField, Go, IconButton, InfoTip } from '../../components/ui.jsx';
 import { useStore } from '../../state/store.jsx';
 import {
-  DELIVERY_WINDOWS, dateInfo, dayPrice, boxName, sizeLabel, windowLabel, canChooseSize, componentName, shortPlace
+  DELIVERY_WINDOWS, dateInfo, dayPrice, boxName, sizeLabel, windowLabel, canChooseSize, componentName, shortPlace,
+  recommendDay, unsafeComponents
 } from '../../domain/app.js';
+import { useOrder, Loading, usePruneExpired } from '../../state/orders.jsx';
+import { PRICING } from '../../domain/standards.js';
+
+const emailValid = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.trim());
+const union = (a = [], b = []) => [...new Set([...a, ...b])];
+/** Terms and Privacy open in the app; a hosted version (VITE_TERMS_URL / VITE_PRIVACY_URL) can replace them. */
+const TERMS_URL = import.meta.env.VITE_TERMS_URL || '';
+const PRIVACY_URL = import.meta.env.VITE_PRIVACY_URL || '';
+export function Agreement({ className = 'help center', style }) {
+  const a = (url, to, label) => (url ? <a href={url} target="_blank" rel="noopener noreferrer">{label}</a> : <Link to={to} className="link-hit" style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3 }}>{label}</Link>);
+  return <p className={className} style={{ margin: 0, fontSize: 15, ...style }}>By continuing you agree to the {a(TERMS_URL, '/legal/terms', 'Terms')} &amp; {a(PRIVACY_URL, '/legal/privacy', 'Privacy Policy')}.</p>;
+}
+/** Fill all six code boxes from a pasted or auto-filled code. */
+export const pastedCode = e => { const t = (e.clipboardData?.getData('text') || '').replace(/\D/g, ''); return t.length > 1 ? t.slice(0, 6) : ''; };
 
 const SHOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_DEMO === '1';
 const ErrorBanner = ({ children }) => children
   ? <div className="banner-err" role="alert"><Icon name="alert" size={18} stroke={2} />{children}</div> : null;
 const prettyMobile = d => `+971 ${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5)}`;
-const extrasShort = addons => addons.map(a => `+${a.qty} ${componentName(a.item)}${a.unit ? ` (${a.unit} loaf)` : a.qty > 1 ? 's' : ''}`).join(' · ');
+const extrasShort = addons => addons.map(a => `+${a.qty} ${componentName(a.item)}${a.unit ? ` (${a.unit} loaf)` : a.qty > 1 ? 's' : ''}${a.flavour ? ` (${a.flavour})` : ''}`).join(' · ');
 
 /* ---------- Create account / sign in (style-1 P14 + P15) ---------- */
 export function SignIn() {
@@ -28,7 +43,7 @@ export function SignIn() {
   const [error, setError] = useState('');
   const [devCode, setDevCode] = useState('');
   const [wait, setWait] = useState(0);
-  const [existing, setExisting] = useState(false);
+  const [needName, setNeedName] = useState(false);
   const refs = useRef([]);
   const digits = mobile.replace(/\D/g, '').replace(/^(00)?971/, '').replace(/^0/, '');
   const mobileOk = /^5\d{8}$/.test(digits);
@@ -59,33 +74,57 @@ export function SignIn() {
     setBusy(true);
     try {
       const r = await post('/auth/otp', { mobile: digits });
-      setDevCode(r.devCode || ''); setExisting(!!r.existingUser); setSent(true); setWait(30); setCode(['', '', '', '', '', '']);
+      setDevCode(r.devCode || ''); setSent(true); setWait(30); setCode(['', '', '', '', '', '']);
       setTimeout(() => refs.current[0]?.focus(), 50);
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
-  const needName = !existing;
   const verify = async () => {
     if (needName && !nameOk) { setTouched(true); setError('Enter your first name to create your account.'); return; }
     setBusy(true); setError('');
     try {
-      const r = await post('/auth/verify', { mobile: digits, code: code.join(''), firstName: needName ? name.trim() : undefined });
-      setToken(r.token);
-      /* MB-FLW-001 §6–7: the plan built before sign-in must never be rebuilt. It was made
-         with the profile on this device, so that profile becomes the saved one. */
+      const r = await post('/auth/verify', { mobile: digits, code: code.join(''), firstName: nameOk ? name.trim() : undefined });
+      setToken(null);
+      const switching = !!state.owner && state.owner !== r.user.mobile;
+      /* MB-FLW-001 §6–7: the plan built before sign-in is kept, with the profile it was
+         built with. Safety never weakens: allergies and dietary needs already saved on the
+         account are added to it, and any planned morning that no longer fits is re-checked. */
       const keepLocal = state.profileDone && (planned.length > 0 || !r.profile);
-      if (keepLocal && JSON.stringify(r.profile) !== JSON.stringify(state.profile)) {
-        await put('/me/profile', state.profile).catch(() => {});
-        r.profile = state.profile;
+      let merged = null;
+      const changedDays = [];
+      if (keepLocal) {
+        const sp = r.profile;
+        merged = sp ? {
+          ...state.profile, dietary: union(state.profile.dietary, sp.dietary), allergies: union(state.profile.allergies, sp.allergies),
+          otherAllergies: [...new Set([state.profile.otherAllergies, sp.otherAllergies].map(x => (x || '').trim()).filter(Boolean))].join(', ').slice(0, 120)
+        } : state.profile;
+        if (JSON.stringify(sp) !== JSON.stringify(merged)) await put('/me/profile', merged).catch(() => {});
+        r.profile = merged;
+        planned.forEach(iso => { if (unsafeComponents(state.plan.days[iso].cfg, merged).length) changedDays.push(iso); });
       }
-      set(s => applySession(s, r));
+      set(s => {
+        if (switching && !keepLocal) resetPersonal(s);
+        if (switching && keepLocal) { s.orders = []; s.businessOrders = []; s.businessUser = null; }
+        if (merged) {
+          s.profile = merged; s.profileDone = true;
+          changedDays.forEach(iso => {
+            const d = s.plan.days[iso];
+            const options = recommendDay(merged, d.context);
+            s.plan.days[iso] = { ...d, options, which: 'primary', cfg: options.none ? null : options.primary, saved: false, changed: true };
+          });
+        }
+        applySession(s, r);
+      });
       const orders = await get('/orders').catch(() => null);
       if (orders) set(s => { s.orders = orders; });
-      nav(next, { replace: true });
+      nav(changedDays.length ? '/plan/summary' : next, { replace: true });
     } catch (e) {
-      setError(e.message); setBusy(false);
+      setBusy(false);
+      if (e.code === 'name_required') { setNeedName(true); setTouched(true); setError('Enter your first name to create your account.'); return; }
+      setError(e.message);
       if (e.code === 'otp_wrong') { setCode(['', '', '', '', '', '']); refs.current[0]?.focus(); }
     }
   };
+  const onPaste = e => { const t = pastedCode(e); if (t) { e.preventDefault(); typeDigit(0, t); } };
 
   if (sent) {
     return (
@@ -100,7 +139,7 @@ export function SignIn() {
           <div className="otp" role="group" aria-label="6-digit code">
             {code.map((c, i) => (
               <input key={i} ref={el => (refs.current[i] = el)} inputMode="numeric" autoComplete={i === 0 ? 'one-time-code' : 'off'} maxLength={i === 0 ? 6 : 1}
-                aria-label={`Digit ${i + 1}`} value={c} onChange={e => typeDigit(i, e.target.value)}
+                aria-label={`Digit ${i + 1}`} value={c} onChange={e => typeDigit(i, e.target.value)} onPaste={onPaste}
                 onKeyDown={e => { if (e.key === 'Backspace' && !c && i > 0) refs.current[i - 1]?.focus(); }} />
             ))}
           </div>
@@ -110,15 +149,12 @@ export function SignIn() {
               ? <span className="strong" style={{ fontSize: 16 }}>Resend in 0:{String(wait).padStart(2, '0')}</span>
               : <button type="button" className="link" onClick={send} disabled={busy}>Resend code</button>}
           </div>
-          <div className="note" style={{ alignItems: 'center' }}><Icon name="phone" size={22} stroke={1.6} style={{ flex: 'none' }} />Code auto-fills from SMS on supported phones.</div>
           {needName && (
             <div className="field">
               <label htmlFor="fn2">Your first name</label>
               <input id="fn2" className={`input${touched && !nameOk ? ' invalid' : ''}`} value={name} autoComplete="given-name" onChange={e => setName(e.target.value)} />
-              <span className="help" style={{ fontSize: 15 }}>New to Morning Box — this is all we need to create your account.</span>
             </div>
           )}
-          {existing && <span className="hint" style={{ fontSize: 15 }}><Icon name="check" size={18} stroke={1.8} />Welcome back — your saved profile and orders are kept.</span>}
           {devCode && <span className="demo-note">Development build — your code is <b>{devCode}</b>. In production it arrives by SMS.</span>}
           <ErrorBanner>{error}</ErrorBanner>
         </main>
@@ -136,20 +172,16 @@ export function SignIn() {
           <h1 className="h-display" style={{ fontSize: 40 }}>{planned.length ? 'Almost there.' : 'Welcome back.'}</h1>
           <p className="help" style={{ fontSize: 17 }}>
             {planned.length
-              ? `Create your account so we can deliver your ${planned.length === 1 ? 'morning' : `${planned.length} mornings`}. Your plan stays exactly as you built it.`
-              : 'Sign in with your mobile number to see your mornings and orders.'}
+              ? `Sign in to secure your ${planned.length === 1 ? 'morning' : `${planned.length} mornings`}.`
+              : 'Sign in to see your mornings.'}
           </p>
         </div>
         <div className="field">
-          <label htmlFor="fn">First name <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(new customers)</span></label>
-          <input id="fn" className="input" value={name} autoComplete="given-name" onChange={e => setName(e.target.value)} />
-        </div>
-        <div className="field">
           <label htmlFor="mb">Mobile number</label>
-          <PhoneField id="mb" value={mobile} onChange={setMobile} invalid={touched && !mobileOk} describedBy="mb-h" />
+          <PhoneField id="mb" value={mobile} onChange={setMobile} invalid={touched && !mobileOk} describedBy={touched && !mobileOk ? 'mb-h' : undefined} />
           {touched && !mobileOk
             ? <span id="mb-h" className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Enter a UAE mobile number, e.g. 50 123 4567</span>
-            : <span id="mb-h" className="help" style={{ fontSize: 15.5 }}>We’ll send a 6-digit code by SMS. No password needed.</span>}
+            : null}
         </div>
         {planned.length > 0 && (
           <div className="panel row" style={{ flexDirection: 'row', padding: '16px 20px', borderRadius: 999 }}>
@@ -161,7 +193,7 @@ export function SignIn() {
       </main>
       <Footer>
         <button className="btn" disabled={busy} onClick={send}>{busy ? 'Sending…' : 'Send code'}</button>
-        <p className="help center" style={{ margin: 0, fontSize: 15 }}>By continuing you agree to the Terms &amp; Privacy Policy.</p>
+        <Agreement />
       </Footer>
     </Screen>
   );
@@ -176,6 +208,7 @@ export function Delivery() {
   const plan = state.plan;
   const dates = plan.dates.filter(d => plan.days[d]?.saved);
   const [editing, setEditing] = useState(() => !state.delivery.address.building);
+  const expiredNote = usePruneExpired();
   /* MB-DLV-001 §8: a window closes when production or delivery capacity is exhausted. */
   const [avail, setAvail] = useState({});
   const key = dates.join(',');
@@ -201,12 +234,12 @@ export function Delivery() {
         const fullOn = iso ? (isFull(iso, w.id) ? iso : null) : dates.find(d => isFull(d, w.id));
         const on = iso ? dl.perDay[iso]?.window === w.id : dl.window === w.id;
         const left = Math.min(...(iso ? [iso] : dates).map(d => remaining(d, w.id) ?? 999));
-        const sub = fullOn ? `Full for ${dateInfo(fullOn).wd}, ${dateInfo(fullOn).day} ${dateInfo(fullOn).mon}` : left <= 10 ? 'Filling fast · few slots left' : 'Available';
+        const sub = fullOn ? `Full for ${dateInfo(fullOn).wd}, ${dateInfo(fullOn).day} ${dateInfo(fullOn).mon}` : left <= 10 ? 'Few slots left' : '';
         return (
           <button key={w.id} type="button" className={`win${on ? ' on' : ''}`} role="radio" aria-checked={on} disabled={!!fullOn}
             onClick={() => upd(d => { if (iso) d.perDay[iso] = { ...(d.perDay[iso] || {}), window: w.id }; else d.window = w.id; })}>
             <span className="ico" style={on ? { background: 'var(--gold-soft)' } : undefined}><Icon name={WINDOW_ICON[w.id]} size={24} stroke={1.6} /></span>
-            <span className="stack" style={{ flex: 1 }}><span style={{ fontSize: 19, fontWeight: 600 }}>{w.label.replace('–', '–')}</span><span className="help" style={{ fontSize: 15.5 }}>{sub}</span></span>
+            <span className="stack" style={{ flex: 1 }}><span style={{ fontSize: 19, fontWeight: 600 }}>{w.label}</span>{sub && <span className="help" style={{ fontSize: 15.5 }}>{sub}</span>}</span>
             {fullOn ? <span className="tag" style={{ marginLeft: 'auto' }}>Full</span> : <span className="dot">{on && <Icon name="check" size={15} stroke={2.2} />}</span>}
           </button>
         );
@@ -220,12 +253,11 @@ export function Delivery() {
       <main className="screen-main" style={{ paddingTop: 8, gap: 20 }}>
         <div className="stack gap-8">
           <h1 className="h-display" style={{ fontSize: 40 }}>Where &amp; when?</h1>
-          <p className="help">Set it once. Change it only when your morning changes.</p>
         </div>
+        {expiredNote && <div className="note" role="status"><Icon name="clock" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{expiredNote}</span></div>}
         {dates.length > 1 && (
           <div className="panel row" style={{ flexDirection: 'row', padding: '18px 20px' }}>
-            <span className="stack"><span className="strong" style={{ fontSize: 17 }}>Same delivery for all {dates.length} mornings?</span>
-              <span className="help" style={{ fontSize: 15 }}>{dates.map(d => `${dateInfo(d).wd} ${dateInfo(d).day}`).join(' · ')} {dateInfo(dates[dates.length - 1]).mon}</span></span>
+            <span className="strong" style={{ fontSize: 17 }}>Same delivery for all {dates.length} mornings?</span>
             <Switch checked={dl.sameForAll} label="Use the same delivery for all mornings" onChange={v => upd(d => { d.sameForAll = v; })} />
           </div>
         )}
@@ -234,7 +266,7 @@ export function Delivery() {
           <div className="card row" style={{ padding: '20px 22px', gap: 16 }}>
             <Icon name="pin" size={24} stroke={1.6} />
             <span className="stack" style={{ flex: 1 }}><span className="strong" style={{ fontSize: 18 }}>{a.building}</span>
-              <span className="help" style={{ fontSize: 16 }}>{a.unit} · {a.area} · {a.handover === 'door' ? 'Hand to me at the door' : 'Hand to reception'}</span></span>
+              <span className="help" style={{ fontSize: 16 }}>{a.unit} · {a.handover === 'door' ? 'At my door' : 'At reception'}</span></span>
             <button type="button" className="link" onClick={() => setEditing(true)}>Change</button>
           </div>
         ) : (
@@ -276,13 +308,12 @@ export function Delivery() {
             </section>
           );
         })}
-        <div className="row" style={{ marginTop: 4 }}><h2 className="h3" style={{ fontSize: 20 }}>Delivery window</h2><span className="live"><i />Live availability</span></div>
+        <h2 className="h3" style={{ fontSize: 20, marginTop: 4 }}>Delivery window <InfoTip label="About delivery windows">Availability updates live. A window closes when it’s fully booked.</InfoTip></h2>
         {sameForAll
           ? <WindowCards />
           : dates.map(iso => (<section key={iso} className="stack gap-10"><span className="strong">{dateInfo(iso).long}</span><WindowCards iso={iso} /></section>))}
 
         {touched && !windowsOk && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Choose an available delivery window{sameForAll ? '' : ' for each morning'}</span>}
-        <p className="help" style={{ fontSize: 15.5, margin: 0 }}>We promise a window, not an exact minute — you can follow every step in your order.</p>
       </main>
       <Footer><button className="btn" onClick={() => { setTouched(true); if (addrOk && windowsOk) nav('/checkout/review'); else if (!addrOk) setEditing(true); }}><Go>Review my order</Go></button></Footer>
     </Screen>
@@ -293,10 +324,19 @@ export function Delivery() {
 export function ReviewPay() {
   const { state, set } = useStore();
   const nav = useNavigate();
-  const [method, setMethod] = useState('apple');
+  /* Apple Pay is offered first only where the device supports it. */
+  const [method, setMethod] = useState(() => (typeof window !== 'undefined' && window.ApplePaySession ? 'apple' : 'card'));
   const [email, setEmail] = useState(state.user?.email || '');
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState('');
+  const [emailTouched, setEmailTouched] = useState(false);
+  /* One key per checkout: a double tap or a retry after a lost response never creates a second order. */
+  const [idemKey] = useState(newIdempotencyKey);
+  const [serverTotal, setServerTotal] = useState(null);
+  /* Morning Box credit from service recovery is used automatically. */
+  const [credit, setCredit] = useState(0);
+  useEffect(() => { if (state.session) get('/me').then(m => setCredit(m.credit || 0)).catch(() => {}); track('checkout_started'); }, [state.session]); // eslint-disable-line react-hooks/exhaustive-deps
+  const expiredNote = usePruneExpired();
   const plan = state.plan;
   const dates = plan.dates.filter(d => plan.days[d]?.saved);
   if (!state.session) return <Navigate to="/sign-in?next=/checkout/review" replace />;
@@ -306,16 +346,24 @@ export function ReviewPay() {
   const addrOf = iso => (dl.sameForAll || dates.length === 1 ? dl.address : (dl.perDay[iso]?.address || dl.address));
   const prices = dates.map(d => dayPrice(plan.days[d].cfg, state.profile));
   const total = prices.reduce((t, p) => t + p.total, 0);
+  const payTotal = serverTotal ?? total;
+  const creditUsed = Math.min(credit, payTotal);
+  const oneAddress = dl.sameForAll || dates.length === 1;
+  const emailBad = !!email.trim() && !emailValid(email);
 
-  /* The server re-validates every morning and re-prices the order before payment. */
+  /* The server re-validates every morning and re-prices the order before payment;
+     if its total differs from the one shown, nothing is charged and the new total is shown. */
   const pay = async () => {
+    setEmailTouched(true);
+    if (emailBad) return;
     setPaying(true); setError('');
     try {
       const order = await post('/orders', {
+        idempotencyKey: idemKey, expectedTotal: payTotal,
         method: method === 'apple' ? 'apple' : 'card', email: email.trim(), address: dl.address,
         days: dates.map(iso => {
           const c = plan.days[iso].cfg;
-          return { date: iso, context: c.context, recipeId: c.recipeId, components: c.components, size: c.size, addons: c.addons, window: win(iso), address: addrOf(iso) };
+          return { date: iso, context: c.context, recipeId: c.recipeId, components: c.components, size: c.size, addons: c.addons, danishFlavour: c.danishFlavour, window: win(iso), address: addrOf(iso) };
         })
       });
       set(s => {
@@ -325,6 +373,7 @@ export function ReviewPay() {
       });
       nav(`/orders/${order.id}/confirmed`, { replace: true });
     } catch (e) {
+      if (e.code === 'price_changed' && typeof e.details?.total === 'number') setServerTotal(e.details.total);
       setError(e.message); setPaying(false);
     }
   };
@@ -334,11 +383,12 @@ export function ReviewPay() {
       <TopBar back={-1} close={null}><span className="topbar-title">Review &amp; pay</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 8, gap: 18 }}>
         <h1 className="h-display" style={{ fontSize: 38 }}>Review your mornings</h1>
+        {expiredNote && <div className="note" role="status"><Icon name="clock" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{expiredNote}</span></div>}
         <section className="card list" style={{ padding: '4px 20px' }}>
           {dates.map((iso, k) => {
             const c = plan.days[iso].cfg;
             const d = dateInfo(iso);
-            const meta = [c.addons.length ? extrasShort(c.addons) : null, windowLabel(win(iso)).replace(' AM', '').replace(' – ', '–'), shortPlace(addrOf(iso).building)].filter(Boolean).join(' · ');
+            const meta = [c.addons.length ? extrasShort(c.addons) : null, windowLabel(win(iso)).replace(' AM', '').replace(' – ', '–'), dl.sameForAll || dates.length === 1 ? null : shortPlace(addrOf(iso).building)].filter(Boolean).join(' · ');
             return (
               <div key={iso} className="row" style={{ alignItems: 'flex-start', gap: 16, padding: '18px 0', borderTop: k ? '1px solid var(--line-soft)' : 0 }}>
                 <span className="stack" style={{ alignItems: 'center', width: 46, flex: 'none' }}>
@@ -357,12 +407,24 @@ export function ReviewPay() {
         </section>
         <section className="card stack gap-12" style={{ padding: 20 }}>
           <div className="sr"><span className="help">Breakfasts &amp; extras</span><span>AED {total}</span></div>
-          <div className="sr"><span className="help">Delivery ({dates.length} morning{dates.length > 1 ? 's' : ''})</span><span>Included</span></div>
+          <div className="sr"><span className="help">Delivery</span><span>Included</span></div>
+          {creditUsed > 0 && <div className="sr"><span className="help">Morning Box credit</span><span>− AED {creditUsed}</span></div>}
           <hr className="divider" />
-          <div className="sr" style={{ fontSize: 22, fontWeight: 700 }}><span>Total</span><span>AED {total}</span></div>
+          <div className="sr" style={{ fontSize: 22, fontWeight: 700 }}><span>Total</span><span>AED {payTotal - creditUsed}</span></div>
+          {PRICING.indicative && <span className="xs">Prices are indicative during our pilot.</span>}
         </section>
+        {oneAddress && dl.address.building && (
+          <Link to="/checkout/delivery" className="card row" style={{ textDecoration: 'none', gap: 14, padding: '16px 20px' }}>
+            <Icon name="pin" size={22} stroke={1.6} />
+            <span className="stack" style={{ flex: 1, gap: 2 }}><span className="strong" style={{ fontSize: 16 }}>{dl.address.building}{dl.address.unit ? `, ${dl.address.unit}` : ''}</span>
+              <span className="help" style={{ fontSize: 15 }}>{dl.address.handover === 'door' ? 'To your door' : 'At Reception'} · {dates.length > 1 ? 'all mornings' : 'DIFC'}</span></span>
+            <span className="link">Edit</span>
+          </Link>
+        )}
         <div className="field"><label htmlFor="em">Email for confirmation <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
-          <input id="em" className="input" type="email" placeholder="you@company.com" value={email} onChange={e => setEmail(e.target.value)} /></div>
+          <input id="em" className={`input${emailTouched && emailBad ? ' invalid' : ''}`} type="email" autoComplete="email" placeholder="you@company.com" value={email}
+            aria-invalid={emailTouched && emailBad} onBlur={() => setEmailTouched(true)} onChange={e => setEmail(e.target.value)} />
+          {emailTouched && emailBad && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Enter a valid email, e.g. name@company.com — or leave it empty</span>}</div>
         <div className="grid-2" role="radiogroup" aria-label="Payment method">
           {[['apple', 'apple', 'Apple Pay'], ['card', 'card', 'Card']].map(([id, icon, label]) => (
             <button key={id} type="button" className={`win${method === id ? ' on' : ''}`} role="radio" aria-checked={method === id} onClick={() => setMethod(id)} style={{ padding: '0 14px', minHeight: 60, gap: 10 }}>
@@ -371,12 +433,12 @@ export function ReviewPay() {
             </button>
           ))}
         </div>
-        <p className="help" style={{ fontSize: 15.5, margin: 0 }}>Free cancellation for any morning until 9:00 PM the night before.</p>
+        <p className="help" style={{ fontSize: 15.5, margin: 0 }}>Free cancellation until 9:00 PM the night before.</p>
         {SHOW_DEMO && <span className="demo-note">Development build: no card is charged. The payment gateway connects at the integration point in server/personal.js.</span>}
         <ErrorBanner>{error}</ErrorBanner>
       </main>
       <Footer sheet>
-        <button className="btn" onClick={pay} disabled={paying}><Icon name="lock" size={20} stroke={1.8} />{paying ? 'Processing…' : `Pay AED ${total}`}</button>
+        <button className="btn" onClick={pay} disabled={paying}><Icon name="lock" size={20} stroke={1.8} />{paying ? 'Processing…' : `Pay AED ${payTotal - creditUsed}`}</button>
       </Footer>
     </Screen>
   );
@@ -402,8 +464,9 @@ function SunCheck() {
 export function Confirmed() {
   const { id } = useParams();
   const { state, set } = useStore();
-  const order = state.orders.find(o => o.id === id);
-  if (!order) return <Navigate to="/orders" replace />;
+  const { order, loading } = useOrder(id);
+  if (loading) return <Loading back="/today" />;
+  if (!order) return <Navigate to={state.session ? '/orders' : `/sign-in?next=/orders/${id}/confirmed`} replace />;
   const first = order.days[0];
   const ds = order.days.map(d => dateInfo(d.date));
   const list = ds.length === 1 ? ds[0].long.replace(',', '') : `${ds.slice(0, -1).map(d => `${d.wd} ${d.day}`).join(', ')} & ${ds[ds.length - 1].wd} ${ds[ds.length - 1].day} ${dateInfo(ds[ds.length - 1].iso).long.split(' ').pop()}`;
@@ -422,22 +485,23 @@ export function Confirmed() {
               <span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>First delivery</span>
               <span className="strong" style={{ fontSize: 18 }}>{ds[0].wd}, {ds[0].day} {ds[0].mon} · {windowLabel(first.window).replace(' – ', '–')}</span>
               <span className="help" style={{ fontSize: 16 }}>{shortPlace(first.address.building)} · {first.address.handover === 'door' ? 'Door' : 'Reception'}</span>
+              {first.bakery && <span className="help" style={{ fontSize: 16 }}>Prepared by {first.bakery}</span>}
             </span>
             <span className="status ok">Confirmed</span>
           </div>
-          <hr className="divider" />
-          <span className="row" style={{ justifyContent: 'flex-start', gap: 12, fontSize: 16 }}><Icon name="bread" size={22} stroke={1.6} style={{ flex: 'none' }} />Bakery assigned at the 9:00 PM cutoff — you’ll see who’s baking it.</span>
         </section>
         <section className="panel row" style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
           <Icon name="coffee" size={24} stroke={1.6} style={{ flex: 'none' }} />
-          <span className="stack" style={{ flex: 1 }}><span className="strong" style={{ fontSize: 17 }}>A little reminder</span>
-            <span className="help" style={{ fontSize: 15.5 }}>Coffee or fresh juice? We’ll nudge you the night before to have your drink ready.</span></span>
+          <span className="strong" style={{ flex: 1, fontSize: 17 }}>Remind me the night before</span>
           <Switch checked={state.settings.coffeeReminder} label="Drink reminder" onChange={v => set(s => { s.settings.coffeeReminder = v; })} />
         </section>
       </main>
       <Footer>
         <Link to={`/orders/${order.id}/${first.date}`} className="btn">Track my morning</Link>
-        <Link to="/today" className="btn-text" style={{ alignSelf: 'center' }}>Back to home</Link>
+        <div className="row" style={{ justifyContent: 'center', gap: 22 }}>
+          <button type="button" className="btn-text" onClick={() => download(`/orders/${order.id}/calendar`, `Morning-Box-${order.id}.ics`, 'text/calendar').catch(() => {})}><Icon name="cal" size={16} />Add to calendar</button>
+          <Link to="/today" className="btn-text">Back to home</Link>
+        </div>
       </Footer>
     </Screen>
   );

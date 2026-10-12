@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 const PATHS = {
@@ -21,6 +22,7 @@ const PATHS = {
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
   alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   minus: '<path d="M5 12h14"/>',
   heart: '<path d="M12 20s-7-4.4-9-9a4.8 4.8 0 0 1 9-3 4.8 4.8 0 0 1 9 3c-2 4.6-9 9-9 9z"/>',
   meh: '<circle cx="12" cy="12" r="9"/><path d="M8.5 15.5c1-1 2.2-1.5 3.5-1.5s2.5.5 3.5 1.5M9 10h.01M15 10h.01"/>',
@@ -31,6 +33,7 @@ const PATHS = {
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/>',
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',
   coffee: '<path d="M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 11h1.5a2.5 2.5 0 0 1 0 5H17M8 3v3M12 3v3"/>',
   phone: '<rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/>',
   card: '<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20M6 15h4"/>',
@@ -57,7 +60,12 @@ const PATHS = {
   sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16v4M17 18h4"/>',
   apple: '<path d="M16 3c-1.5.2-3 1.3-3.3 3 1.6.1 3-.9 3.3-3z"/><path d="M12 7c-1.2 0-2-.6-3.2-.6C6.6 6.4 5 8.3 5 11c0 4 2.6 9 4.6 9 1 0 1.4-.6 2.4-.6s1.3.6 2.4.6c1.6 0 3.3-3.2 3.9-5-1.8-.8-2.6-2.4-2.6-4 0-1.5.8-2.8 2-3.4-.8-1.1-2-1.6-3.2-1.6C13.6 6 13 7 12 7z"/>',
   dot: '<circle cx="12" cy="12" r="3"/>',
-  map: '<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>'
+  map: '<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
+  star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.25 4.1 1 5.8L12 16.9l-5.25 2.7 1-5.8L3.5 9.7l5.9-.9z"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 014.8.9c0 1.7-2.4 2.2-2.4 3.6M12 17v.4"/>',
+  doc: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
+  mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/>',
+  offline: '<path d="M3 3l18 18M8.5 16.5a5 5 0 017 0M5 12.6a10 10 0 015.2-2.5M14.5 10.2A10 10 0 0119 12.6M2 9a15 15 0 014.4-2.6M11 5.1A15 15 0 0122 9"/><path d="M12 20h.01"/>'
 };
 
 export function Icon({ name, size = 20, stroke = 1.7, color = 'currentColor', style }) {
@@ -267,3 +275,35 @@ export function RuledDate({ eyebrow, children }) {
     </div>
   );
 }
+
+/** Small ⓘ button: tap (or hover with a mouse) to read a short explanation. */
+export function InfoTip({ label = 'More info', children }) {
+  const [pos, setPos] = useState(null);
+  const btn = useRef(null);
+  const show = () => {
+    const r = btn.current.getBoundingClientRect();
+    const width = Math.min(280, window.innerWidth - 32);
+    setPos({ top: r.bottom + 8, left: Math.max(16, Math.min(r.left + r.width / 2 - width / 2, window.innerWidth - 16 - width)), width });
+  };
+  const hide = () => setPos(null);
+  useEffect(() => {
+    if (!pos) return undefined;
+    const off = e => { if (!btn.current?.contains(e.target)) hide(); };
+    const key = e => { if (e.key === 'Escape') hide(); };
+    document.addEventListener('pointerdown', off);
+    document.addEventListener('keydown', key);
+    window.addEventListener('scroll', hide, true);
+    return () => { document.removeEventListener('pointerdown', off); document.removeEventListener('keydown', key); window.removeEventListener('scroll', hide, true); };
+  }, [pos]);
+  return (
+    <span className="tip">
+      <button ref={btn} type="button" className="tip-btn" aria-label={label} aria-expanded={!!pos}
+        onClick={e => { e.preventDefault(); e.stopPropagation(); pos ? hide() : show(); }}
+        onPointerEnter={e => { if (e.pointerType === 'mouse') show(); }} onPointerLeave={e => { if (e.pointerType === 'mouse') hide(); }}>
+        <Icon name="info" size={18} stroke={1.7} />
+      </button>
+      {pos && <span role="tooltip" className="tip-pop" style={pos}>{children}</span>}
+    </span>
+  );
+}
+

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { put } from '../api.js';
+import { put, UNAUTHORISED_EVENT } from '../api.js';
+import { isBeforeCutoff } from '../domain/standards.js';
 
 const KEY = 'morningbox.app.v1';
 
@@ -7,12 +8,13 @@ export const emptyPlan = () => ({ dates: [], days: {} });
 export const emptyBusiness = () => ({
   people: 20, hasSpecial: null, specials: [], mode: 'mix', lines: [],
   dates: [], sameForAll: true, perDay: {},
-  delivery: { company: '', building: '', office: '', area: 'DIFC', contact: '', mobile: '', notes: '', window: 'w1' },
-  invoice: { wanted: true, billingName: '', address: '', trn: '' }
+  delivery: { company: '', building: '', office: '', area: 'DIFC', contact: '', mobile: '', notes: '', window: null },
+  invoice: { wanted: false, billingName: '', address: '', trn: '', po: '' }
 });
+export const emptyProfile = () => ({ eatingStyle: null, preferences: [], dietary: [], allergies: [], otherAllergies: '' });
 
 const initial = () => ({
-  profile: { eatingStyle: null, preferences: [], dietary: [], allergies: [] },
+  profile: emptyProfile(),
   profileDone: false,
   session: null,
   plan: emptyPlan(),
@@ -26,10 +28,26 @@ const initial = () => ({
   savedPlans: []
 });
 
+/** Drop planned mornings whose 9:00 PM cutoff has passed. Returns the removed dates. */
+export function pruneExpired(s) {
+  const gone = s.plan.dates.filter(d => !isBeforeCutoff(d));
+  if (gone.length) {
+    s.plan.dates = s.plan.dates.filter(d => !gone.includes(d));
+    gone.forEach(d => { delete s.plan.days[d]; });
+  }
+  const bizGone = (s.business.dates || []).filter(d => !isBeforeCutoff(d));
+  if (bizGone.length) s.business.dates = s.business.dates.filter(d => !bizGone.includes(d));
+  return gone;
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...initial(), ...JSON.parse(raw) } : initial();
+    if (!raw) return initial();
+    const saved = JSON.parse(raw);
+    const s = { ...initial(), ...saved, profile: { ...emptyProfile(), ...(saved.profile || {}) } };
+    pruneExpired(s);
+    return s;
   } catch {
     return initial();
   }
@@ -53,10 +71,18 @@ export function StoreProvider({ children }) {
     });
   }, []);
 
+  /* The server ended the session (expired, signed out elsewhere): stop showing
+     the customer's data and ask them to sign in again. */
+  useEffect(() => {
+    const onUnauthorised = () => setState(prev => (prev.session ? { ...prev, session: null, user: null, orders: [], businessOrders: [], businessUser: null } : prev));
+    window.addEventListener(UNAUTHORISED_EVENT, onUnauthorised);
+    return () => window.removeEventListener(UNAUTHORISED_EVENT, onUnauthorised);
+  }, []);
+
   /* Once signed in, the Morning Profile and settings live on the server. */
   const synced = useRef({ profile: null, coffee: null });
   useEffect(() => {
-    if (!state.session || !state.profileDone) return;
+    if (!state.session || !state.profileDone) { synced.current.profile = null; return; }
     const p = JSON.stringify(state.profile);
     if (synced.current.profile === null) { synced.current.profile = p; return; }
     if (p === synced.current.profile) return;
@@ -64,7 +90,7 @@ export function StoreProvider({ children }) {
     put('/me/profile', state.profile).catch(() => { synced.current.profile = null; });
   }, [state.session, state.profileDone, state.profile]);
   useEffect(() => {
-    if (!state.session) return;
+    if (!state.session) { synced.current.coffee = null; return; }
     const c = state.settings.coffeeReminder;
     if (synced.current.coffee === null) { synced.current.coffee = c; return; }
     if (c === synced.current.coffee) return;
@@ -72,9 +98,12 @@ export function StoreProvider({ children }) {
     put('/me/settings', { coffeeReminder: c }).catch(() => {});
   }, [state.session, state.settings.coffeeReminder]);
 
+  /** Sign-out and "clear this device": nothing personal survives for the next person. */
   const reset = useCallback(() => setState(initial()), []);
+  /** A screen that already saved the profile to the server records it here to avoid a second save. */
+  const markProfileSynced = useCallback(profile => { synced.current.profile = JSON.stringify(profile); }, []);
 
-  return <Ctx.Provider value={{ state, set, reset }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ state, set, reset, markProfileSynced }}>{children}</Ctx.Provider>;
 }
 
 export const useStore = () => useContext(Ctx);

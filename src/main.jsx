@@ -4,6 +4,11 @@ import { HashRouter } from 'react-router-dom';
 import { StoreProvider } from './state/store.jsx';
 import App from './App.jsx';
 import './styles.css';
+import { setupNative } from './native.js';
+import { applyPricing } from './domain/standards.js';
+import { setLibrarySettings } from './domain/library.js';
+
+setupNative().catch(error => console.error('Morning Box native setup failed:', error));
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -12,7 +17,20 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
+/* Prices are set by Morning Box in Admin. Use the last known prices straight away,
+   then the server's current ones before the first screen renders (max 2.5 s). */
+const PRICE_CACHE = 'morningbox.pricing';
+try { const c = JSON.parse(localStorage.getItem(PRICE_CACHE) || 'null'); applyPricing(c?.pricing ?? c); setLibrarySettings(c?.library); } catch { /* storage blocked */ }
+const pricing = Promise.race([
+  fetch('./api/config').then(r => r.json()).then(c => {
+    applyPricing(c.pricing);
+    setLibrarySettings(c.library);
+    try { localStorage.setItem(PRICE_CACHE, JSON.stringify({ pricing: c.pricing, library: c.library })); } catch { /* storage blocked */ }
+  }),
+  new Promise(resolve => setTimeout(resolve, 2500))
+]).catch(() => {});
+
+pricing.then(() => ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <HashRouter>
       <StoreProvider>
@@ -20,4 +38,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       </StoreProvider>
     </HashRouter>
   </React.StrictMode>
-);
+));

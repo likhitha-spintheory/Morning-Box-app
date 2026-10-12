@@ -121,8 +121,8 @@ export function describe(recipe) {
   const names = recipe.components.slice(0, 3).map(id => COMPONENTS[id].name.toLowerCase());
   const head = names[0][0].toUpperCase() + names[0].slice(1);
   const rest = names.slice(1);
-  return rest.length ? `${head}, ${rest.slice(0, -1).join(', ')}${rest.length > 1 ? ' &' : ' &'} ${rest[rest.length - 1]}`
-                     : head;
+  if (!rest.length) return head;
+  return rest.length === 1 ? `${head} & ${rest[0]}` : `${head}, ${rest.slice(0, -1).join(', ')} & ${rest[rest.length - 1]}`;
 }
 
 /**

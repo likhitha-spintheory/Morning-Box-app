@@ -23,7 +23,7 @@ export default function Splash() {
       </svg>
       <Logo width={300} to="/" />
       <span className="eyebrow grey" style={{ marginTop: 34, letterSpacing: '.3em', fontSize: 13 }}>Now serving DIFC</span>
-      <span className="help" style={{ position: 'absolute', bottom: 'calc(48px + env(safe-area-inset-bottom))', fontSize: 17 }}>Good mornings, made for you.</span>
+      <span className="help" style={{ position: 'absolute', bottom: 'calc(48px + var(--mb-inset-bottom))', fontSize: 17 }}>Good mornings, made for you.</span>
     </div>
   );
 }

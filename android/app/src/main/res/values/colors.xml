@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#FBF7EF</color>
+    <color name="colorPrimaryDark">#FBF7EF</color>
+    <color name="colorAccent">#D99A12</color>
+    <color name="mbIvory">#FBF7EF</color>
+    <color name="mbEspresso">#3B2D22</color>
+</resources>

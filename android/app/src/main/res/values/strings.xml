@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Morning Box</string>
+    <string name="title_activity_main">Morning Box</string>
+    <string name="package_name">ae.morningbox.app</string>
+    <string name="custom_url_scheme">ae.morningbox.app</string>
+</resources>

@@ -1,0 +1,22 @@
+{
+  "appId": "ae.morningbox.app",
+  "appName": "Morning Box",
+  "webDir": "dist",
+  "backgroundColor": "#FBF7EF",
+  "server": {
+    "url": "http://10.0.2.2:8787",
+    "cleartext": true,
+    "androidScheme": "https",
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "webContentsDebuggingEnabled": true,
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "style": "LIGHT"
+    }
+  }
+}

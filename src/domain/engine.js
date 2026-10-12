@@ -42,7 +42,7 @@ import { BASE_RECOMMENDATIONS, recipeById, describe, priceLevel } from './recipe
 const SWEET_SPREADS = ['honey', 'jam', 'peanutButter'];
 const SAVORY_ONLY = ['scrambledEggs', 'omelette', 'boiledEggs', 'beans', 'chickenSausage', 'beefBacon', 'turkeyBacon', 'feta', 'labneh'];
 export const INCOMPATIBLE_PAIRS = [
-  ['peanutButter', 'butter'], ['peanutButter', 'creamCheese'],
+  ['peanutButter', 'butter'], ['peanutButter', 'creamCheese'], ['peanutButter', 'plantButter'],
   ...SAVORY_ONLY.flatMap(a => SWEET_SPREADS.map(b => [a, b])).filter(([a, b]) => !(a === 'labneh' && b === 'honey'))
 ];
 const incompatible = (a, b) => INCOMPATIBLE_PAIRS.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
@@ -60,6 +60,8 @@ function compatibleInComposition(altId, recipe, components, index) {
   if (components.some((c, i) => i !== index && c === altId)) return false;
   const readyToEat = /sandwich|ready-to-eat|cup/i.test(recipe.format || '');
   if (readyToEat && COMPONENTS[altId].notBusyFormat) return false;
+  /* MB-PRO-001 §12.1–12.2: a ready-to-eat / no-cutlery box can't take loose fruit that needs a container. */
+  if (/sandwich|no assembly|no cutlery|^ready-to-eat\.?$/i.test(recipe.format || '') && COMPONENTS[altId].needsContainer) return false;
   if (/no added sweetener/i.test(recipe.format || '') && ADDED_SWEETENERS.includes(altId)) return false;
   if (components.some((c, i) => i !== index && incompatible(altId, c))) return false;
   return true;
@@ -165,7 +167,11 @@ export function recommend(profile, context) {
   /* §8 — Another Option is the next highest-priority eligible candidate and
      must stay within the selected preferences, Eating Style and Daily
      Context. If only one eligible candidate exists, it is not shown. */
-  const alternative = resolved[1] ? { ...resolved[1], reasonCode: REASON.SECONDARY } : null;
+  /* An option identical to Your Morning Box (same items after substitution) is not
+     "another" option: take the next distinct candidate, or show none. */
+  const sameBox = (a, b) => a.components.length === b.components.length && a.components.every(id => b.components.includes(id));
+  const next = resolved.slice(1).find(r => !sameBox(r, resolved[0]));
+  const alternative = next ? { ...next, reasonCode: REASON.SECONDARY } : null;
 
   return { context, profile, primary, alternative, reasonCode: REASON.PRIMARY, rejected, candidates: resolved.length };
 }
@@ -204,6 +210,22 @@ export function applySwap(config, index, altId) {
   if (!config.components.includes(before)) delete config.variants[before];
   config.variants[altId] = buildVariant(altId, config.profile);
   (config.userSwaps ||= []).push({ from: before, to: altId });
+  return { ok: true };
+}
+
+/**
+ * Server check of the customer's swaps (MB-BOX-001 §5): the box keeps the same
+ * number of items, and each changed item must be an eligible swap for the one
+ * it replaces. There is no Remove and no build-your-own (§1, §7).
+ */
+export function applyUserSwaps(config, finalComponents) {
+  if (!Array.isArray(finalComponents) || finalComponents.length !== config.components.length) {
+    return { ok: false, reason: 'Breakfast composition changed. Please plan it again.' };
+  }
+  for (let i = 0; i < finalComponents.length; i++) {
+    if (finalComponents[i] === config.components[i]) continue;
+    if (!applySwap(config, i, finalComponents[i]).ok) return { ok: false, reason: 'One of your swaps is not eligible for your profile.' };
+  }
   return { ok: true };
 }
 
@@ -278,7 +300,7 @@ export function configure(resolved, profile) {
    Every recommendation must be traceable from the inputs to the final
    breakfast configuration.
    ============================================================ */
-export function traceRecord(config, context, alternativeId = null) {
+export function traceRecord(config, context, alternativeId = null, selection = null) {
   const variants = config.variants || variantsFor(config.components, config.profile);
   return {
     inputs: {
@@ -286,12 +308,17 @@ export function traceRecord(config, context, alternativeId = null) {
       preferences: config.profile.preferences,
       dailyContext: context,
       dietary: config.profile.dietary,
-      allergies: config.profile.allergies
+      allergies: config.profile.allergies,
+      otherAllergies: config.profile.otherAllergies || ''
     },
     recommendation: {
       baseRecommendation: config.baseRecommendationId,
       reasonCode: config.reasonCode,
-      alternativeBaseRecommendation: alternativeId || null
+      alternativeBaseRecommendation: alternativeId || null,
+      /* REC §15: Your Morning Box, Another Option, and which one the customer chose. */
+      yourMorningBox: selection?.primary ?? null,
+      anotherOption: selection?.alternative ?? null,
+      selected: selection?.which ?? null
     },
     changes: {
       systemSubstitutions: config.substitutions,
