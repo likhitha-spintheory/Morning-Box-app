@@ -14,7 +14,8 @@
     "android": "node scripts/android.mjs",
     "apk": "node scripts/apk.mjs",
     "apk:release": "node scripts/apk.mjs --release",
-    "backup": "node scripts/backup.mjs"
+    "backup": "node scripts/backup.mjs",
+    "seed": "node scripts/seed.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.3",
