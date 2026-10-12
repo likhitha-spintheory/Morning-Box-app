@@ -6,6 +6,7 @@ import { applyPricing, pricingSnapshot, DEFAULT_PRICING, PRICE_LEVELS, ADDON_PRI
 import { SUPPLIER, SUPPORT } from './company.js';
 import { LIBRARY_SETTINGS, setLibrarySettings, COMPONENTS } from '../src/domain/library.js';
 import { menuSnapshot, applyMenu, validateMenu, DEFAULT_MENU } from '../src/domain/menu.js';
+import { SERVICE_AREAS, ACTIVE_AREAS, applyAreas } from '../src/domain/standards.js';
 import { bad, DELIVERY_CAPACITY } from './rules.js';
 
 db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
@@ -168,3 +169,15 @@ applyPricing(read('pricing'));
 try { const m = read('menu'); if (m) applyMenu(validateMenu(m, failMenu)); } catch (e) { console.error('[menu] Saved menu ignored:', e.message); }
 const savedCompany = read('company');
 if (savedCompany) { Object.assign(SUPPLIER, savedCompany.company); Object.assign(SUPPORT, savedCompany.support); }
+
+/* ---------- Service areas (MB-PRD-001 §3): Phase 1 DIFC, then Downtown Dubai, then Meydan One ---------- */
+export const getAreas = () => ({ areas: SERVICE_AREAS.map(a => ({ ...a, active: ACTIVE_AREAS.includes(a.id) })) });
+export function saveAreas(input = {}) {
+  const ids = SERVICE_AREAS.map(a => a.id);
+  const active = Array.isArray(input.active) ? input.active.filter(id => ids.includes(id)) : [];
+  if (!active.length) throw bad('areas_invalid', 'Keep at least one service area switched on.');
+  write('areas', active);
+  applyAreas(active);
+  return getAreas();
+}
+applyAreas(read('areas') || ['DIFC']);

@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { get, post, put, applySession, setToken, resetPersonal, newIdempotencyKey, download, track } from '../../api.js';
-import { Screen, TopBar, Footer, Icon, Chip, Switch, Option, Logo, PhoneField, Go, IconButton, InfoTip } from '../../components/ui.jsx';
+import { Screen, TopBar, Footer, Icon, Chip, Switch, Option, Logo, PhoneField, Go, IconButton, InfoTip, AreaField } from '../../components/ui.jsx';
 import { useStore } from '../../state/store.jsx';
 import {
   DELIVERY_WINDOWS, dateInfo, dayPrice, boxName, sizeLabel, windowLabel, canChooseSize, componentName, shortPlace,
   recommendDay, unsafeComponents
 } from '../../domain/app.js';
 import { useOrder, Loading, usePruneExpired } from '../../state/orders.jsx';
-import { PRICING } from '../../domain/standards.js';
+import { PRICING, areaFor } from '../../domain/standards.js';
 
 const emailValid = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.trim());
 const union = (a = [], b = []) => [...new Set([...a, ...b])];
@@ -230,7 +230,7 @@ export function Delivery() {
   const setDayAddr = (iso, k, v) => upd(d => { const cur = d.perDay[iso]?.address || structuredClone(d.address); d.perDay[iso] = { ...(d.perDay[iso] || {}), address: { ...cur, [k]: v } }; });
   const remaining = (iso, w) => avail[iso]?.[w]?.remaining;
   const windowFor = iso => (sameForAll ? dl.window : dl.perDay[iso]?.window);
-  const addrOk = (sameForAll ? [a] : dates.map(addrFor)).every(x => x.building.trim() && x.unit.trim());
+  const addrOk = (sameForAll ? [a] : dates.map(addrFor)).every(x => x.building.trim() && x.unit.trim() && areaFor(x.area));
   const windowsOk = dates.every(iso => windowFor(iso) && !isFull(iso, windowFor(iso)));
 
   const WindowCards = ({ iso }) => (
@@ -285,7 +285,7 @@ export function Delivery() {
             <div className="grid-2">
               <div className="field"><label htmlFor="u">Office / Floor</label>
                 <input id="u" className={`input${touched && !a.unit.trim() ? ' invalid' : ''}`} placeholder="Office 402" value={a.unit} onChange={e => upd(d => { d.address.unit = e.target.value; })} /></div>
-              <div className="field"><label htmlFor="ar">Area</label><input id="ar" className="input" value={a.area} readOnly /></div>
+              <AreaField id="ar" value={a.area} invalid={touched} onChange={v => upd(d => { d.address.area = v; })} />
             </div>
             <div className="stack gap-8">
               <span className="label">Hand over at</span>
@@ -311,8 +311,8 @@ export function Delivery() {
               <div className="grid-2">
                 <div className="field"><label htmlFor={`u-${iso}`}>Office / Floor</label>
                   <input id={`u-${iso}`} className={`input${touched && !x.unit.trim() ? ' invalid' : ''}`} value={x.unit} onChange={e => setDayAddr(iso, 'unit', e.target.value)} /></div>
-                {/* FLW §8: each date has its own location; delivery is DIFC only, as in the shared form. */}
-                <div className="field"><label htmlFor={`ar-${iso}`}>Area</label><input id={`ar-${iso}`} className="input" value={x.area || 'DIFC'} readOnly /></div>
+                {/* FLW §8: each date has its own location, within the active service areas. */}
+                <AreaField id={`ar-${iso}`} value={x.area} invalid={touched} onChange={v => setDayAddr(iso, 'area', v)} />
               </div>
               <div className="stack gap-8">
                 <span className="label">Hand over at</span>

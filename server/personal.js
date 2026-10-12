@@ -14,6 +14,7 @@ import { activeBakeries, danishFlavours } from './rules.js';
 import { pricingSnapshot } from '../src/domain/standards.js';
 import { LIBRARY_SETTINGS } from '../src/domain/library.js';
 import { menuSnapshot } from '../src/domain/menu.js';
+import { ACTIVE_AREAS } from '../src/domain/standards.js';
 import { notify, listNotifications, markRead, alreadyNotified } from './notify.js';
 import { recommend } from '../src/domain/engine.js';
 import { boxName, componentName, sizeLabel, windowLabel, extrasText } from '../src/domain/app.js';
@@ -85,7 +86,7 @@ personalRouter.get('/availability', (req, res) => {
 personalRouter.get('/config', (_req, res) => {
   /* Prices set in Admin, and the Fruit Danish variants partner bakeries can make (MB-PRO-001 §14.2). */
   const flavours = [...new Set(activeBakeries().flatMap(danishFlavours))];
-  res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: SUPPLIER, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples }, menu: menuSnapshot() });
+  res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: SUPPLIER, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples }, menu: menuSnapshot(), areas: [...ACTIVE_AREAS] });
 });
 
 /** Product analytics (Master Plan §15): the app reports funnel steps and no-match results. */

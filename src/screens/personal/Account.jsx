@@ -15,7 +15,7 @@ import {
 } from '../../domain/app.js';
 import { BoxEditor, FlavourPicker, offeredPastries } from '../../components/BoxEditor.jsx';
 import { addonGroups } from '../../domain/engine.js';
-import { FEEDBACK, addDaysIso as addDays } from '../../domain/standards.js';
+import { FEEDBACK, addDaysIso as addDays, areasText } from '../../domain/standards.js';
 import { useOrder, Loading } from '../../state/orders.jsx';
 import { pastedCode } from './Checkout.jsx';
 
@@ -308,7 +308,7 @@ function RouteCard({ stage, label }) {
         <circle cx="580" cy="120" r="18" fill="#3B2D22" /><circle cx="580" cy="120" r="7" fill="#fff" />
         <g transform="translate(470 152)"><rect x="-6" y="-6" width="220" height="62" rx="31" fill="#3B2D22" /><text x="104" y="35" textAnchor="middle" fill="#FBF7EF" fontFamily="Inter, sans-serif" fontSize="26" fontWeight="600">{label}</text></g>
       </svg>
-      <span className="badge-float" style={{ top: 16, left: 16 }}><Icon name="map" size={18} stroke={1.6} />DIFC</span>
+      <span className="badge-float" style={{ top: 16, left: 16 }}><Icon name="map" size={18} stroke={1.6} />{areasText()}</span>
     </div>
   );
 }

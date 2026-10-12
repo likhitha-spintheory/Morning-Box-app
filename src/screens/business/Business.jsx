@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import {
-  Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch, InfoTip
+  Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch, InfoTip, AreaField
 } from '../../components/ui.jsx';
 import { useStore, emptyBusiness } from '../../state/store.jsx';
 import { get, post, patch, del, download, applySession, setToken, resetPersonal, newIdempotencyKey, track } from '../../api.js';
@@ -12,7 +12,7 @@ const SHOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_DEMO === '1';
 import { businessModels, morningBoxMix, resolveSpecial, priceBusinessDay } from '../../domain/engine.js';
 import { recipeById, describe, priceLevel } from '../../domain/recipes.js';
 import { COMPONENTS } from '../../domain/library.js';
-import { DIETARY, ALLERGENS, DELIVERY_WINDOWS, SIZE_ADJUSTMENT, PRICE_LEVELS } from '../../domain/standards.js';
+import { DIETARY, ALLERGENS, DELIVERY_WINDOWS, SIZE_ADJUSTMENT, PRICE_LEVELS, areaFor } from '../../domain/standards.js';
 import {
   dateInfo, planningWeeks, cutoffLabel, isBeforeCutoff, windowLabel, componentName, dietLabel, allergyLabel,
   sizeLabel, todayIso, serverDateIso
@@ -287,7 +287,7 @@ export function BizWelcome() {
         ...emptyBusiness(),
         people: d.people, hasSpecial: d.specials.length > 0, specials: structuredClone(d.specials),
         mode: o.mode || 'mix', lines: structuredClone(d.lines),
-        delivery: { ...emptyBusiness().delivery, ...structuredClone(d.delivery || {}), area: 'DIFC', window: d.window || null },
+        delivery: { ...emptyBusiness().delivery, ...structuredClone(d.delivery || {}), area: areaFor(d.delivery?.area) || '', window: d.window || null },
         source: { orderId: o.id, kind: which },
         sourceDays: live.length > 1 ? live.map(x => ({ lines: structuredClone(x.lines), specials: structuredClone(x.specials) })) : null
       };
@@ -300,7 +300,7 @@ export function BizWelcome() {
       s.business = {
         ...emptyBusiness(),
         people: p.people, hasSpecial: p.specials.length > 0, specials: structuredClone(p.specials), mode: p.mode, lines: structuredClone(p.lines),
-        delivery: { ...emptyBusiness().delivery, ...structuredClone(p.delivery), area: 'DIFC', window: p.delivery.window || null },
+        delivery: { ...emptyBusiness().delivery, ...structuredClone(p.delivery), area: areaFor(p.delivery?.area) || '', window: p.delivery.window || null },
         source: { planId: pl.id, kind: 'plan' }
       };
     });
@@ -792,6 +792,7 @@ export function BizDelivery() {
     company: !dl.company.trim() && 'Enter the company name',
     building: !dl.building.trim() && 'Enter the building or tower',
     office: !dl.office.trim() && 'Enter the office, floor or unit',
+    area: !areaFor(dl.area) && 'Choose the delivery area',
     contact: !dl.contact.trim() && 'Enter who will receive the delivery',
     mobile: !/^5\d{8}$/.test(digits) && 'Enter a UAE mobile number, e.g. 50 123 4567',
     window: (!(same ? dl.window : b.dates.every(iso => windowFor(b, iso))) && 'Choose a delivery window')
@@ -847,9 +848,7 @@ export function BizDelivery() {
           {field('company', 'Company name', 'e.g. Gulf Capital Partners', { autoComplete: 'organization' })}
           {field('building', 'Building / Tower', 'e.g. Gate Village, Building 3')}
           {field('office', 'Office / Floor / Unit', 'e.g. Level 4, Office 402')}
-          <div className="field"><label htmlFor="bd-area">Area <InfoTip label="Delivery area">Morning Box currently delivers within DIFC.</InfoTip></label>
-            <input id="bd-area" className="input" value="DIFC" readOnly />
-</div>
+          <AreaField id="bd-area" value={dl.area} invalid={touched} onChange={v => upd(d => { d.delivery.area = v; })} />
         </section>
         <hr className="divider" />
         <section className="stack gap-12">

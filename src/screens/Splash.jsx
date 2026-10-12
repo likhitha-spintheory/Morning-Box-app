@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Logo } from '../components/ui.jsx';
+import { areasText } from '../domain/standards.js';
 
 const KEY = 'morningbox.splash.seen';
 
@@ -22,7 +23,7 @@ export default function Splash() {
         <path d="M10 56 Q140 -4 270 56" fill="none" stroke="#E6D3AE" strokeWidth="2.5" strokeDasharray="2 8" strokeLinecap="round" />
       </svg>
       <Logo width={300} to="/" />
-      <span className="eyebrow grey" style={{ marginTop: 34, letterSpacing: '.3em', fontSize: 13 }}>Now serving DIFC</span>
+      <span className="eyebrow grey" style={{ marginTop: 34, letterSpacing: '.3em', fontSize: 13 }}>Now serving {areasText()}</span>
       <span className="help" style={{ position: 'absolute', bottom: 'calc(48px + var(--mb-inset-bottom))', fontSize: 17 }}>Good mornings, made for you.</span>
     </div>
   );

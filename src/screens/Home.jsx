@@ -4,7 +4,7 @@ import { Icon, Logo, Ring } from '../components/ui.jsx';
 import { useStore } from '../state/store.jsx';
 import { get, track } from '../api.js';
 import { planningWeeks, timeLeft, tomorrowIso, fromPrice, dubaiNote } from '../domain/app.js';
-import { cutoffFor } from '../domain/standards.js';
+import { cutoffFor, areasText } from '../domain/standards.js';
 
 
 function greeting() {
@@ -37,7 +37,7 @@ export default function Home() {
       <header className="home-wide row" style={{ paddingTop: 16, paddingBottom: 8 }}>
         <Logo width={150} />
         <span className="row" style={{ gap: 10 }}>
-          <span className="date-pill" style={{ padding: '10px 16px', fontWeight: 500 }}><Icon name="pin" size={18} stroke={1.7} /> DIFC</span>
+          <span className="date-pill" style={{ padding: '10px 16px', fontWeight: 500 }}><Icon name="pin" size={18} stroke={1.7} /> {areasText()}</span>
           <Link to={signedIn ? '/today' : '/sign-in?next=/today'} className="icon-btn" style={{ width: 48, height: 48 }} aria-label={signedIn ? 'My mornings' : 'Sign in'}>
             <Icon name="user" size={22} />
           </Link>

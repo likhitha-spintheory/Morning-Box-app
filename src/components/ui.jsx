@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { ACTIVE_AREAS, areaFor } from '../domain/standards.js';
 
 const PATHS = {
   back: '<path d="M15 18l-6-6 6-6"/>',
@@ -333,3 +334,15 @@ export function InfoTip({ label = 'More info', children }) {
   );
 }
 
+
+/** Delivery area (MB-PRD-001 §3): fixed while one area is live; a choice once Morning Box opens more. */
+export function AreaField({ id, value, onChange, invalid }) {
+  if (ACTIVE_AREAS.length === 1) return <div className="field"><label htmlFor={id}>Area</label><input id={id} className="input" value={ACTIVE_AREAS[0]} readOnly /></div>;
+  return (
+    <div className="field"><label htmlFor={id}>Area</label>
+      <select id={id} className={`input${invalid && !areaFor(value) ? ' invalid' : ''}`} value={areaFor(value) || ''} onChange={e => onChange(e.target.value)}>
+        <option value="" disabled>Choose an area</option>
+        {ACTIVE_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+      </select></div>
+  );
+}

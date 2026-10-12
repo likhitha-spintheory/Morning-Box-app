@@ -242,3 +242,20 @@ export function cutoffFor(dateIso) {
   return new Date(Date.UTC(y, m - 1, d - 1, CUTOFF_HOUR) - DUBAI_OFFSET_MS);
 }
 export const isBeforeCutoff = (dateIso, now = new Date()) => now < cutoffFor(dateIso);
+
+/* ---------- MB-PRD-001 §3 · Service areas, launched sequentially ----------
+   Phase 1 DIFC (pilot), Phase 2 Downtown Dubai, Phase 3 Meydan One. Morning Box
+   switches areas on in Admin → Company; only active areas accept deliveries. */
+export const SERVICE_AREAS = [
+  { id: 'DIFC', label: 'DIFC', phase: 1 },
+  { id: 'Downtown Dubai', label: 'Downtown Dubai', phase: 2 },
+  { id: 'Meydan One', label: 'Meydan One', phase: 3 }
+];
+export const ACTIVE_AREAS = ['DIFC'];
+export function applyAreas(list) {
+  const ok = Array.isArray(list) ? SERVICE_AREAS.map(a => a.id).filter(id => list.includes(id)) : [];
+  if (ok.length) ACTIVE_AREAS.splice(0, ACTIVE_AREAS.length, ...ok);
+}
+/** The area to store for a delivery: the one asked for when active; with one active area, that one. */
+export const areaFor = requested => (ACTIVE_AREAS.includes(requested) ? requested : ACTIVE_AREAS.length === 1 ? ACTIVE_AREAS[0] : null);
+export const areasText = () => ACTIVE_AREAS.join(' · ');

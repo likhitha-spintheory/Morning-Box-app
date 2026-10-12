@@ -9,7 +9,7 @@ import { recipeById, describe, priceLevel } from '../src/domain/recipes.js';
 import { unsafeComponents } from '../src/domain/app.js';
 import {
   CONTEXTS, DELIVERY_WINDOWS, DIETARY, ALLERGENS, PREFERENCES, EATING_STYLES, PRICE_LEVELS,
-  isBeforeCutoff, orderableDates, isoDate, dubaiTodayIso, EXCEPTION_KINDS as BASE_EXCEPTION_KINDS
+  isBeforeCutoff, orderableDates, isoDate, dubaiTodayIso, EXCEPTION_KINDS as BASE_EXCEPTION_KINDS, ACTIVE_AREAS, areaFor
 } from '../src/domain/standards.js';
 import { db } from './db.js';
 /* allocation.js imports this module too; the cycle is safe because neither uses the other at load time. */
@@ -153,10 +153,17 @@ export function buildPersonalDay(input, profile) {
   return { cfg, price, trace: traceRecord(config, context, other?.recipe.id || null, { primary: rec.primary?.recipe.id || null, alternative: rec.alternative?.recipe.id || null, which: cfg.which }) };
 }
 
+/* Deliveries only to active service areas (MB-PRD-001 §3). */
+function areaOrFail(requested) {
+  const area = areaFor(requested);
+  if (!area) throw bad('area_unavailable', `We deliver to ${ACTIVE_AREAS.join(', ')} for now. Choose one of these areas.`);
+  return area;
+}
+
 export function validateAddress(a) {
   if (!a || !str(a.building) || !str(a.unit)) throw bad('address_invalid', 'Add your building and floor or unit.');
   return {
-    building: plain(a.building, 120), unit: plain(a.unit, 120), area: 'DIFC',
+    building: plain(a.building, 120), unit: plain(a.unit, 120), area: areaOrFail(a.area),
     handover: a.handover === 'door' ? 'door' : 'reception',
     notes: plain(a.notes, 200)
   };
@@ -218,7 +225,7 @@ export function validateBusinessDelivery(d) {
   const missing = need.filter(k => !str(d?.[k]));
   if (missing.length) throw bad('delivery_invalid', 'Complete the delivery details.', { missing });
   if (!/^5\d{8}$/.test(String(d.mobile).replace(/\D/g, '').replace(/^00/, '').replace(/^971/, '').replace(/^0/, ''))) throw bad('delivery_invalid', 'Enter a valid UAE mobile number for the contact person.');
-  return { company: plain(d.company, 120), building: plain(d.building, 120), office: plain(d.office, 120), area: 'DIFC', contact: plain(d.contact, 120), mobile: plain(d.mobile, 30), notes: plain(d.notes, 200) };
+  return { company: plain(d.company, 120), building: plain(d.building, 120), office: plain(d.office, 120), area: areaOrFail(d.area), contact: plain(d.contact, 120), mobile: plain(d.mobile, 30), notes: plain(d.notes, 200) };
 }
 
 export const needsGlutenFreeHandling = (dietary = [], allergies = []) => dietary.includes('glutenFree') || allergies.includes('gluten');

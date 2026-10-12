@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto
 import { db, parse } from './db.js';
 import { ApiError, bad } from './rules.js';
 import { TERMS_VERSION } from './company.js';
+import { ACTIVE_AREAS } from '../src/domain/standards.js';
 
 const DEV = process.env.NODE_ENV !== 'production';
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -64,7 +65,7 @@ export function userPayload(userId) {
     } : null,
     settings: { coffeeReminder: p ? !!p.coffee_reminder : true, offers: !!u.marketing_opt_in },
     termsAccepted: u.terms_version === TERMS_VERSION,
-    address: a ? { building: a.building || '', unit: a.unit || '', area: a.area || 'DIFC', handover: a.handover || 'reception', notes: a.notes || '' } : null,
+    address: a ? { building: a.building || '', unit: a.unit || '', area: a.area || ACTIVE_AREAS[0], handover: a.handover || 'reception', notes: a.notes || '' } : null,
     defaultWindow: a?.default_window || null,
     business: b ? { company: b.company, email: b.email } : null
   };

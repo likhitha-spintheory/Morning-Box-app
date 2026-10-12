@@ -318,6 +318,8 @@ export function Company({ data, act, busy, call }) {
   const [lib, setLib] = useState(null);
   const [cap, setCap] = useState(null);
   const [cost, setCost] = useState('0');
+  const [areas, setAreas] = useState(null);
+  useEffect(() => { call('GET', '/admin/areas').then(d => setAreas(d.areas)).catch(() => {}); }, [call]);
   useEffect(() => { call('GET', '/admin/library').then(setLib).catch(() => {}); call('GET', '/admin/delivery').then(d => { setCap(d.capacity); setCost(String(d.costPerDelivery)); }).catch(() => {}); }, [call]);
   const set = (group, k) => e => setV(x => ({ ...x, [group]: { ...x[group], [k]: e.target.value } }));
   return (
@@ -336,6 +338,18 @@ export function Company({ data, act, busy, call }) {
         <Field label="Hours"><input className="input" value={v.support.hours} onChange={set('support', 'hours')} /></Field>
       </div>
       <button type="button" className="btn" style={{ width: 'auto', padding: '0 28px', alignSelf: 'flex-start' }} disabled={busy} onClick={() => act('PUT', '/admin/company', v)}>Save details</button>
+      {areas && <>
+        <h2 className="h3">Service areas</h2>
+        <span className="xs">Morning Box launches area by area (MB-PRD-001 §3). Customers can only choose areas that are on. Bakery distances are measured from DIFC, so check partner bakeries before opening a new area.</span>
+        <div className="stack gap-8">{areas.map(a => (
+          <label key={a.id} className="row xs" style={{ gap: 8, justifyContent: 'flex-start' }}>
+            <input type="checkbox" checked={a.active} onChange={e => setAreas(list => list.map(x => (x.id === a.id ? { ...x, active: e.target.checked } : x)))} />
+            <b>{a.label}</b> · Phase {a.phase}
+          </label>
+        ))}</div>
+        <button type="button" className="btn-secondary" style={{ width: 'auto', alignSelf: 'flex-start' }} disabled={busy || !areas.some(a => a.active)}
+          onClick={() => act('PUT', '/admin/areas', { active: areas.filter(a => a.active).map(a => a.id) })}>Save service areas</button>
+      </>}
       {cap && <>
         <h2 className="h3">Delivery capacity per window (boxes)</h2>
         <span className="xs">How many boxes the couriers can deliver in each window. When a window is full it can’t be chosen (MB-DLV-001 §8).</span>
