@@ -12,6 +12,8 @@ import {
   isBeforeCutoff, orderableDates, isoDate, dubaiTodayIso, EXCEPTION_KINDS as BASE_EXCEPTION_KINDS
 } from '../src/domain/standards.js';
 import { db } from './db.js';
+/* allocation.js imports this module too; the cycle is safe because neither uses the other at load time. */
+import { productionRoom } from './allocation.js';
 
 export class ApiError extends Error {
   constructor(status, code, message, details) { super(message); this.status = status; this.code = code; this.details = details; }
@@ -85,8 +87,10 @@ export function boxesBooked(date, window, { excludeOrderDay, excludeBusinessDay 
 }
 export function availability(date) {
   if (closedReason(date)) return Object.fromEntries(DELIVERY_WINDOWS.map(w => [w.id, { available: false, remaining: 0, closed: true }]));
+  /* Production capacity: what the active bakeries can still take in each window after the current plan. */
+  const production = productionRoom(date, ids(DELIVERY_WINDOWS));
   return Object.fromEntries(DELIVERY_WINDOWS.map(w => {
-    const remaining = Math.max(0, capOf(w.id) - boxesBooked(date, w.id));
+    const remaining = Math.max(0, Math.min(capOf(w.id) - boxesBooked(date, w.id), production[w.id]));
     return [w.id, { available: remaining > 0, remaining }];
   }));
 }

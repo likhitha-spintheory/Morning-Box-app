@@ -65,7 +65,7 @@ export function Live({ data, meta, busy, act }) {
                 <td><span className={`status ${HEALTH_CLASS[r.health] || 'done'}`}>{r.health}</span></td>
                 <td><button type="button" className="btn-text" onClick={() => setOpen(open === key ? null : key)}>{open === key ? 'Close' : 'Actions'}</button></td>
               </tr>
-              {open === key && <tr><td colSpan={8}><Actions r={r} meta={meta} busy={busy} act={act} /></td></tr>}
+              {open === key && <tr><td colSpan={8}><Actions r={r} meta={meta} busy={busy} act={act} names={names} /></td></tr>}
             </Fragment>
           );
         })}</tbody>
@@ -91,14 +91,15 @@ function RoutePlanner({ date, rows, busy, act }) {
 }
 
 /** The next steps for one delivery, in order: bakery → pickup → delivery; plus late, failed and remedies. */
-function Actions({ r, meta, busy, act }) {
+function Actions({ r, meta, busy, act, names = {} }) {
   const path = `/days/${r.kind}/${r.id}`;
   const parts = r.kind === 'business' && r.allocation?.length > 1
     ? r.allocation.map(p => ({ bakeryId: p.bakeryId, boxes: p.boxes, special: (p.items || []).filter(it => r.production[it.entry]?.special?.length).reduce((t, it) => t + it.qty, 0) }))
     : [{ bakeryId: undefined, boxes: r.boxes, special: r.specialBoxes }];
   const [f, setF] = useState({ delay: '', reason: meta.planIssues[0], route: r.routeId || '', eta: '', fail: meta.failureReasons[0], remedy: meta.remedies[1], amount: '', why: '',
-    counts: Object.fromEntries(parts.map(p => [p.bakeryId ?? 'one', { boxes: String(p.boxes), special: String(p.special) }])), qc: {} });
+    counts: Object.fromEntries(parts.map(p => [p.bakeryId ?? 'one', { boxes: String(p.boxes), special: String(p.special) }])), qc: {}, failPart: '' });
   /* Final quality check before Ready (MB-BKY-001 §4): each check is ticked, never a blanket pass. */
+  const split = parts.length > 1 && parts[0].bakeryId !== undefined;
   const qcChecks = meta.qcChecks || {};
   const qcDone = Object.keys(qcChecks).every(c => f.qc[c]);
   const blocked = r.safetyHold || r.safetyCheck;
@@ -118,7 +119,11 @@ function Actions({ r, meta, busy, act }) {
           <input className="input" style={{ ...input, width: 90 }} placeholder="Minutes" inputMode="numeric" aria-label="Delay in minutes" value={f.delay} onChange={set('delay')} />
           <button type="button" className="btn-text" disabled={busy || !f.delay} onClick={() => act('POST', `${path}/bakery-state`, { state: 'Delayed', delayMinutes: Number(f.delay) })}>Report delay</button>
           <select className="input" style={{ ...input, width: 230 }} aria-label="Why it can’t be fulfilled" value={f.reason} onChange={set('reason')}>{meta.planIssues.map(x => <option key={x}>{x}</option>)}</select>
-          <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `${path}/bakery-state`, { state: 'Unable to Fulfil', reason: f.reason })}>Can’t fulfil</button>
+          {/* A split order: only the chosen bakery's part fails and moves (MB-OPS-001 §4). */}
+          {split && <select className="input" style={{ ...input, width: 200 }} aria-label="Which bakery’s part can’t be fulfilled" value={f.failPart} onChange={set('failPart')}>
+            <option value="">Which bakery’s part?</option>
+            {parts.map(p => <option key={p.bakeryId} value={p.bakeryId}>{names[p.bakeryId] || `#${p.bakeryId}`} ×{p.boxes}</option>)}</select>}
+          <button type="button" className="btn-text" disabled={busy || (split && !f.failPart)} onClick={() => act('POST', `${path}/bakery-state`, { state: 'Unable to Fulfil', reason: f.reason, ...(split ? { bakeryId: Number(f.failPart) } : {}) })}>Can’t fulfil</button>
           <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `${path}/reallocate`)}>Reallocate to next bakery</button>
         </div>
       )}
@@ -203,6 +208,8 @@ export function Prep({ data }) {
 
 /** Production view (aggregated) and packing view (per order) — MB-OPS-001 §3. Also used by the Bakery View. */
 export function ProductionPlan({ plan, date, children }) {
+  /* Preparation standards (MB-PRO-001 §1, §4): each item once, from the plan or its production lines. */
+  const standards = [...new Map([...(plan.standards || []), ...plan.production.flatMap(p => p.standards || [])].map(s => [s.item, s])).values()];
   return (
     <div className="card stack gap-12 print-block" style={{ padding: 18 }}>
       <div className="row" style={{ flexWrap: 'wrap' }}>
@@ -220,6 +227,10 @@ export function ProductionPlan({ plan, date, children }) {
           </tr>
         ))}</tbody>
       </table>
+      {standards.length > 0 && <>
+        <span className="eyebrow grey">Preparation standards</span>
+        <ul className="xs" style={{ margin: 0, paddingLeft: 18 }}>{standards.map(s => <li key={s.item}><b>{s.item}</b>: {s.note}</li>)}</ul>
+      </>}
       {plan.addons.length > 0 && <>
         <span className="eyebrow grey">Add-ons (packed separately)</span>
         <table className="ops-table"><tbody>{plan.addons.map(a => <tr key={a.item}><td style={{ width: 60 }}><b>{a.qty}×</b></td><td>{a.item}</td></tr>)}</tbody></table>

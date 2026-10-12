@@ -117,6 +117,14 @@ export function planAllocation(date, { extra = [], keep = false, exclude = [] } 
   return { bakeries, left, win, result: [...result.values()] };
 }
 
+/** Production capacity left per delivery window (DLV §8): after the date's current plan, the boxes
+    the active bakeries can still take in each window — daily effective capacity and, where a bakery
+    has one, its window capacity. One plan per date. */
+export function productionRoom(date, windows) {
+  const { bakeries, left, win } = planAllocation(date);
+  return Object.fromEntries(windows.map(w => [w, bakeries.reduce((t, b) => t + Math.max(0, room(left, win, b.id, w)), 0)]));
+}
+
 /** Capacity reservation at order / edit time (DLV §8): throws when the morning could no longer be allocated.
     Each extra may carry its `window`, so bakery window capacity is respected too (without it only daily capacity is checked). */
 export function assertAllocatable(date, extra, { exclude = [] } = {}) {

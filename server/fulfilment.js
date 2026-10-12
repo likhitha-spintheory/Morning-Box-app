@@ -198,6 +198,24 @@ export function setBakeryState(kind, id, state, { delayMinutes, reason, note, qc
     for (const t of targets) { partnerEvent(t, row, 'Unable to Fulfil', reason); savePart(kind, loadDay(kind, id).raw, row, t, { state: 'Unable to Fulfil' }); }
     update(kind, raw.id, { issue_reason: reason });
     const exId = raiseException({ ref: `${kind}:${raw.id}`, kind: reason, category: reason === 'Dietary/Allergy Issue' ? 'Safety' : 'Bakery', note: `${bakeryName} cannot fulfil: ${reason}${note ? ` — ${note}` : ''}`, responsibleParty: bakeryName, owner: 'Operations', action: 'Reallocate to the next eligible bakery, otherwise full refund', dedupe: false });
+    /* A business order: only the failed bakery's part moves; what can't be placed is refunded pro-rata (MB-OPS-001 §4, MB-DLV-001 §11). */
+    if (kind === 'business') {
+      const moved = reallocateParts(raw.id, targets);
+      if (moved.placed.length && !moved.unplaced) {
+        db.prepare('UPDATE exceptions SET resolution = ?, resolved = 1, resolved_at = datetime(\'now\') WHERE id = ?').run(`Reallocated automatically to ${moved.placed.map(b => b.name).join(', ')}`, exId);
+      } else if (moved.kept + moved.placed.reduce((t, b) => t + b.boxes, 0) > 0) {
+        const fresh = loadDay(kind, raw.id).raw;
+        const left = fresh.total - db.prepare(`SELECT COALESCE(SUM(amount), 0) AS n FROM service_recovery WHERE day_kind = ? AND day_id = ? AND type IN ('Partial Refund', 'Full Refund')`).get(kind, raw.id).n;
+        const amount = Math.min(left, Math.round(fresh.total * moved.unplaced / fresh.people * 100) / 100);
+        if (amount > 0) applyRemedy(kind, raw.id, { type: 'Partial Refund', amount, reason: `We couldn’t prepare ${moved.unplaced} of your ${fresh.people} breakfasts this morning` });
+        db.prepare('UPDATE exceptions SET action = ? WHERE id = ?').run(`${moved.unplaced} box${moved.unplaced > 1 ? 'es' : ''} could not be placed — partial refund AED ${amount} issued; customer told; the rest proceeds${moved.placed.length ? ` (moved to ${moved.placed.map(b => b.name).join(', ')})` : ''}`, exId);
+      } else {
+        applyRemedy(kind, raw.id, { type: 'Full Refund', reason: 'We couldn’t prepare your breakfast this morning' });
+        update(kind, raw.id, { delivery_state: 'Not Fulfilled' });
+        db.prepare('UPDATE exceptions SET action = ? WHERE id = ?').run('No other bakery could take it — full refund issued; customer told', exId);
+      }
+      return;
+    }
     /* MB-OPS-001 §4 / MB-DLV-001 §11: try the next eligible bakery; if none can, the breakfast is refunded in full and the customer told. */
     try {
       const next = reallocate(kind, raw.id, { exclude: targets });
@@ -229,6 +247,63 @@ export function reallocate(kind, id, { exclude = [] } = {}) {
   else update(kind, raw.id, { allocation: json([{ bakeryId: next.id, boxes: row.boxes, items: units.map(u => ({ entry: u.entry, qty: u.qty })) }]), ...reset });
   db.prepare(`UPDATE bakery_plans SET status = 'Changed — confirm again', updated_at = datetime('now') WHERE bakery_id = ? AND date = ? AND status = 'Confirmed'`).run(next.id, row.date);
   return next;
+}
+
+/**
+ * A business order: move only the failed bakeries' parts (MB-OPS-001 §4, MB-B2B-001 §9). Each failed
+ * part's lines go to other eligible bakeries not already on the order (capability, products, Danish
+ * flavours, daily and window capacity), split across several when needed. The healthy parts, their
+ * states and handovers, are untouched. Boxes no bakery can take are left out of the allocation.
+ * Returns { placed: [{ id, name, boxes }], unplaced, kept } — kept = boxes in the healthy parts.
+ * When nothing at all can be made, the allocation is left as it is (the caller refunds in full).
+ */
+function reallocateParts(id, failed) {
+  const { raw, row } = loadDay('business', id);
+  if (raw.stage >= 2) throw bad('already_dispatched', 'This order has already left the bakery.');
+  const states = partStates(raw);
+  const alloc = row.allocation || [];
+  const isFailed = p => failed.includes(p.bakeryId) || states[p.bakeryId]?.state === 'Unable to Fulfil';
+  const healthy = alloc.filter(p => !isFailed(p));
+  const moving = alloc.filter(isFailed).flatMap(p => p.items || []);
+  const units = businessUnits(parse(raw.lines), parse(raw.specials));
+  const others = dayRows(row.date).filter(r => !(r.kind === 'business' && r.id === row.id));
+  const used = (b, list) => list.reduce((t, r) => t + rowParts(r).filter(p => p.bakeryId === b).reduce((x, p) => x + p.boxes, 0), 0);
+  /* Not to a bakery already on the order, nor one that already reported it can't fulfil this morning (partner log). */
+  const current = [...alloc.map(p => p.bakeryId), ...db.prepare("SELECT bakery_id FROM bakery_events WHERE day_kind = 'business' AND day_id = ? AND kind = 'Unable to Fulfil'").all(raw.id).map(e => e.bakery_id)];
+  const candidates = bakeriesFor(row.date).filter(b => !current.includes(b.id) && !failed.includes(b.id)).map(b => ({
+    b, free: Math.min(b.capacity - used(b.id, others), windowRoom(b, row.window, used(b.id, others.filter(r => r.window === row.window))))
+  }));
+  const canMake = (b, u) => bakeryCovers(b, u.needs) && (!u.glutenFree || b.gluten_free_certified) && bakeryMakes(b, u.items) && u.flavours.every(f => danishFlavours(b).includes(f));
+  /* Most constrained first: Special Breakfasts, then general lines. */
+  const unitOf = it => units.find(u => u.entry === it.entry);
+  const queue = [...moving].sort((a, b) => (unitOf(b)?.special ? 1 : 0) - (unitOf(a)?.special ? 1 : 0));
+  const parts = {};
+  let unplaced = 0;
+  for (const it of queue) {
+    const u = unitOf(it);
+    let need = it.qty;
+    for (const c of candidates) {
+      if (need <= 0 || !u) break;
+      if (c.free <= 0 || !canMake(c.b, u)) continue;
+      const take = Math.min(c.free, need);
+      const p = (parts[c.b.id] ||= { bakeryId: c.b.id, boxes: 0, items: [] });
+      const same = p.items.find(x => x.entry === it.entry);
+      if (same) same.qty += take; else p.items.push({ entry: it.entry, qty: take });
+      p.boxes += take; c.free -= take; need -= take;
+    }
+    unplaced += need;
+  }
+  const added = Object.values(parts);
+  const kept = healthy.reduce((t, p) => t + p.boxes, 0);
+  const placed = added.map(p => ({ id: p.bakeryId, boxes: p.boxes, name: candidates.find(c => c.b.id === p.bakeryId).b.name }));
+  if (!kept && !added.length) return { placed, unplaced, kept };
+  const allocation = [...healthy, ...added];
+  for (const p of alloc.filter(isFailed)) delete states[p.bakeryId];
+  const agg = aggregate(allocation.map(p => ({ bakeryId: p.bakeryId })), states);
+  update('business', raw.id, { allocation: json(allocation), part_states: Object.keys(states).length ? json(states) : null, bakery_state: agg,
+    ...(unplaced ? {} : { issue_reason: null }), ...(healthy.some(p => states[p.bakeryId]?.delay) ? {} : { delay_minutes: null }) });
+  for (const p of added) db.prepare(`UPDATE bakery_plans SET status = 'Changed — confirm again', updated_at = datetime('now') WHERE bakery_id = ? AND date = ? AND status = 'Confirmed'`).run(p.bakeryId, row.date);
+  return { placed, unplaced, kept };
 }
 
 /* ---------- Courier routes, planned the night before (MB-OPS-001 §1, §6) ---------- */
@@ -407,7 +482,7 @@ export function productionPlan(date, onlyBakery = null, { forBakery = false } = 
       if (!p.readyBy || ready < p.readyBy) p.readyBy = ready;
       for (const line of production) {
         const key = `${ready}|${line.box}|${line.size}|${(line.swaps || []).join(',')}|${(line.special || []).join(',')}|${line.components.join(',')}`;
-        const agg = (p.production[key] ||= { readyBy: ready, box: line.box, size: sizeLabel(line.size), format: line.format, components: line.components, swaps: line.swaps || [], substitutions: line.substitutions || [], special: line.special || [], qty: 0 });
+        const agg = (p.production[key] ||= { readyBy: ready, box: line.box, size: sizeLabel(line.size), format: line.format, components: line.components, swaps: line.swaps || [], substitutions: line.substitutions || [], special: line.special || [], standards: line.standards || [], qty: 0 });
         agg.qty += line.qty;
         for (const a of line.addons || []) {
           const k = `${componentName(a.item)}${a.unit ? ` (${a.unit} loaf)` : ''}${flavourText(a)}`;
