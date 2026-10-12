@@ -6,13 +6,14 @@ import {
   bakeriesFor, bakeryMakes, danishFlavours
 } from './rules.js';
 import { adminRouter } from './admin.js';
+import { menuRouter } from './menu.js';
 import { dayRows, readyBy as rbBy } from './days.js';
 import { DELIVERY_COST } from './settings.js';
 import { allocate } from './allocation.js';
 export { allocate };
 import { registerFulfilmentRoutes, flagAtRisk, demoStep } from './fulfilment.js';
 export { flagAtRisk };
-import { requireUser } from './auth.js';
+import { requireUser, checkStaffCode } from './auth.js';
 import { notify } from './notify.js';
 import { VAT_RATE } from './company.js';
 import { addDaysIso, dubaiIsoOf, cutoffFor } from '../src/domain/standards.js';
@@ -29,9 +30,12 @@ const digest = s => createHash('sha256').update(String(s)).digest();
 export const opsRouter = Router();
 opsRouter.use((req, _res, next) => {
   if (!OPS_KEY || (!DEV && OPS_KEY === 'dev-ops-key')) return next(new ApiError(503, 'ops_disabled', 'Operations API is not configured.'));
-  if (!timingSafeEqual(digest(req.get('x-ops-key') || ''), digest(OPS_KEY))) return next(new ApiError(401, 'unauthorised', 'Operations key required.'));
+  const ok = timingSafeEqual(digest(req.get('x-ops-key') || ''), digest(OPS_KEY));
+  try { checkStaffCode(req, 'ops', ok); } catch (e) { return next(e); }
+  if (!ok) return next(new ApiError(401, 'unauthorised', 'Operations key required.'));
   next();
 });
+opsRouter.use('/admin/menu', menuRouter);
 opsRouter.use('/admin', adminRouter);
 registerFulfilmentRoutes(opsRouter);
 /* Retention (Master Plan §15): repeat customers, repeat-week usage and mornings per active customer. */

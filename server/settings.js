@@ -5,6 +5,7 @@ import { db, json, parse } from './db.js';
 import { applyPricing, pricingSnapshot, DEFAULT_PRICING, PRICE_LEVELS, ADDON_PRICES } from '../src/domain/standards.js';
 import { SUPPLIER, SUPPORT } from './company.js';
 import { LIBRARY_SETTINGS, setLibrarySettings } from '../src/domain/library.js';
+import { menuSnapshot, applyMenu, validateMenu, DEFAULT_MENU } from '../src/domain/menu.js';
 import { bad, DELIVERY_CAPACITY } from './rules.js';
 
 db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
@@ -80,6 +81,50 @@ export function saveCompany(input = {}) {
   return getCompany();
 }
 
+/* ---------- Menu rules: food items, the 32 breakfasts, priority (MB-PRO-001 §12, §15.1; MB-REC-001 §7) ----------
+   Saved menus apply to the next recommendation; every save records what changed. */
+const menuName = (m, id) => m.items[id]?.name || id;
+function menuChanges(before, after) {
+  const out = [];
+  for (const [id, it] of Object.entries(after.items)) {
+    const was = before.items[id];
+    if (!was) { out.push(`Added item ${it.name}`); continue; }
+    for (const [k, label] of [['name', 'name'], ['allergens', 'allergens'], ['diet', 'suitable for'], ['flexibleOnly', 'Flexible only']]) {
+      if (JSON.stringify(was[k]) !== JSON.stringify(it[k])) out.push(`${was.name}: ${label} ${JSON.stringify(was[k])} → ${JSON.stringify(it[k])}`);
+    }
+  }
+  for (const id of Object.keys(before.items)) if (!after.items[id]) out.push(`Removed item ${menuName(before, id)}`);
+  for (const [id, b] of Object.entries(after.breakfasts)) {
+    if (JSON.stringify(before.breakfasts[id]?.components) !== JSON.stringify(b.components)) out.push(`${id}: ${b.components.map(x => menuName(after, x)).join(' + ')}`);
+  }
+  for (const [c, list] of Object.entries(after.priority)) if (JSON.stringify(before.priority[c]) !== JSON.stringify(list)) out.push(`Priority ${c}: ${list.join(' → ')}`);
+  return out;
+}
+const failMenu = msg => { throw bad('menu_invalid', msg); };
+export const getMenu = () => menuSnapshot();
+export function saveMenu(input) {
+  const m = validateMenu(input, failMenu);
+  const before = menuSnapshot();
+  applyMenu(m);
+  const after = menuSnapshot();
+  const changes = menuChanges(before, after);
+  if (changes.length) {
+    write('menu', after);
+    db.prepare('INSERT INTO settings_history (key, value) VALUES (?, ?)').run('menu_changes', json(changes));
+  }
+  return { menu: after, changes };
+}
+export function resetMenu() {
+  const before = menuSnapshot();
+  db.prepare("DELETE FROM settings WHERE key = 'menu'").run();
+  applyMenu(DEFAULT_MENU);
+  const changes = menuChanges(before, menuSnapshot());
+  db.prepare('INSERT INTO settings_history (key, value) VALUES (?, ?)').run('menu_changes', json(['Reset to the approved menu', ...changes]));
+  return { menu: menuSnapshot(), changes };
+}
+export const menuHistory = () => db.prepare("SELECT value, created_at FROM settings_history WHERE key = 'menu_changes' ORDER BY id DESC LIMIT 30").all()
+  .map(r => ({ at: r.created_at, changes: parse(r.value) }));
+
 /* ---------- Menu: SAMPLE items (MB-PRO-001 §15.1) ----------
    Testing-only items stay off in production until the client approves their records. */
 export const getLibrary = () => ({ samples: LIBRARY_SETTINGS.samples });
@@ -114,5 +159,7 @@ const savedDelivery = read('delivery');
 if (savedDelivery) { Object.assign(DELIVERY_CAPACITY, savedDelivery.capacity); DELIVERY_COST.perDelivery = savedDelivery.costPerDelivery ?? 0; }
 setLibrarySettings(read('library') || { samples: process.env.NODE_ENV !== 'production' });
 applyPricing(read('pricing'));
+/* A saved menu is re-checked on start; one that no longer passes is ignored (approved menu used) rather than half-applied. */
+try { const m = read('menu'); if (m) applyMenu(validateMenu(m, failMenu)); } catch (e) { console.error('[menu] Saved menu ignored:', e.message); }
 const savedCompany = read('company');
 if (savedCompany) { Object.assign(SUPPLIER, savedCompany.company); Object.assign(SUPPORT, savedCompany.support); }

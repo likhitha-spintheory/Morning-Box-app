@@ -13,6 +13,7 @@ import { assertAllocatable, personalUnits, reallocateProvisional, isFinal } from
 import { activeBakeries, danishFlavours } from './rules.js';
 import { pricingSnapshot } from '../src/domain/standards.js';
 import { LIBRARY_SETTINGS } from '../src/domain/library.js';
+import { menuSnapshot } from '../src/domain/menu.js';
 import { notify, listNotifications, markRead, alreadyNotified } from './notify.js';
 import { recommend } from '../src/domain/engine.js';
 import { boxName, componentName, sizeLabel, windowLabel, extrasText } from '../src/domain/app.js';
@@ -84,7 +85,7 @@ personalRouter.get('/availability', (req, res) => {
 personalRouter.get('/config', (_req, res) => {
   /* Prices set in Admin, and the Fruit Danish variants partner bakeries can make (MB-PRO-001 §14.2). */
   const flavours = [...new Set(activeBakeries().flatMap(danishFlavours))];
-  res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: SUPPLIER, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples } });
+  res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: SUPPLIER, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples }, menu: menuSnapshot() });
 });
 
 /** Product analytics (Master Plan §15): the app reports funnel steps and no-match results. */
@@ -294,7 +295,7 @@ personalRouter.post('/orders', requireUser, (req, res) => {
   const id = newOrderId('MB', 'orders');
   const needs = needsFor(profile.dietary, profile.allergies);
   const order = tx(() => {
-    built.forEach(b => { assertCapacity(b.date, b.window, 1); assertAllocatable(b.date, [{ kind: 'personal', boxes: 1, units: personalUnits(b.cfg, b.trace.inputs) }]); });
+    built.forEach(b => { assertCapacity(b.date, b.window, 1); assertAllocatable(b.date, [{ kind: 'personal', window: b.window, boxes: 1, units: personalUnits(b.cfg, b.trace.inputs) }]); });
     /* Morning Box credit (service recovery) is used first; the card pays the rest. */
     const credit = Math.min(creditBalance(req.userId), total);
     // Payment gateway integration point: authorise `total - credit` before persisting.
@@ -360,7 +361,8 @@ personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res) => {
   tx(() => {
     if (window !== day.window) assertCapacity(day.date, window, 1, { excludeOrderDay: day.id });
     /* The changed breakfast must still be makeable by a bakery with capacity (DLV §8). */
-    if (b) assertAllocatable(day.date, [{ kind: 'personal', boxes: 1, units: personalUnits(b.cfg, b.trace.inputs) }], { exclude: [`personal:${day.id}`] });
+    /* Bakery capacity is per day and, where set, per delivery window (MB-B2B-001 §9). */
+    if (b || window !== day.window) assertAllocatable(day.date, [{ kind: 'personal', window, boxes: 1, units: b ? personalUnits(b.cfg, b.trace.inputs) : personalUnits(parse(day.cfg), parse(day.trace).inputs) }], { exclude: [`personal:${day.id}`] });
     if (b) {
       db.prepare('UPDATE order_days SET cfg = ?, trace = ?, price = ?, context = ?, window = ?, safety_hold = 0 WHERE id = ?')
         .run(json(b.cfg), json(b.trace), b.price, b.cfg.context, window, day.id);

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Screen, TopBar, Icon } from '../components/ui.jsx';
 import { addDaysIso, dubaiTodayIso } from '../domain/standards.js';
 import { Live, Prep, Labels } from './OpsLive.jsx';
-import { Bakeries, Pricing, Company, Products } from './OpsAdmin.jsx';
+import { Bakeries, Pricing, Company, Products, Couriers } from './OpsAdmin.jsx';
+import { MenuRules } from './OpsMenu.jsx';
 
 /* Operations & admin console for the Morning Box team: live deliveries, production
    plans, labels, exceptions, support, feedback, reports, closed days, and Admin
@@ -10,7 +11,7 @@ import { Bakeries, Pricing, Company, Products } from './OpsAdmin.jsx';
    Protected by the server's OPS_KEY (kept for this browser tab only). */
 const KEY = 'morningbox.ops';
 const TABS = [['days', 'Live'], ['prep', 'Production'], ['labels', 'Labels'], ['exceptions', 'Exceptions'], ['support', 'Support'], ['feedback', 'Feedback'], ['report', 'Reports'], ['closed', 'Closed days'],
-  ['bakeries', 'Admin · Bakeries'], ['products', 'Admin · Products & allergens'], ['pricing', 'Admin · Prices'], ['company', 'Admin · Company']];
+  ['bakeries', 'Admin · Bakeries'], ['menu', 'Admin · Menu rules'], ['couriers', 'Admin · Couriers'], ['products', 'Admin · Products & allergens'], ['pricing', 'Admin · Prices'], ['company', 'Admin · Company']];
 
 function useOps() {
   const [key, setKey] = useState(() => { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } });
@@ -38,7 +39,7 @@ export default function Ops() {
     if (!key) return;
     setError(''); setData(null);
     const path = { days: `/dashboard?date=${date}`, prep: `/prep?date=${date}`, labels: `/labels?date=${date}`, support: '/support', feedback: '/feedback', exceptions: '/exceptions', closed: '/closed-dates',
-      report: `/report?from=${range.from}&to=${range.to}`, bakeries: '/admin/bakeries', products: '/admin/products', pricing: '/admin/pricing', company: '/admin/company' }[tab];
+      report: `/report?from=${range.from}&to=${range.to}`, bakeries: '/admin/bakeries', menu: '/admin/menu', couriers: '/admin/couriers', products: '/admin/products', pricing: '/admin/pricing', company: '/admin/company' }[tab];
     try { const value = await call('GET', path); setData({ key: `${tab}|${date}|${range.from}|${range.to}`, value }); } catch (e) { setError(e.message); if (e.status === 401) save(''); }
   }, [key, tab, date, range, call]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
@@ -94,6 +95,8 @@ export default function Ops() {
       {view && tab === 'closed' && <Closed items={view} busy={busy} act={act} />}
       {view && tab === 'report' && <Report data={view} />}
       {view && tab === 'bakeries' && <Bakeries items={view} call={call} act={act} busy={busy} />}
+      {view && tab === 'menu' && <MenuRules data={view} act={act} busy={busy} call={call} />}
+      {view && tab === 'couriers' && <Couriers call={call} />}
       {view && tab === 'products' && <Products data={view} />}
       {view && tab === 'pricing' && <Pricing data={view} act={act} busy={busy} />}
       {view && tab === 'company' && <Company data={view} act={act} busy={busy} call={call} />}
