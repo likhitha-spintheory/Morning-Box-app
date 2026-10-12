@@ -249,6 +249,21 @@ export const activeBakeries = (date = dubaiTodayIso()) => db.prepare("SELECT * F
 export const BAKERY_CONDITIONS = ['Item Unavailable', 'Reduced Capacity', 'Special Requirement Unavailable', 'Temporarily Unavailable'];
 export const bakeryProducts = b => { try { return JSON.parse(b.products || 'null'); } catch { return null; } };
 export const danishFlavours = b => { try { return JSON.parse(b.danish_flavours || 'null') || []; } catch { return []; } };
+/* Per-window capacity { w1, w2, w3 } (a missing window has no limit of its own), or null when only the daily capacity applies. */
+export const WINDOW_IDS = ['w1', 'w2', 'w3'];
+export const windowCapacity = b => {
+  let v; try { v = JSON.parse(b.window_capacity || 'null'); } catch { v = null; }
+  if (!v || typeof v !== 'object') return null;
+  const out = Object.fromEntries(WINDOW_IDS.filter(w => Number.isInteger(v[w]) && v[w] >= 0).map(w => [w, v[w]]));
+  return Object.keys(out).length ? out : null;
+};
+/** Boxes this bakery can still take in a window: the window limit, if it has one. */
+export const windowRoom = (b, window, usedInWindow = 0) => {
+  const cap = windowCapacity(b)?.[window];
+  return cap == null ? Infinity : cap - usedInWindow;
+};
+/** A route / courier id as stored on a delivery (letters, digits, dash, space). */
+export const cleanRouteId = v => String(v || '').replace(/[^\w\- ]/g, '').trim().slice(0, 30);
 export function bakeriesFor(date) {
   const conds = db.prepare('SELECT * FROM bakery_conditions WHERE date = ?').all(date);
   return activeBakeries(date).flatMap(b => {
@@ -259,7 +274,7 @@ export function bakeriesFor(date) {
     const caps = { ...bakeryCaps(b) };
     for (const c of mine) if (c.kind === 'Special Requirement Unavailable' && c.need) caps[c.need] = false;
     const unavailable = mine.filter(c => c.kind === 'Item Unavailable' && c.item).map(c => c.item);
-    return [{ ...b, capacity, capabilities: JSON.stringify(caps), unavailable, approved: bakeryProducts(b) }];
+    return [{ ...b, capacity, windowCapacity: windowCapacity(b), capabilities: JSON.stringify(caps), unavailable, approved: bakeryProducts(b) }];
   });
 }
 /** Can this bakery make every item (components and add-ons) on that date? */

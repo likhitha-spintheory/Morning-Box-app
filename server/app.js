@@ -7,7 +7,7 @@ import { authRouter } from './auth.js';
 import { personalRouter } from './personal.js';
 import { businessRouter } from './business.js';
 import { opsRouter, demoRouter } from './ops.js';
-import { bakeryRouter } from './fulfilment.js';
+import { bakeryRouter, courierRouter } from './fulfilment.js';
 
 const PROD = process.env.NODE_ENV === 'production';
 const CSP = [
@@ -40,6 +40,7 @@ export function createApp() {
   app.use('/api/business', businessRouter);
   app.use('/api/ops', opsRouter);
   app.use('/api/bakery', bakeryRouter);
+  app.use('/api/courier', courierRouter);
   app.use('/api/demo', demoRouter);
   app.use('/api', (_req, _res, next) => next(new ApiError(404, 'not_found', 'Not found.')));
 

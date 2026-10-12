@@ -326,6 +326,23 @@ CREATE TABLE IF NOT EXISTS bakery_events (
 CREATE INDEX IF NOT EXISTS idx_bakery_events ON bakery_events(bakery_id, date);
 `);
 
+/* Couriers (MB-OPS-001 §6, MB-DLV-001 §4): one courier per route, each with its own
+   access code for the Courier View. Deliveries carry the route id ops assigns the night before. */
+db.exec(`
+CREATE TABLE IF NOT EXISTS couriers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  phone TEXT,
+  route_id TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  access_hash TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+/* Optional capacity per delivery window, JSON { w1, w2, w3 } (MB-B2B-001 §9; DLV §7).
+   NULL = only the daily capacity applies. */
+addColumns('bakeries', { window_capacity: 'TEXT' });
+
 /* Launch partner set for the DIFC pilot (MB-BKY-001). Names are placeholders
    until partner agreements are signed. */
 if (db.prepare('SELECT COUNT(*) AS n FROM bakeries').get().n === 0) {

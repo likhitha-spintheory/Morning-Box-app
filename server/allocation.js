@@ -32,14 +32,14 @@ const canMake = (b, u) => bakeryCovers(b, u.needs) && (!u.glutenFree || b.gluten
 
 function dayDemand(date) {
   const personal = db.prepare(`SELECT d.*, o.payment_status FROM order_days d JOIN orders o ON o.id = d.order_id WHERE d.date = ? AND d.cancelled = 0`).all(date).map(d => ({
-    kind: 'personal', id: d.id, ref: `personal:${d.id}`, boxes: 1, units: personalUnits(parse(d.cfg), parse(d.trace).inputs),
+    kind: 'personal', id: d.id, ref: `personal:${d.id}`, window: d.window, boxes: 1, units: personalUnits(parse(d.cfg), parse(d.trace).inputs),
     current: d.bakery_id ? [{ bakeryId: d.bakery_id, boxes: 1, items: [{ entry: 0, qty: 1 }] }] : null,
     locked: LOCKED.includes(d.bakery_state) || d.stage >= 1, hold: !!d.safety_hold, paid: !/failed|refunded/.test(d.payment_status || '')
   }));
   const business = db.prepare(`SELECT d.*, o.payment_status FROM business_days d JOIN business_orders o ON o.id = d.order_id WHERE d.date = ? AND d.cancelled = 0`).all(date).map(d => {
     const alloc = parse(d.allocation);
     return {
-      kind: 'business', id: d.id, ref: `business:${d.id}`, boxes: d.people, units: businessUnits(parse(d.lines), parse(d.specials)),
+      kind: 'business', id: d.id, ref: `business:${d.id}`, window: d.window, boxes: d.people, units: businessUnits(parse(d.lines), parse(d.specials)),
       current: Array.isArray(alloc) && alloc.length ? alloc : null,
       locked: LOCKED.includes(d.bakery_state) || d.stage >= 1, hold: false, paid: !/failed|refunded/.test(d.payment_status || '')
     };
@@ -47,31 +47,41 @@ function dayDemand(date) {
   return [...personal, ...business];
 }
 
-/** Allocate one delivery to one bakery, or split a business order by line. Mutates `left`. */
-function place(row, bakeries, left) {
-  const single = bakeries.find(b => left[b.id] >= row.boxes && row.units.every(u => canMake(b, u)));
+/* Capacity left: `left` per bakery for the day; `win` per bakery per window, only for bakeries with window limits. */
+const room = (left, win, id, window) => Math.min(left[id], win[id]?.[window] ?? Infinity);
+function use(left, win, id, window, boxes) {
+  left[id] -= boxes;
+  if (win[id]?.[window] != null) win[id][window] -= boxes;
+}
+
+/** Allocate one delivery to one bakery, or split a business order by line. Mutates `left` and `win`. */
+function place(row, bakeries, left, win = {}) {
+  const single = bakeries.find(b => room(left, win, b.id, row.window) >= row.boxes && row.units.every(u => canMake(b, u)));
   if (single) {
-    left[single.id] -= row.boxes;
+    use(left, win, single.id, row.window, row.boxes);
     return [{ bakeryId: single.id, boxes: row.boxes, items: row.units.map(u => ({ entry: u.entry, qty: u.qty })) }];
   }
   if (row.kind !== 'business') return null;
   const parts = {};
   const trial = { ...left };
+  const trialWin = Object.fromEntries(Object.entries(win).map(([id, w]) => [id, { ...w }]));
   /* Most constrained first: Special Breakfasts, then general lines. */
   const units = [...row.units].sort((a, b) => b.special - a.special || bakeries.filter(x => canMake(x, a)).length - bakeries.filter(x => canMake(x, b)).length);
   for (const u of units) {
     let need = u.qty;
     for (const b of bakeries) {
       if (need <= 0) break;
-      if (!canMake(b, u) || trial[b.id] <= 0) continue;
-      const take = Math.min(trial[b.id], need);
+      const free = room(trial, trialWin, b.id, row.window);
+      if (!canMake(b, u) || free <= 0) continue;
+      const take = Math.min(free, need);
       const p = (parts[b.id] ||= { bakeryId: b.id, boxes: 0, items: [] });
       p.boxes += take; p.items.push({ entry: u.entry, qty: take });
-      trial[b.id] -= take; need -= take;
+      use(trial, trialWin, b.id, row.window, take); need -= take;
     }
     if (need > 0) return null;
   }
   Object.assign(left, trial);
+  Object.assign(win, trialWin);
   return Object.values(parts);
 }
 
@@ -83,13 +93,15 @@ export function planAllocation(date, { extra = [], keep = false, exclude = [] } 
   const bakeries = bakeriesFor(date);
   const byId = Object.fromEntries(bakeries.map(b => [b.id, b]));
   const left = Object.fromEntries(bakeries.map(b => [b.id, b.capacity]));
+  /* Capacity per delivery window, for bakeries that have one (MB-B2B-001 §9, DLV §7). */
+  const win = Object.fromEntries(bakeries.filter(b => b.windowCapacity).map(b => [b.id, { ...b.windowCapacity }]));
   const rows = [...dayDemand(date).filter(r => !exclude.includes(r.ref)), ...extra];
   const valid = r => r.current && r.current.every(p => byId[p.bakeryId] && p.items.every(it => { const u = r.units.find(x => x.entry === it.entry); return !u || canMake(byId[p.bakeryId], u); }));
   const result = new Map();
   /* Started orders stay where they are and use up that bakery's capacity. */
   for (const r of rows) {
     if (r.locked || (keep && valid(r))) {
-      (r.current || []).forEach(p => { if (p.bakeryId in left) left[p.bakeryId] -= p.boxes; });
+      (r.current || []).forEach(p => { if (p.bakeryId in left) use(left, win, p.bakeryId, r.window, p.boxes); });
       result.set(r.ref, { row: r, parts: r.current, kept: true });
     }
   }
@@ -100,12 +112,13 @@ export function planAllocation(date, { extra = [], keep = false, exclude = [] } 
   open.sort((a, b) => isNew(a) - isNew(b) || options(a) - options(b) || b.boxes - a.boxes || a.ref.localeCompare(b.ref));
   for (const r of open) {
     if (r.hold || !r.paid) { result.set(r.ref, { row: r, parts: null, skipped: r.hold ? 'Safety hold' : 'Payment not confirmed' }); continue; }
-    result.set(r.ref, { row: r, parts: place(r, bakeries, left) });
+    result.set(r.ref, { row: r, parts: place(r, bakeries, left, win) });
   }
-  return { bakeries, left, result: [...result.values()] };
+  return { bakeries, left, win, result: [...result.values()] };
 }
 
-/** Capacity reservation at order / edit time (DLV §8): throws when the morning could no longer be allocated. */
+/** Capacity reservation at order / edit time (DLV §8): throws when the morning could no longer be allocated.
+    Each extra may carry its `window`, so bakery window capacity is respected too (without it only daily capacity is checked). */
 export function assertAllocatable(date, extra, { exclude = [] } = {}) {
   const rows = extra.map((e, i) => ({ ...e, ref: `new:${i}`, current: null, locked: false, hold: false, paid: true }));
   /* An edit plans the new version of the delivery in place of its current one. */

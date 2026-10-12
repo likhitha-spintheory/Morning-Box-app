@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { randomInt, createHash } from 'node:crypto';
 import { db, json } from './db.js';
 import { allocate, isFinal } from './allocation.js';
-import { ApiError, bad, isIsoDate, BAKERY_CONDITIONS, bakeryCaps, bakeryProducts, danishFlavours } from './rules.js';
+import { ApiError, bad, isIsoDate, BAKERY_CONDITIONS, bakeryCaps, bakeryProducts, danishFlavours, windowCapacity, WINDOW_IDS, cleanRouteId } from './rules.js';
 import { getPricing, savePricing, resetPricing, pricingHistory, getCompany, saveCompany, getLibrary, saveLibrary, getDelivery, saveDelivery } from './settings.js';
 import { COMPONENTS, ADDON_BREAD, ADDON_PASTRY } from '../src/domain/library.js';
 import { BASE_RECOMMENDATIONS, describe, priceLevel } from '../src/domain/recipes.js';
@@ -42,6 +42,7 @@ adminRouter.put('/delivery', (req, res) => res.json(saveDelivery(req.body)));
 export const BAKERY_STATUS = ['Active', 'Under Review', 'Suspended'];
 export const CAPABILITIES = ['glutenFree', 'nutFree', 'peanutFree', 'dairyFree', 'eggFree', 'vegan', 'sesameFree', 'soyFree'];
 export const DANISH_FLAVOURS = ['Apple', 'Berry', 'Apricot'];
+const WINDOW_NAME = { w1: '7:30–8:30 AM', w2: '8:30–9:30 AM', w3: '9:30–10:30 AM' };
 const hash = code => createHash('sha256').update(String(code)).digest('hex');
 const log = (id, message) => db.prepare('INSERT INTO bakery_log (bakery_id, message) VALUES (?, ?)').run(id, String(message).slice(0, 300));
 const clean = (v, max = 120) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f<>]/g, ' ').trim().slice(0, max) : '');
@@ -56,7 +57,7 @@ function bakeryOut(b) {
   kpi.unable = db.prepare("SELECT COUNT(DISTINCT day_kind || day_id) AS n FROM bakery_events WHERE bakery_id = ? AND kind = 'Unable to Fulfil' AND date < ?").get(b.id, today).n;
   return {
     id: b.id, name: b.name, area: b.area, distanceKm: b.distance_km, dailyCapacity: b.daily_capacity,
-    effectiveCapacity: b.effective_capacity ?? null, glutenFreeCertified: !!b.gluten_free_certified,
+    effectiveCapacity: b.effective_capacity ?? null, windowCapacity: windowCapacity(b), glutenFreeCertified: !!b.gluten_free_certified,
     capabilities: bakeryCaps(b), status: b.status, statusNote: b.status_note || '', products: bakeryProducts(b),
     danishFlavours: danishFlavours(b), contactName: b.contact_name || '', contactPhone: b.contact_phone || '', hasAccessCode: !!b.access_hash,
     payoutPct: b.payout_pct ?? 60, licenceNo: b.licence_no || '', licenceExpiry: b.licence_expiry || '', bakesOwnBread: !!b.bakes_own_bread, readyLeadMinutes: b.ready_lead_minutes ?? 30,
@@ -89,6 +90,21 @@ function validateBakery(input, existing = {}) {
   const distance = Number(input.distanceKm ?? existing.distance_km);
   const daily = Number(input.dailyCapacity ?? existing.daily_capacity);
   const effective = input.effectiveCapacity === '' || input.effectiveCapacity == null ? null : Number(input.effectiveCapacity);
+  /* Optional capacity per delivery window (blank = no limit for that window); null when none is set. */
+  let perWindow = input.windowCapacity === undefined ? windowCapacity(existing) : null;
+  if (input.windowCapacity !== undefined && input.windowCapacity !== null) {
+    if (typeof input.windowCapacity !== 'object' || Array.isArray(input.windowCapacity)) throw bad('window_capacity_invalid', 'Window capacity must be set per window.');
+    perWindow = {};
+    for (const w of WINDOW_IDS) {
+      const raw = input.windowCapacity[w];
+      if (raw === '' || raw == null) continue;
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 0 || n > daily) throw bad('window_capacity_invalid', `Capacity for ${WINDOW_NAME[w]} must be a whole number of boxes between 0 and the stated daily capacity.`);
+      perWindow[w] = n;
+    }
+    if (!Object.keys(perWindow).length) perWindow = null;
+  }
+  if (perWindow && Object.values(perWindow).some(n => n > daily)) throw bad('window_capacity_invalid', 'Window capacity can’t be more than the stated daily capacity.');
   if (!name) throw bad('name_required', 'Enter the bakery name.');
   if (!area) throw bad('area_required', 'Enter the area.');
   if (!Number.isFinite(distance) || distance < 0 || distance > 100) throw bad('distance_invalid', 'Distance must be 0–100 km.');
@@ -102,7 +118,7 @@ function validateBakery(input, existing = {}) {
   }
   const flavours = input.danishFlavours === undefined ? danishFlavours(existing) : (Array.isArray(input.danishFlavours) ? input.danishFlavours.filter(f => DANISH_FLAVOURS.includes(f)) : []);
   return {
-    name, area, distance_km: distance, daily_capacity: daily, effective_capacity: effective,
+    name, area, distance_km: distance, daily_capacity: daily, effective_capacity: effective, window_capacity: perWindow ? json(perWindow) : null,
     gluten_free_certified: input.glutenFreeCertified === undefined ? existing.gluten_free_certified || 0 : input.glutenFreeCertified ? 1 : 0,
     capabilities: json(caps), products: products === null ? null : json(products), danish_flavours: json([...new Set(flavours)]),
     contact_name: clean(input.contactName ?? existing.contact_name ?? ''), contact_phone: clean(input.contactPhone ?? existing.contact_phone ?? '', 30),
@@ -219,3 +235,42 @@ adminRouter.post('/bakeries/:id/access-code', (req, res) => {
 });
 export const bakeryByCode = code => (code ? db.prepare('SELECT * FROM bakeries WHERE access_hash = ?').get(hash(code)) : null);
 
+
+/* ---------- Couriers (MB-OPS-001 §6): one courier per route, each with a Courier View access code ---------- */
+const courierOut = c => ({ id: c.id, name: c.name, phone: c.phone || '', routeId: c.route_id, active: !!c.active, hasAccessCode: !!c.access_hash, createdAt: c.created_at });
+const courierById = id => {
+  const c = db.prepare('SELECT * FROM couriers WHERE id = ?').get(Number(id));
+  if (!c) throw new ApiError(404, 'not_found', 'Courier not found.');
+  return c;
+};
+function validateCourier(input, existing = {}) {
+  const name = clean(input.name ?? existing.name);
+  const phone = clean(input.phone ?? existing.phone ?? '', 30);
+  const routeId = cleanRouteId(input.routeId ?? existing.route_id);
+  if (!name) throw bad('name_required', 'Enter the courier’s name.');
+  if (!routeId) throw bad('route_required', 'Enter the route id (letters, digits, dash).');
+  const taken = db.prepare('SELECT id FROM couriers WHERE route_id = ? AND id IS NOT ?').get(routeId, existing.id ?? null);
+  if (taken) throw new ApiError(409, 'route_taken', `Route ${routeId} already has a courier.`);
+  return { name, phone: phone || null, route_id: routeId, active: input.active === undefined ? existing.active ?? 1 : input.active ? 1 : 0 };
+}
+adminRouter.get('/couriers', (_req, res) => res.json(db.prepare('SELECT * FROM couriers ORDER BY active DESC, route_id').all().map(courierOut)));
+adminRouter.post('/couriers', (req, res) => {
+  const v = validateCourier(req.body);
+  const r = db.prepare('INSERT INTO couriers (name, phone, route_id, active) VALUES (?, ?, ?, ?)').run(v.name, v.phone, v.route_id, v.active);
+  res.status(201).json(courierOut(courierById(r.lastInsertRowid)));
+});
+/** Edit, or deactivate with { active: false } — a deactivated courier can no longer sign in. */
+adminRouter.put('/couriers/:id', (req, res) => {
+  const c = courierById(req.params.id);
+  const v = validateCourier(req.body, c);
+  db.prepare('UPDATE couriers SET name = ?, phone = ?, route_id = ?, active = ? WHERE id = ?').run(v.name, v.phone, v.route_id, v.active, c.id);
+  res.json(courierOut(courierById(c.id)));
+});
+/** A new 8-digit access code for the Courier View. Shown once; only its hash is stored. */
+adminRouter.post('/couriers/:id/access-code', (req, res) => {
+  const c = courierById(req.params.id);
+  const code = String(randomInt(10_000_000, 100_000_000));
+  db.prepare('UPDATE couriers SET access_hash = ? WHERE id = ?').run(hash(code), c.id);
+  res.json({ code });
+});
+export const courierByCode = code => (code ? db.prepare('SELECT * FROM couriers WHERE access_hash = ? AND active = 1').get(hash(code)) : null);

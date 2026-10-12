@@ -30,7 +30,7 @@ export function Live({ data, meta, busy, act }) {
           <thead><tr><th>Bakery</th><th>Booked / capacity</th><th>Production plan</th><th /></tr></thead>
           <tbody>{data.plans.map(p => (
             <tr key={p.bakeryId} className={p.booked && p.plan?.status !== 'Confirmed' ? 'warn' : ''}>
-              <td>{p.bakery}</td><td>{p.booked} / {p.capacity}</td>
+              <td>{p.bakery}</td><td>{p.booked} / {p.capacity}{p.windowCapacity ? <><br /><small>{Object.entries(p.windowCapacity).map(([w, n]) => `${windowLabel(w)}: ${p.bookedByWindow?.[w] ?? 0} / ${n}`).join(' · ')}</small></> : null}</td>
               <td>{p.plan ? `${p.plan.status}${p.plan.reason ? ` — ${p.plan.reason}` : ''}` : p.booked ? 'Waiting for the bakery to confirm' : '—'}</td>
               <td>{p.booked > 0 && p.plan?.status !== 'Confirmed' && <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `/plans/${p.bakeryId}/${data.date}/confirm`)}>Confirm for bakery</button>}</td>
             </tr>
@@ -38,6 +38,8 @@ export function Live({ data, meta, busy, act }) {
         </table>
       </div>
 
+      {/* Active couriers' routes are offered; any other route / courier can still be typed. */}
+      <datalist id="courier-routes">{(data.couriers || []).map(c => <option key={c.routeId} value={c.routeId}>{c.name}</option>)}</datalist>
       <RoutePlanner date={data.date} busy={busy} act={act} rows={data.rows} />
       <div className="row" style={{ flexWrap: 'wrap', gap: 8, justifyContent: 'flex-start' }}>
         {Object.entries(data.counts).map(([k, n]) => <span key={k} className={`status ${HEALTH_CLASS[k] || 'done'}`}>{k} · {n}</span>)}
@@ -82,7 +84,7 @@ function RoutePlanner({ date, rows, busy, act }) {
       <b style={{ fontSize: 14 }}>Routes:</b><span className="xs">{unrouted ? `${unrouted} without a courier` : 'all assigned'}</span>
       <select className="input" style={{ width: 180, minHeight: 36 }} aria-label="Window" value={v.window} onChange={e => setV(x => ({ ...x, window: e.target.value }))}>
         <option value="">All windows</option>{['w1', 'w2', 'w3'].map(w => <option key={w} value={w}>{windowLabel(w)}</option>)}</select>
-      <input className="input" style={{ width: 160, minHeight: 36 }} placeholder="Route / courier" aria-label="Route" value={v.routeId} onChange={e => setV(x => ({ ...x, routeId: e.target.value }))} />
+      <input className="input" style={{ width: 160, minHeight: 36 }} list="courier-routes" placeholder="Route / courier" aria-label="Route" value={v.routeId} onChange={e => setV(x => ({ ...x, routeId: e.target.value }))} />
       <button type="button" className="btn-text" disabled={busy || !v.routeId.trim()} onClick={() => act('POST', '/routes', { date, ...v })}>Assign to window</button>
     </div>
   );
@@ -132,7 +134,7 @@ function Actions({ r, meta, busy, act }) {
       {!done && r.stage < 2 && (
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
           <b style={{ fontSize: 14 }}>Courier / route:</b>
-          <input className="input" style={input} placeholder="e.g. R3 or courier name" aria-label="Route or courier" value={f.route} onChange={set('route')} />
+          <input className="input" style={input} list="courier-routes" placeholder="e.g. R3 or courier name" aria-label="Route or courier" value={f.route} onChange={set('route')} />
           <button type="button" className="btn-text" disabled={busy || !f.route.trim()} onClick={() => act('POST', `${path}/route`, { routeId: f.route })}>Assign</button>
         </div>
       )}

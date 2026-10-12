@@ -6,6 +6,8 @@ import { Fragment, useEffect, useState } from 'react';
 const CAP_LABEL = { glutenFree: 'Gluten-free', nutFree: 'Tree-nut-free', peanutFree: 'Peanut-free', dairyFree: 'Dairy-free', eggFree: 'Egg-free', vegan: 'Vegan', sesameFree: 'Sesame-free', soyFree: 'Soy-free' };
 const STATUS_CLASS = { Active: 'ok', 'Under Review': 'prep', Suspended: 'off' };
 const small = { width: 'auto', padding: '0 16px', minHeight: 40 };
+const WINDOWS = [['w1', '7:30–8:30'], ['w2', '8:30–9:30'], ['w3', '9:30–10:30']];
+const windowCaps = wc => (wc ? ` · per window ${WINDOWS.filter(([w]) => wc[w] != null).map(([w, label]) => `${label}: ${wc[w]}`).join(', ')}` : '');
 const Field = ({ label, children }) => <div className="field" style={{ gap: 6 }}><label>{label}</label>{children}</div>;
 
 /* ---------- Bakeries ---------- */
@@ -47,7 +49,7 @@ function Bakery({ b, catalog, call, act, busy }) {
       {b.statusNote && <span className="help">{b.statusNote}</span>}
       {b.openSafety > 0 && <div className="banner-warn" role="status"><span><b>{b.openSafety} open safety incident{b.openSafety > 1 ? 's' : ''}</b> linked to this bakery — consider Under Review (MB-BKY-001 §10).</span></div>}
       <span className="xs">Licence {b.licenceNo || '— not recorded'}{b.licenceExpiry ? ` (expires ${b.licenceExpiry})` : ''} · {b.bakesOwnBread ? 'bakes its own bread in-house' : 'own bread NOT confirmed'} · ready {b.readyLeadMinutes} min before each window</span>
-      <span className="xs">{b.area} · {b.distanceKm} km · capacity {b.effectiveCapacity ?? b.dailyCapacity}{b.effectiveCapacity != null ? ` (stated ${b.dailyCapacity})` : ''} boxes/day · {b.upcomingBoxes} upcoming · {approved}{b.danishFlavours.length ? ` · Danish: ${b.danishFlavours.join(', ')}` : ''}</span>
+      <span className="xs">{b.area} · {b.distanceKm} km · capacity {b.effectiveCapacity ?? b.dailyCapacity}{b.effectiveCapacity != null ? ` (stated ${b.dailyCapacity})` : ''} boxes/day{windowCaps(b.windowCapacity)} · {b.upcomingBoxes} upcoming · {approved}{b.danishFlavours.length ? ` · Danish: ${b.danishFlavours.join(', ')}` : ''}</span>
       <span className="xs">Can handle: {Object.entries(b.capabilities).filter(([, v]) => v).map(([k]) => CAP_LABEL[k]).join(', ') || 'no special requirements'}{b.glutenFreeCertified ? ' · gluten-free certified' : ''}</span>
       {(b.contactName || b.contactPhone) && <span className="xs">Contact: {b.contactName} {b.contactPhone}</span>}
       <span className="xs">So far: {perf.mornings} mornings · {perf.onTime} on time · {perf.late} late · {perf.unableToFulfil} not fulfilled · Loved it {perf.loved} / Not for me {perf.notForMe}</span>
@@ -102,6 +104,7 @@ function BakeryForm({ b, catalog, busy, onSave }) {
   const [v, setV] = useState(() => ({
     name: b?.name || '', area: b?.area || 'DIFC', distanceKm: b?.distanceKm ?? '', dailyCapacity: b?.dailyCapacity ?? '', effectiveCapacity: b?.effectiveCapacity ?? '',
     /* A new bakery starts with no approved products; each is added as its onboarding sample is approved (MB-BKY-001 §8). */
+    windowCapacity: Object.fromEntries(WINDOWS.map(([w]) => [w, b?.windowCapacity?.[w] ?? ''])),
     glutenFreeCertified: !!b?.glutenFreeCertified, capabilities: b?.capabilities || {}, allProducts: b ? !b.products : false, products: b?.products || [],
     danishFlavours: b?.danishFlavours || [], contactName: b?.contactName || '', contactPhone: b?.contactPhone || '',
     licenceNo: b?.licenceNo || '', licenceExpiry: b?.licenceExpiry || '', bakesOwnBread: !!b?.bakesOwnBread, readyLeadMinutes: b?.readyLeadMinutes ?? 30, payoutPct: b?.payoutPct ?? 60
@@ -111,7 +114,9 @@ function BakeryForm({ b, catalog, busy, onSave }) {
   const categories = [...new Set(catalog.items.map(i => i.category))];
   const save = () => onSave({
     ...v, distanceKm: Number(v.distanceKm), dailyCapacity: Number(v.dailyCapacity), readyLeadMinutes: Number(v.readyLeadMinutes), payoutPct: Number(v.payoutPct), licenceExpiry: v.licenceExpiry || null, effectiveCapacity: v.effectiveCapacity === '' ? null : Number(v.effectiveCapacity),
-    products: v.allProducts ? null : v.products
+    products: v.allProducts ? null : v.products,
+    /* Blank = no limit for that window; all blank = only the daily capacity applies. */
+    windowCapacity: Object.fromEntries(WINDOWS.map(([w]) => [w, v.windowCapacity[w] === '' ? '' : Number(v.windowCapacity[w])]))
   });
   return (
     <div className="stack gap-12" style={{ borderTop: '1px solid var(--line-soft)', paddingTop: 12 }}>
@@ -121,6 +126,7 @@ function BakeryForm({ b, catalog, busy, onSave }) {
         <Field label="Distance to DIFC (km)"><input className="input" inputMode="decimal" value={v.distanceKm} onChange={set('distanceKm')} /></Field>
         <Field label="Stated daily capacity (boxes)"><input className="input" inputMode="numeric" value={v.dailyCapacity} onChange={set('dailyCapacity')} /></Field>
         <Field label="Effective capacity we allocate (optional)"><input className="input" inputMode="numeric" placeholder="Same as stated" value={v.effectiveCapacity} onChange={set('effectiveCapacity')} /></Field>
+        {WINDOWS.map(([w, label]) => <Field key={w} label={`Capacity ${label} (optional)`}><input className="input" inputMode="numeric" placeholder="No window limit" value={v.windowCapacity[w]} onChange={e => setV(x => ({ ...x, windowCapacity: { ...x.windowCapacity, [w]: e.target.value } }))} /></Field>)}
         <Field label="Contact name"><input className="input" value={v.contactName} onChange={set('contactName')} /></Field>
         <Field label="Contact phone"><input className="input" value={v.contactPhone} onChange={set('contactPhone')} /></Field>
         <Field label="Food business licence no."><input className="input" value={v.licenceNo} onChange={set('licenceNo')} /></Field>
@@ -142,6 +148,69 @@ function BakeryForm({ b, catalog, busy, onSave }) {
           <div className="chips">{catalog.items.filter(i => i.category === cat).map(i => <button key={i.id} type="button" className={`chip${v.products.includes(i.id) ? ' on' : ''}`} aria-pressed={v.products.includes(i.id)} onClick={() => toggle('products', i.id)}>{i.name}</button>)}</div></div>
       ))}
       <button type="button" className="btn" style={{ alignSelf: 'flex-start', width: 'auto', padding: '0 28px' }} disabled={busy || !v.name.trim()} onClick={save}>{b ? 'Save bakery' : 'Add bakery (starts Under Review)'}</button>
+    </div>
+  );
+}
+
+/* ---------- Couriers (MB-OPS-001 §6): one courier per route, each with a Courier View access code ---------- */
+/* Admin → Couriers: each route's driver signs in to the Courier View (#/courier) with their own access code. */
+export function Couriers({ call }) {
+  const [list, setList] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [codes, setCodes] = useState({});
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = () => call('GET', '/admin/couriers').then(setList).catch(e => setError(e.message));
+  useEffect(() => { load(); }, [call]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* Its own calls (not the console's reload), so a new access code stays on screen. */
+  const run = async (method, path, body) => {
+    setBusy(true); setError('');
+    try { const r = await call(method, path, body); await load(); return r || true; } catch (e) { setError(e.message); return false; } finally { setBusy(false); }
+  };
+  const issueCode = async c => { const r = await run('POST', `/admin/couriers/${c.id}/access-code`); if (r) setCodes(x => ({ ...x, [c.id]: r.code })); };
+  return (
+    <div className="card stack gap-12" style={{ padding: 18 }}>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <h2 className="h3">Couriers</h2>
+        <button type="button" className="btn-secondary" style={small} onClick={() => setAdding(a => !a)}>{adding ? 'Cancel' : 'Add a courier'}</button>
+      </div>
+      <span className="xs">Each courier has one route. Deliveries assigned to that route (Live → Routes) show in the courier’s view at <b>#/courier</b>: pickup, out for delivery, delivered or failed.</span>
+      {error && <div className="banner-err" role="alert">{error}</div>}
+      {adding && <CourierForm busy={busy} onSave={v => run('POST', '/admin/couriers', v).then(ok => ok && setAdding(false))} />}
+      {!list ? <p className="help">Loading…</p> : !list.length ? <p className="help" style={{ margin: 0 }}>No couriers yet.</p> : (
+        <table className="ops-table">
+          <thead><tr><th>Route</th><th>Courier</th><th>Phone</th><th>Status</th><th /></tr></thead>
+          <tbody>{list.map(c => (
+            <Fragment key={c.id}>
+              <tr className={c.active ? '' : 'warn'}>
+                <td><b>{c.routeId}</b></td><td>{c.name}</td><td>{c.phone || '—'}</td>
+                <td><span className={`status ${c.active ? 'ok' : 'off'}`}>{c.active ? 'Active' : 'Inactive'}</span>{c.active && !c.hasAccessCode ? <><br /><small>No access code yet</small></> : null}</td>
+                <td>
+                  <button type="button" className="btn-text" onClick={() => setEditing(editing === c.id ? null : c.id)}>{editing === c.id ? 'Close' : 'Edit'}</button>
+                  {c.active && <button type="button" className="btn-text" disabled={busy} onClick={() => issueCode(c)}>{c.hasAccessCode ? 'New access code' : 'Create access code'}</button>}
+                  <button type="button" className="btn-text" disabled={busy} onClick={() => run('PUT', `/admin/couriers/${c.id}`, { active: !c.active })}>{c.active ? 'Deactivate' : 'Reactivate'}</button>
+                </td>
+              </tr>
+              {codes[c.id] && <tr><td colSpan={5}><div className="note"><span>Courier View access code for {c.name} ({c.routeId}): <b style={{ fontSize: 18, letterSpacing: '.1em' }}>{codes[c.id]}</b> — share it with the courier now; it isn’t shown again. They sign in at <b>#/courier</b>.</span></div></td></tr>}
+              {editing === c.id && <tr><td colSpan={5}><CourierForm c={c} busy={busy} onSave={v => run('PUT', `/admin/couriers/${c.id}`, v).then(ok => ok && setEditing(null))} /></td></tr>}
+            </Fragment>
+          ))}</tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function CourierForm({ c, busy, onSave }) {
+  const [v, setV] = useState({ name: c?.name || '', phone: c?.phone || '', routeId: c?.routeId || '' });
+  const set = k => e => setV(x => ({ ...x, [k]: e.target.value }));
+  return (
+    <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start', alignItems: 'flex-end' }}>
+      <Field label="Name"><input className="input" style={{ width: 200 }} value={v.name} onChange={set('name')} /></Field>
+      <Field label="Mobile"><input className="input" style={{ width: 170 }} inputMode="tel" value={v.phone} onChange={set('phone')} /></Field>
+      <Field label="Route id"><input className="input" style={{ width: 120 }} placeholder="e.g. R1" value={v.routeId} onChange={set('routeId')} /></Field>
+      <button type="button" className="btn-secondary" style={small} disabled={busy || !v.name.trim() || !v.routeId.trim()} onClick={() => onSave(v)}>{c ? 'Save' : 'Add courier'}</button>
     </div>
   );
 }

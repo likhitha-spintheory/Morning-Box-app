@@ -29,6 +29,17 @@ function limitIp(req, key, max, windowMs = HOUR) {
 }
 setInterval(() => { const now = Date.now(); for (const [k, h] of hits) if (now - h.start > HOUR) hits.delete(k); }, HOUR).unref();
 
+/** Staff codes (operations key, bakery and courier access codes): after 20 wrong codes in an hour a device is blocked for the rest of it. */
+const STAFF_FAILURES = 20;
+export function checkStaffCode(req, kind, ok) {
+  const id = `staff-${kind}:${req.ip}`;
+  const now = Date.now();
+  let h = hits.get(id);
+  if (h && now - h.start > HOUR) { hits.delete(id); h = null; }
+  if (h && h.n >= STAFF_FAILURES) throw new ApiError(429, 'rate_limited', `Too many wrong codes from this device. Try again in ${minutes(HOUR - (now - h.start))} minutes.`);
+  if (!ok) { if (h) h.n++; else hits.set(id, { start: now, n: 1 }); }
+}
+
 /** Normalises a UAE mobile to +9715XXXXXXXX. */
 export function normaliseMobile(m) {
   const d = String(m || '').replace(/\D/g, '').replace(/^00/, '').replace(/^971/, '').replace(/^0/, '');
