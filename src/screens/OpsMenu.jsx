@@ -216,7 +216,7 @@ function TryIt({ lists, call, name, dirty }) {
   const [r, setR] = useState(null);
   const [err, setErr] = useState('');
   const run = async () => { setErr(''); try { setR(await call('POST', '/admin/menu/try', p)); } catch (e) { setErr(e.message); setR(null); } };
-  const box = x => x && <><b>{x.components.map(name).join(' + ')}</b> <span className="xs">({x.recipeId})</span></>;
+  const box = x => x && <><b>{(x.names || x.components.map(name)).join(' + ')}</b> <span className="xs">({x.recipeId})</span></>;
   return (
     <div className="card stack gap-12" style={{ padding: 18 }}>
       <span className="xs">See what a customer would be recommended with the saved rules.{dirty ? ' Save your changes first to try them.' : ''}</span>

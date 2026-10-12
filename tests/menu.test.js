@@ -97,3 +97,9 @@ test('staff codes: a device is blocked after 20 wrong codes in an hour', async (
   assert.equal((await fetch(`${base}/bakery/me`, { headers: { 'x-bakery-code': 'wrong-again' } })).status, 429);
   assert.equal((await ops('GET', '/admin/menu')).status, 200, 'the operations key is counted separately');
 });
+
+test('try-it shows the approved build used for an allergy', async () => {
+  const r = await ops('POST', '/admin/menu/try', { eatingStyle: 'health', preferences: ['fresh'], allergies: ['dairy'], context: 'busy' });
+  assert.ok(r.body.primary.names.some(n => /Coconut yogurt/.test(n)), JSON.stringify(r.body.primary.names));
+  assert.ok(!r.body.primary.names.includes('Greek Yogurt'));
+});

@@ -6,7 +6,8 @@ import { getMenu, saveMenu, resetMenu, menuHistory } from './settings.js';
 import { ALLERGENS, DIETARY, PREFERENCES, CONTEXTS } from '../src/domain/standards.js';
 import { CATEGORIES } from '../src/domain/menu.js';
 import { SWAP_GROUPS } from '../src/domain/library.js';
-import { recommend } from '../src/domain/engine.js';
+import { recommend, variantLabel } from '../src/domain/engine.js';
+import { COMPONENTS } from '../src/domain/library.js';
 import { bad } from './rules.js';
 
 export const menuRouter = Router();
@@ -25,6 +26,8 @@ menuRouter.post('/try', (req, res) => {
   const profile = { eatingStyle, preferences: pick(preferences, PREFERENCES.map(p => p.id)), dietary: pick(dietary, DIETARY.map(d => d.id)), allergies: pick(allergies, ALLERGENS.map(a => a.id)) };
   if (!profile.preferences.length) throw bad('profile_invalid', 'Choose at least one preference.');
   const r = recommend(profile, context);
-  const box = x => x && { recipeId: x.recipe.id, components: x.components, substitutions: x.substitutions || [] };
+  /* Names show the approved build actually used, e.g. "Greek Yogurt (Coconut yogurt (sample))" for a dairy allergy. */
+  const named = (id, variants) => `${COMPONENTS[id].name}${variantLabel(id, variants?.[id]) ? ` (${variantLabel(id, variants[id])})` : ''}`;
+  const box = x => x && { recipeId: x.recipe.id, components: x.components, names: x.components.map(id => named(id, x.variants)), substitutions: x.substitutions || [] };
   res.json({ primary: box(r.primary), alternative: box(r.alternative), rejected: r.rejected || [], message: r.message || null });
 });
