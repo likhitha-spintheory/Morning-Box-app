@@ -393,3 +393,7 @@ export function tx(fn) {
 addColumns('couriers', { capacity: 'INTEGER' });
 /* Optional photo on a customer's problem report (MB-OPS-001 §10), a small data URL. */
 addColumns('customer_issues', { photo: 'TEXT' });
+/* Optional proof-of-delivery photo from the courier (MB-DLV-001 §10: "Photo proof may be used operationally
+   where supported, without requiring a photograph of the customer"), a small data URL. */
+addColumns('order_days', { delivery_photo: 'TEXT' });
+addColumns('business_days', { delivery_photo: 'TEXT' });

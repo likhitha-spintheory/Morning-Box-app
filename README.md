@@ -39,7 +39,11 @@ Privacy, Refunds and Allergen pages are built in (`#/legal/...`); `VITE_TERMS_UR
 them with hosted versions. Have the legal text reviewed before launch.
 
 Operations console: open `#/ops` and enter `OPS_KEY` — deliveries and status, bakery allocation, printable kitchen
-prep list and box labels, support inbox, ratings & NPS, exceptions, and closed days (public holidays).
+prep list and box labels, support inbox, Loved it / Not for me feedback, exceptions, and closed days (public holidays).
+Bakery View: open `#/bakery` with the bakery's own access code (issued in Admin) — its production plan, labels,
+Confirm / Report an issue, In Preparation → Ready, delays and temporary conditions; no customer contact details.
+Courier View: open `#/courier` with the courier's own access code — its route only, pickup counts, out for delivery,
+handover point with an optional proof-of-delivery photo (never of the customer), running late and failed delivery.
 Backups: `npm run backup` writes a consistent copy to `data/backups/` (keeps 14; `MB_BACKUP_DIR`, `MB_BACKUP_KEEP`).
 The full product review and roadmap is in `docs/IMPROVEMENTS.md`.
 
@@ -116,7 +120,8 @@ public/assets/     Approved logo and photography.
 
 - **SMS for OTP**: codes are generated, stored and verified (10 min expiry, 5 attempts); in development the code is shown on screen. Plug an SMS provider into `server/auth.js`.
 - **Payment gateway**: orders record a `demo_…` payment reference; authorise/charge and refund at the marked points in `server/personal.js` and `server/business.js`.
-- **Ops & bakery screens**: the operations API exists (production list, allocation, status, exceptions); the staff UI is the next build step. In development, "Demo: advance delivery status" on an order steps it through the stages.
+- **Staff accounts**: the operations console, Bakery View and Courier View are built; ops still signs in with one shared `OPS_KEY` (bakeries and couriers have their own codes). In development, "Demo: advance delivery status" on an order steps it through the stages.
+- **Photo storage**: complaint and proof-of-delivery photos are small data URLs kept in SQLite; move them to file/object storage before scaling.
 - **Prices**: indicative values from the MVP (`PRICE_LEVELS`, `SIZE_ADJUSTMENT`, `ADDON_PRICES`, `VOLUME_DISCOUNT` in `standards.js`). Final AED pricing is pending approval.
 - **Partner bakeries**: seeded as placeholders (Partner Bakery A/B/C) until agreements are signed.
 - **Special Breakfasts**: with the current approved library, some combinations (e.g. Gluten-Free, or Vegan + tree-nut allergy) have no safe breakfast; the app blocks them rather than weakening safety.

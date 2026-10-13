@@ -106,11 +106,18 @@ test('courier view: auth, only own route, only what is needed; pickup → out �
   assert.equal((await cr('POST', `/days/personal/${id}/out`, null, C)).status, 200);
   assert.equal(dayOf(id).stage, 2);
   assert.equal((await cr('POST', `/days/personal/${id}/delivered`, { deliveryPoint: 'the contact person' }, C)).body.error, 'point_required');
-  assert.equal((await cr('POST', `/days/personal/${id}/delivered`, { deliveryPoint: 'your door' }, C)).status, 200);
+  /* Optional photo proof (DLV §10): a bad photo is refused without recording the delivery. */
+  assert.equal((await cr('POST', `/days/personal/${id}/delivered`, { deliveryPoint: 'your door', photo: 'not-an-image' }, C)).body.error, 'photo_invalid');
+  assert.equal(dayOf(id).stage, 2);
+  assert.equal((await ops('GET', `/days/personal/${id}/delivery-photo`)).status, 404);
+  const photo = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+  assert.equal((await cr('POST', `/days/personal/${id}/delivered`, { deliveryPoint: 'your door', photo }, C)).status, 200);
   const done = dayOf(id);
   assert.equal(done.stage, 3); assert.equal(done.delivery_point, 'your door'); assert.equal(done.recipient_type, 'Designated receiving point');
+  assert.equal((await ok('GET', `/days/personal/${id}/delivery-photo`)).body.photo, photo);
   const after = (await cr('GET', `/deliveries?date=${date}`, null, C)).body.deliveries[0];
   assert.equal(after.delivered.recipientType, 'Designated receiving point');
+  assert.equal(after.delivered.photo, true);
 });
 
 test('courier view: bakery handed over first → courier pickup checks its own count; failed with reason', async () => {

@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { db, json, parse, tx, logEvent } from './db.js';
 import { checkStaffCode } from './auth.js';
-import { ApiError, bad, prettyDate, raiseException, isIsoDate, bakeriesFor, bakeryCovers, bakeryMakes, danishFlavours, bakeryProducts, windowRoom, cleanRouteId } from './rules.js';
+import { ApiError, bad, prettyDate, raiseException, isIsoDate, bakeriesFor, bakeryCovers, bakeryMakes, danishFlavours, bakeryProducts, windowRoom, cleanRouteId, cleanPhoto } from './rules.js';
 export { setStage };
 import { notify } from './notify.js';
 import { dayRows, personalRow, businessRow, rowBakeries, health, readyBy, openSafetyCheck } from './days.js';
@@ -376,10 +376,13 @@ export function outForDelivery(kind, id) {
   update(kind, raw.id, { delivery_state: 'Out for Delivery' });
   if (raw.stage < 2) setStage(kind, raw.id, 2);
 }
-export function markDelivered(kind, id, point) {
+export function markDelivered(kind, id, point, photo) {
   const { raw } = loadDay(kind, id);
   if (raw.delivery_state !== 'Out for Delivery') throw bad('not_out', 'This order is not out for delivery.');
+  /* Optional photo proof (DLV §10); checked before the stage changes so a bad photo never half-records a delivery. */
+  const pic = cleanPhoto(photo);
   setStage(kind, raw.id, 3, point);
+  if (pic) db.prepare(`UPDATE ${TABLE[kind]} SET delivery_photo = ? WHERE id = ?`).run(pic, raw.id);
 }
 
 /** Development only: walk one delivery through the real steps (plan, prepare, ready, handover, out, delivered). */
@@ -591,7 +594,15 @@ export function registerFulfilmentRoutes(router) {
   router.post('/days/:kind/:id/handover', (req, res) => { const [k, i] = kindId(req); recordHandover(k, i, req.body); res.json({ ok: true }); });
   router.post('/days/:kind/:id/pickup', (req, res) => { const [k, i] = kindId(req); confirmPickup(k, i); res.json({ ok: true }); });
   router.post('/days/:kind/:id/out', (req, res) => { const [k, i] = kindId(req); outForDelivery(k, i); res.json({ ok: true }); });
-  router.post('/days/:kind/:id/delivered', (req, res) => { const [k, i] = kindId(req); markDelivered(k, i, req.body.deliveryPoint); res.json({ ok: true }); });
+  router.post('/days/:kind/:id/delivered', (req, res) => { const [k, i] = kindId(req); markDelivered(k, i, req.body.deliveryPoint, req.body.photo); res.json({ ok: true }); });
+  /* The courier's proof-of-delivery photo, loaded on request (DLV §10). */
+  router.get('/days/:kind/:id/delivery-photo', (req, res) => {
+    const [k, i] = kindId(req);
+    if (!TABLE[k]) throw bad('kind_invalid', 'Unknown order type.');
+    const p = db.prepare(`SELECT delivery_photo FROM ${TABLE[k]} WHERE id = ?`).get(i);
+    if (!p?.delivery_photo) throw new ApiError(404, 'not_found', 'No delivery photo for this order.');
+    res.json({ photo: p.delivery_photo });
+  });
   router.post('/days/:kind/:id/failed', (req, res) => { const [k, i] = kindId(req); markFailed(k, i, req.body.reason, req.body.note); res.json({ ok: true }); });
   router.post('/days/:kind/:id/remedy', (req, res) => { const [k, i] = kindId(req); res.json(applyRemedy(k, i, req.body)); });
   router.post('/plans/:bakeryId/:date/confirm', (req, res) => { confirmPlan(Number(req.params.bakeryId), req.params.date); res.json({ ok: true }); });
@@ -691,7 +702,7 @@ function courierRow(r, bakeries) {
     contact: business ? { name: a.contact || '', mobile: a.mobile || '' } : null,
     hold: !!(r.safetyHold || r.safetyCheck),
     bakeryState: r.bakeryState, deliveryState: r.deliveryState, stage: r.stage,
-    delivered: r.stage >= 3 ? { at: r.deliveredAt, point: r.deliveryPoint, recipientType: r.recipientType, late: r.late } : null,
+    delivered: r.stage >= 3 ? { at: r.deliveredAt, point: r.deliveryPoint, recipientType: r.recipientType, late: r.late, photo: r.hasDeliveryPhoto } : null,
     attempts: (r.attempts || []).map(x => ({ reason: x.reason, at: x.created_at }))
   };
 }
@@ -728,6 +739,6 @@ courierRouter.post('/days/:kind/:id/pickup', (req, res) => {
   res.json({ ok: true });
 });
 courierRouter.post('/days/:kind/:id/out', (req, res) => { const { kind, id } = ownDelivery(req); outForDelivery(kind, id); res.json({ ok: true }); });
-courierRouter.post('/days/:kind/:id/delivered', (req, res) => { const { kind, id } = ownDelivery(req); markDelivered(kind, id, req.body.deliveryPoint); res.json({ ok: true }); });
+courierRouter.post('/days/:kind/:id/delivered', (req, res) => { const { kind, id } = ownDelivery(req); markDelivered(kind, id, req.body.deliveryPoint, req.body.photo); res.json({ ok: true }); });
 courierRouter.post('/days/:kind/:id/late', (req, res) => { const { kind, id } = ownDelivery(req); reportLate(kind, id, req.body.eta, { by: 'courier', note: req.body.note, routeId: req.courier.route_id }); res.json({ ok: true }); });
 courierRouter.post('/days/:kind/:id/failed', (req, res) => { const { kind, id } = ownDelivery(req); markFailed(kind, id, req.body.reason, req.body.note); res.json({ ok: true }); });

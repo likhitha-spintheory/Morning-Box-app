@@ -10,7 +10,7 @@ const STAGE = ['Confirmed', 'Being prepared', 'Out for delivery', 'Delivered'];
 const bakeryOf = (r, names) => (r.kind === 'personal' ? (r.bakeryId ? names[r.bakeryId] || `#${r.bakeryId}` : '—') : (r.allocation || []).map(p => `${names[p.bakeryId] || `#${p.bakeryId}`} ×${p.boxes}`).join(', ') || '—');
 const small = { width: 'auto', padding: '0 14px', minHeight: 36, fontSize: 14 };
 
-export function Live({ data, meta, busy, act }) {
+export function Live({ data, meta, busy, act, call }) {
   const [filter, setFilter] = useState('attention');
   const [open, setOpen] = useState(null);
   const names = Object.fromEntries(data.plans.map(p => [p.bakeryId, p.bakery]));
@@ -65,7 +65,7 @@ export function Live({ data, meta, busy, act }) {
                 <td><span className={`status ${HEALTH_CLASS[r.health] || 'done'}`}>{r.health}</span></td>
                 <td><button type="button" className="btn-text" onClick={() => setOpen(open === key ? null : key)}>{open === key ? 'Close' : 'Actions'}</button></td>
               </tr>
-              {open === key && <tr><td colSpan={8}><Actions r={r} meta={meta} busy={busy} act={act} names={names} /></td></tr>}
+              {open === key && <tr><td colSpan={8}><Actions r={r} meta={meta} busy={busy} act={act} call={call} names={names} /></td></tr>}
             </Fragment>
           );
         })}</tbody>
@@ -91,7 +91,15 @@ function RoutePlanner({ date, rows, busy, act }) {
 }
 
 /** The next steps for one delivery, in order: bakery → pickup → delivery; plus late, failed and remedies. */
-function Actions({ r, meta, busy, act, names = {} }) {
+/** The courier's proof-of-delivery photo, loaded on request (MB-DLV-001 §10). */
+function DeliveryPhoto({ r, call }) {
+  const [src, setSrc] = useState('');
+  const [err, setErr] = useState('');
+  if (src) return <img src={src} alt="Proof of delivery from the courier" style={{ maxWidth: 320, borderRadius: 12 }} />;
+  return <span className="row" style={{ gap: 8, justifyContent: 'flex-start' }}><button type="button" className="btn-text" onClick={() => call('GET', `/days/${r.kind}/${r.id}/delivery-photo`).then(x => setSrc(x.photo)).catch(e => setErr(e.message))}>View delivery photo</button>{err && <span className="xs">{err}</span>}</span>;
+}
+
+function Actions({ r, meta, busy, act, call, names = {} }) {
   const path = `/days/${r.kind}/${r.id}`;
   const parts = r.kind === 'business' && r.allocation?.length > 1
     ? r.allocation.map(p => ({ bakeryId: p.bakeryId, boxes: p.boxes, special: (p.items || []).filter(it => r.production[it.entry]?.special?.length).reduce((t, it) => t + it.qty, 0) }))
@@ -110,6 +118,7 @@ function Actions({ r, meta, busy, act, names = {} }) {
   return (
     <div className="stack gap-12" style={{ padding: '6px 0' }}>
       {r.attempts?.length > 0 && <span className="xs">Attempts: {r.attempts.map(a => `${a.reason} (${a.created_at})`).join('; ')}</span>}
+      {done && r.hasDeliveryPhoto && call && <DeliveryPhoto r={r} call={call} />}
       {blocked && <div className="banner-warn" role="status"><span><b>{r.safetyHold ? 'Safety hold' : 'Open allergy / dietary check'}</b> — resolve it in Exceptions before the bakery prepares or hands this over (MB-BKY-001 §3).</span></div>}
       {r.handover && <span className="xs">Handed over {r.handover.boxes} boxes ({r.handover.special_boxes} special){r.handover.route_id ? ` · route ${r.handover.route_id}` : ''} · {r.handover.picked_up_at ? `picked up ${r.handover.picked_up_at}` : 'awaiting courier pickup'}</span>}
       {!leftBakery && !done && (

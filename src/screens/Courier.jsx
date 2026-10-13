@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Screen, TopBar, Icon } from '../components/ui.jsx';
+import { Screen, TopBar, Icon, PhotoPicker } from '../components/ui.jsx';
 import { dubaiTodayIso } from '../domain/standards.js';
 
 /* Courier View (MB-OPS-001 §6–7; MB-DLV-001 §4–6, §10).
@@ -101,6 +101,7 @@ function Delivery({ d, me, busy, act }) {
   const path = `/days/${d.kind}/${d.id}`;
   const [count, setCount] = useState({});
   const [point, setPoint] = useState('');
+  const [photo, setPhoto] = useState('');
   const [fail, setFail] = useState({ open: false, reason: '', note: '' });
   const [late, setLate] = useState({ open: false, eta: '', note: '' });
   const [label, cls] = badge(d);
@@ -159,7 +160,10 @@ function Delivery({ d, me, busy, act }) {
               </button>
             ))}
           </div>
-          <button type="button" className="btn" style={big} disabled={busy || !point} onClick={() => act(`${path}/delivered`, { deliveryPoint: point })}>{point ? `Delivered — ${points.find(p => p.point === point)?.label}` : 'Choose where you handed it over'}</button>
+          {/* Optional photo proof (DLV §10): the boxes at the handover point, never the customer. */}
+          <PhotoPicker value={photo} onChange={setPhoto} />
+          <span className="xs">Photo of the boxes where you left them, if useful. Don’t photograph the customer.</span>
+          <button type="button" className="btn" style={big} disabled={busy || !point} onClick={() => act(`${path}/delivered`, { deliveryPoint: point, ...(photo ? { photo } : {}) })}>{point ? `Delivered — ${points.find(p => p.point === point)?.label}` : 'Choose where you handed it over'}</button>
           {!fail.open ? <button type="button" className="btn-text" style={{ alignSelf: 'flex-start' }} onClick={() => setFail(x => ({ ...x, open: true }))}>Couldn’t deliver?</button> : (
             <div className="stack gap-8">
               <select className="input" style={{ minHeight: 52 }} aria-label="Why delivery failed" value={fail.reason} onChange={e => setFail(x => ({ ...x, reason: e.target.value }))}>
@@ -184,7 +188,7 @@ function Delivery({ d, me, busy, act }) {
           )}
         </div>
       )}
-      {done && d.delivered && <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2} /><span>Delivered to {points.find(p => p.point === d.delivered.point)?.label || d.delivered.point} · {d.delivered.recipientType} · {at(d.delivered.at)}{d.delivered.late ? ' · after the window' : ''}</span></div>}
+      {done && d.delivered && <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2} /><span>Delivered to {points.find(p => p.point === d.delivered.point)?.label || d.delivered.point} · {d.delivered.recipientType} · {at(d.delivered.at)}{d.delivered.late ? ' · after the window' : ''}{d.delivered.photo ? ' · photo saved' : ''}</span></div>}
     </article>
   );
 }

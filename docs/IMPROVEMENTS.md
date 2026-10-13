@@ -42,7 +42,7 @@ Status: ✅ built in this round · 🟡 needs a client decision or content · �
 | 28 | Ask customers who loved it to rate the app on Google Play | 🔵 (Play In-App Review) |
 | 29 | Rate individual items in the box | ⬜ |
 | 29a | Customise the suggested box freely (remove, add any item, multi-select) | ↩ Reverted 12 Oct — against BOX-001 §1, §5, §7 |
-| 30 | Photo with a complaint | ⬜ (needs file storage) |
+| 30 | Photo with a complaint | ✅ (small photo kept in the database) |
 
 ## 3. Help & support
 | # | Improvement | Status |
@@ -106,9 +106,9 @@ Status: ✅ built in this round · 🟡 needs a client decision or content · �
 | 75 | Closed days (public holidays): customers can't pick them, server refuses them | ✅ |
 | 76 | Closing a day warns how many orders are already booked | ✅ |
 | 77 | Daily database backup script (`npm run backup`, keeps 14) | ✅ |
-| 78 | Courier app / driver view with proof of delivery photo | 🟡 delivery marked at Reception/Door from the console; photo needs file storage |
+| 78 | Courier app / driver view with proof of delivery photo | ✅ Courier View (`#/courier`); optional photo of the boxes, never the customer (DLV §10) |
 | 79 | Live courier location on the map | 🔵 |
-| 80 | Bakery portal (partners update their own status) | ⬜ |
+| 80 | Bakery portal (partners update their own status) | ✅ Bakery View (`#/bakery`) |
 | 81 | Revenue & orders reports, CSV export for finance (console → Reports) | ✅ |
 | 82 | Refunds issued from the console | 🔵 (payment gateway) |
 | 83 | Team accounts with roles instead of one shared key | ⬜ |

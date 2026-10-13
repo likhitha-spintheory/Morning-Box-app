@@ -44,7 +44,7 @@ function fulfilment(d, date, window) {
     handedOverAt: d.handed_over_at || null, pickedUpAt: d.picked_up_at || null,
     bakeryState: d.bakery_state || null, deliveryState: d.delivery_state || null, delayMinutes: d.delay_minutes || null,
     issueReason: d.issue_reason || null, late: !!d.late, lateNote: d.late_note, deliveredAt: d.delivered_at, deliveryPoint: d.delivery_point,
-    recipientType: d.recipient_type || null, readyBy: hhmm(readyBy(date, window, firstBakery)), windowEnds: windowEnd(date, window).toISOString(),
+    recipientType: d.recipient_type || null, hasDeliveryPhoto: !!d.delivery_photo, readyBy: hhmm(readyBy(date, window, firstBakery)), windowEnds: windowEnd(date, window).toISOString(),
     handover: db.prepare('SELECT * FROM handovers WHERE day_kind = ? AND day_id = ? ORDER BY id DESC').get(d.kind, d.id) || null,
     handovers: db.prepare('SELECT * FROM handovers WHERE day_kind = ? AND day_id = ? ORDER BY id').all(d.kind, d.id),
     attempts: db.prepare('SELECT reason, note, created_at FROM delivery_attempts WHERE day_kind = ? AND day_id = ? ORDER BY id').all(d.kind, d.id),

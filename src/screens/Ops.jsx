@@ -86,7 +86,7 @@ export default function Ops() {
       </nav>
       {error && <div className="banner-err no-print" role="alert"><Icon name="alert" size={18} stroke={2} />{error}</div>}
       {!view && !error && <p className="help">Loading…</p>}
-      {view && meta && tab === 'days' && <Live data={view} meta={meta} busy={busy} act={act} />}
+      {view && meta && tab === 'days' && <Live data={view} meta={meta} busy={busy} act={act} call={call} />}
       {view && tab === 'prep' && <Prep data={view} />}
       {view && tab === 'labels' && <Labels data={view} />}
       {view && tab === 'support' && <Support items={view} busy={busy} act={act} />}
