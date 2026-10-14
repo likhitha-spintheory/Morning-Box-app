@@ -48,7 +48,9 @@ function fulfilment(d, date, window) {
     handover: db.prepare('SELECT * FROM handovers WHERE day_kind = ? AND day_id = ? ORDER BY id DESC').get(d.kind, d.id) || null,
     handovers: db.prepare('SELECT * FROM handovers WHERE day_kind = ? AND day_id = ? ORDER BY id').all(d.kind, d.id),
     attempts: db.prepare('SELECT reason, note, created_at FROM delivery_attempts WHERE day_kind = ? AND day_id = ? ORDER BY id').all(d.kind, d.id),
-    safetyCheck: openSafetyCheck(d.kind, d.id)
+    safetyCheck: openSafetyCheck(d.kind, d.id),
+    /* MB-OPS-001 §9: Completed only after delivery with proof of delivery; reconciliation outcome and the order's financial record. */
+    completed: !!d.completed_at, reconcileStatus: d.reconcile_status || null, reconcileIssues: parse(d.reconcile_issues) || [], finance: parse(d.finance)
   };
 }
 
@@ -107,12 +109,15 @@ export const rowBakeries = r => (r.kind === 'personal' ? (r.bakeryId ? [r.bakery
  * Normal orders need no attention; only the exceptions are surfaced.
  */
 export function health(r, now = new Date()) {
-  if (r.stage >= 3) return r.late ? 'Delivered late' : 'Delivered';
+  /* OPS §9: Completed = delivered with proof of delivery (handover point + recipient). */
+  if (r.stage >= 3) return r.late ? 'Delivered late' : r.deliveryPoint && r.recipientType ? 'Completed' : 'Delivered';
   if (['Failed', 'Not Fulfilled'].includes(r.deliveryState) || r.bakeryState === 'Unable to Fulfil') return 'Failed';
   if (now > new Date(r.windowEnds)) return 'Late';
   /* Attention: safety hold, no bakery, a delay or at-risk warning, an unconfirmed plan after cutoff, or not ready by ready-by. */
   const unconfirmed = now >= cutoffFor(r.date) && rowBakeries(r).some(b => db.prepare('SELECT status FROM bakery_plans WHERE bakery_id = ? AND date = ?').get(b, r.date)?.status !== 'Confirmed');
   const attention = r.safetyHold || r.safetyCheck || !rowBakeries(r).length || r.bakeryState === 'Delayed' || r.atRisk || (unconfirmed && !r.bakeryState?.match(/Ready|Handed/))
-    || (now > readyBy(r.date, r.window, rowBakeries(r)[0]) && !['Ready', 'Handed Over'].includes(r.bakeryState) && !r.deliveryState);
+    || (now > readyBy(r.date, r.window, rowBakeries(r)[0]) && !['Ready', 'Handed Over'].includes(r.bakeryState) && !r.deliveryState)
+    /* OPS §6: courier assignment is planned before food becomes Ready — after the cutoff, an order without a route needs attention. */
+    || (now >= cutoffFor(r.date) && !r.routeId && r.stage < 2);
   return attention ? 'Attention Required' : 'On Track';
 }

@@ -44,7 +44,7 @@ async function opsDeliver(kind, id, date, point = 'Reception') {
   const ops = (m, p, b) => call(m, `/ops${p}`, b, {}, H);
   await ops('POST', '/allocate', { date });
   const row = (await ops('GET', `/dashboard?date=${date}`)).body.rows.find(r => r.kind === kind && r.id === id);
-  for (const [p, b] of [['bakery-state', { state: 'In Preparation' }], ['bakery-state', { state: 'Ready', qcPassed: true }], ['route', { routeId: 'R1' }]]) {
+  for (const [p, b] of [['bakery-state', { state: 'In Preparation' }], ['bakery-state', { state: 'Ready', qc: { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true } }], ['route', { routeId: 'R1' }]]) {
     const r = await ops('POST', `/days/${kind}/${id}/${p}`, b); if (r.status !== 200) throw new Error(`${p}: ${JSON.stringify(r.body)}`);
   }
   const parts = kind === 'business' && row.allocation?.length > 1 ? row.allocation : [{ bakeryId: undefined, boxes: row.boxes }];

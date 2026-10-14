@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { get, post, put, patch, del, setToken } from '../../api.js';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Screen, TopBar, Footer, Icon, Logo, TabBar, Switch, Qty, Money, Chip, PhoneField, InfoTip, PhotoPicker } from '../../components/ui.jsx';
+import { Screen, TopBar, Footer, Icon, Logo, TabBar, Switch, Qty, Money, Chip, PhoneField, InfoTip, PhotoPicker, AreaField, Ring } from '../../components/ui.jsx';
 import { download, shareText } from '../../api.js';
 import { useUnread } from '../Notifications.jsx';
 import { LEGAL_PAGES } from '../Legal.jsx';
@@ -15,7 +15,7 @@ import {
 } from '../../domain/app.js';
 import { BoxEditor, FlavourPicker, offeredPastries } from '../../components/BoxEditor.jsx';
 import { addonGroups } from '../../domain/engine.js';
-import { FEEDBACK, addDaysIso as addDays, areasText } from '../../domain/standards.js';
+import { FEEDBACK, addDaysIso as addDays, areasText, cutoffFor } from '../../domain/standards.js';
 import { useOrder, Loading } from '../../state/orders.jsx';
 import { pastedCode } from './Checkout.jsx';
 
@@ -60,6 +60,27 @@ function StatusPill({ day }) {
   return <span className="status prep">{st === 1 ? 'Being prepared' : 'On its way'}</span>;
 }
 
+/* Live 9:00 PM cutoff countdown (design board: Home, Orders, Order details). Re-renders every minute. */
+function useMinuteTick() {
+  const [, setTick] = useState(0);
+  useEffect(() => { const t = setInterval(() => setTick(n => n + 1), 60000); return () => clearInterval(t); }, []);
+}
+const editableDay = d => !d.cancelled && isBeforeCutoff(d.date) && trackingStage(d) === 0;
+function CutoffPanel({ iso, title }) {
+  const left = timeLeft(iso);
+  if (!left) return null;
+  const hours = Math.max(0, (cutoffFor(iso) - new Date()) / 3.6e6);
+  return (
+    <div className="panel row" style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: '16px 20px' }} role="status">
+      <Ring fraction={Math.min(1, hours / 24)} label={`${Math.floor(hours)}h`} size={42} />
+      <span className="stack" style={{ lineHeight: 1.35 }}>
+        <span className="strong" style={{ fontSize: 16 }}>{title}</span>
+        <span className="help" style={{ fontSize: 15 }}>Edits and free cancellation until {cutoffLabel(iso)} · {left} left</span>
+      </span>
+    </div>
+  );
+}
+
 function DateBox({ iso }) {
   const d = dateInfo(iso);
   return <span className="datebox"><span className="wd">{d.wd}</span><span className="dn">{d.day}</span><span className="mo">{d.mon}</span></span>;
@@ -72,6 +93,7 @@ export function Today() {
   const config = useConfig();
   const loadError = useOrders();
   const guard = useSignedIn('/today');
+  useMinuteTick();
   const unread = useUnread(!!state.session);
   const [me, setMe] = useState(null);
   useEffect(() => {
@@ -138,6 +160,7 @@ export function Today() {
         ) : (
           <div className="card"><span className="strong">No mornings planned yet</span></div>
         )}
+        {next && editableDay(next) && <CutoffPanel iso={next.date} title={`${dateInfo(next.date).label} is still editable`} />}
 
         {toRate && (
           <section className="card stack gap-10" style={{ padding: 18 }} aria-label="Your feedback">
@@ -227,6 +250,7 @@ export function Orders() {
   const [params, setParams] = useSearchParams();
   const loadError = useOrders();
   const guard = useSignedIn('/orders');
+  useMinuteTick();
   if (guard) return guard;
   const tab = params.get('tab') || 'upcoming';
   const today = todayIso();
@@ -261,6 +285,7 @@ export function Orders() {
               <span className="stack" style={{ flex: 1, gap: 3, minWidth: 0 }}>
                 <span className="strong" style={{ fontSize: 17 }}>{boxName(d.cfg)}</span>
                 <span className="help" style={{ fontSize: 15 }}>{canChooseSize(d.cfg) ? sizeLabel(d.cfg.size) : 'Standard'} · {windowLabel(d.window)}</span>
+                {tab !== 'past' && editableDay(d) && timeLeft(d.date) && <span className="xs row" style={{ justifyContent: 'flex-start', gap: 6 }}><Icon name="clock" size={14} stroke={1.8} />Changes close in {timeLeft(d.date)}</span>}
               </span>
               <StatusPill day={d} />
             </Link>
@@ -325,6 +350,7 @@ export function OrderDay() {
   const [note, setNote] = useState('');
   const [photo, setPhoto] = useState('');
   const [reportError, setReportError] = useState('');
+  useMinuteTick();
   const day = order?.days.find(d => d.date === date);
   const live = !!day && !day.cancelled && trackingStage(day) < 3 && date <= todayIso();
   /* While a morning is in progress, refresh its status every 30 seconds. */
@@ -418,6 +444,7 @@ export function OrderDay() {
           {containsAllergens(day.cfg).length > 0 && <span className="xs">Contains: {containsAllergens(day.cfg).join(', ')} <InfoTip label="About allergens">Prepared in a kitchen that handles other allergens, so traces can’t be ruled out. <Link to="/legal/allergens" className="link" style={{ color: 'inherit' }}>Allergen information</Link></InfoTip></span>}
         </section>
 
+        {editable && <CutoffPanel iso={date} title="You can still make changes" />}
         {editable && <Link to={`/orders/${id}/${date}/edit`} className={day.safetyReview ? 'btn' : 'btn-secondary'}>{day.safetyReview ? 'Review this morning' : 'Edit or cancel this morning'}</Link>}
         {!editable && st >= 0 && st < 3 && (
           <div className="note"><Icon name="clock" size={20} stroke={1.6} style={{ flex: 'none' }} />
@@ -489,7 +516,7 @@ export function EditMorning() {
   const [avail, setAvail] = useState({});
   const [moreBread, setMoreBread] = useState(false);
   const config = useConfig();
-  useEffect(() => { if (day && !draft) setDraft(structuredClone({ cfg: startCfg(), window: day.window })); }, [!!day]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (day && !draft) setDraft(structuredClone({ cfg: startCfg(), window: day.window, address: { notes: '', ...day.address } })); }, [!!day]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { get(`/availability?dates=${date}`).then(a => setAvail(a[date] || {})).catch(() => {}); }, [date]);
   if (guard) return guard;
   if (loading || (day && !draft)) return <Loading back={`/orders/${id}/${date}`} />;
@@ -538,7 +565,14 @@ export function EditMorning() {
   /* Only what changed is sent: a window-only change keeps the breakfast exactly as ordered. */
   const recipe = c => ({ context: c.context, recipeId: c.recipeId, components: c.components, size: c.size, addons: c.addons, ...(c.components.includes('fruitDanish') ? { danishFlavour: c.danishFlavour } : {}) });
   const recipeChanged = day.safetyReview || JSON.stringify(recipe(draft.cfg)) !== JSON.stringify(recipe(day.cfg));
-  const save = () => run(() => patch(`/orders/${id}/days/${date}`, { ...(recipeChanged ? recipe(draft.cfg) : {}), window: draft.window }));
+  /* FLW §8: the delivery location of this morning can change before cutoff too. */
+  const setAddr = (k, v) => setDraft(d => ({ ...d, address: { ...d.address, [k]: v } }));
+  const addrChanged = ['building', 'unit', 'area', 'handover', 'notes'].some(k => (draft.address[k] || '') !== (day.address[k] || ''));
+  const addrOk = !!(draft.address.building.trim() && draft.address.unit.trim());
+  const save = () => {
+    if (addrChanged && !addrOk) { setError('Add your building and office or floor.'); return; }
+    run(() => patch(`/orders/${id}/days/${date}`, { ...(recipeChanged ? recipe(draft.cfg) : {}), window: draft.window, ...(addrChanged ? { address: draft.address } : {}) }));
+  };
   const cancel = () => run(() => post(`/orders/${id}/days/${date}/cancel`));
 
   return (
@@ -658,6 +692,26 @@ export function EditMorning() {
           </div>
         </section>}
 
+        {!noSafe && <section className="card stack gap-12" style={{ padding: 20 }} aria-labelledby="ed-addr">
+          <h2 id="ed-addr" className="h3" style={{ fontSize: 19 }}>Delivery address</h2>
+          <div className="field"><label htmlFor="ed-b">Building / Tower</label>
+            <input id="ed-b" className="input" value={draft.address.building} onChange={e => setAddr('building', e.target.value)} /></div>
+          <div className="grid-2">
+            <div className="field"><label htmlFor="ed-u">Office / Floor</label>
+              <input id="ed-u" className="input" value={draft.address.unit} onChange={e => setAddr('unit', e.target.value)} /></div>
+            <AreaField id="ed-ar" value={draft.address.area} onChange={v => setAddr('area', v)} />
+          </div>
+          <div className="stack gap-8">
+            <span className="label">Hand over at</span>
+            <div className="chips">
+              <Chip on={draft.address.handover !== 'door'} onClick={() => setAddr('handover', 'reception')}>Reception</Chip>
+              <Chip on={draft.address.handover === 'door'} onClick={() => setAddr('handover', 'door')}>My door</Chip>
+            </div>
+          </div>
+          <div className="field"><label htmlFor="ed-n">Delivery notes <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
+            <input id="ed-n" className="input" maxLength={200} value={draft.address.notes || ''} onChange={e => setAddr('notes', e.target.value)} /></div>
+        </section>}
+
         {!noSafe && price.total !== day.price && <p className="help" style={{ fontSize: 15, margin: 0 }}>Was AED {day.price}. We’ll charge or refund the difference.</p>}
 
         <section className="stack gap-10" style={{ marginTop: 4 }}>
@@ -683,7 +737,7 @@ export function EditMorning() {
 
 /* ---------- Delivered & feedback (style-1 P20) ----------
    MB-PRD-001 §12: Loved it or Not for me; after Not for me, an optional predefined reason. */
-const REASONS = ['Not my taste', 'Too much', 'Too little', 'Not fresh enough', 'Arrived late'];
+const REASONS = ['Not my taste', 'Too much', 'Too little', 'Not fresh enough'];
 export function Feedback() {
   const { id, date } = useParams();
   const [params] = useSearchParams();

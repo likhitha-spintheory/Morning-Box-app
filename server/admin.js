@@ -4,11 +4,11 @@ import { Router } from 'express';
 import { randomInt, createHash } from 'node:crypto';
 import { db, json } from './db.js';
 import { allocate, isFinal } from './allocation.js';
-import { ApiError, bad, isIsoDate, BAKERY_CONDITIONS, bakeryCaps, bakeryProducts, danishFlavours, windowCapacity, WINDOW_IDS, cleanRouteId } from './rules.js';
+import { ApiError, bad, isIsoDate, BAKERY_CONDITIONS, areaDistances, bakeryCaps, bakeryProducts, danishFlavours, windowCapacity, WINDOW_IDS, cleanRouteId } from './rules.js';
 import { getPricing, savePricing, resetPricing, pricingHistory, getCompany, saveCompany, getLibrary, saveLibrary, getDelivery, saveDelivery, getAreas, saveAreas } from './settings.js';
 import { COMPONENTS, ADDON_BREAD, ADDON_PASTRY } from '../src/domain/library.js';
 import { BASE_RECOMMENDATIONS, describe, priceLevel } from '../src/domain/recipes.js';
-import { ALLERGENS, DIETARY } from '../src/domain/standards.js';
+import { ALLERGENS, DIETARY, SERVICE_AREAS, dubaiTodayIso } from '../src/domain/standards.js';
 
 export const adminRouter = Router();
 
@@ -60,11 +60,11 @@ function bakeryOut(b) {
   /* Unable to Fulfil from the partner log: it stays with this bakery after the order is reallocated (MB-BKY-001 §9). */
   kpi.unable = db.prepare("SELECT COUNT(DISTINCT day_kind || day_id) AS n FROM bakery_events WHERE bakery_id = ? AND kind = 'Unable to Fulfil' AND date < ?").get(b.id, today).n;
   return {
-    id: b.id, name: b.name, area: b.area, distanceKm: b.distance_km, dailyCapacity: b.daily_capacity,
+    id: b.id, name: b.name, area: b.area, distanceKm: b.distance_km, areaDistances: areaDistances(b), dailyCapacity: b.daily_capacity,
     effectiveCapacity: b.effective_capacity ?? null, windowCapacity: windowCapacity(b), glutenFreeCertified: !!b.gluten_free_certified,
     capabilities: bakeryCaps(b), status: b.status, statusNote: b.status_note || '', products: bakeryProducts(b),
     danishFlavours: danishFlavours(b), contactName: b.contact_name || '', contactPhone: b.contact_phone || '', hasAccessCode: !!b.access_hash,
-    payoutPct: b.payout_pct ?? 60, licenceNo: b.licence_no || '', licenceExpiry: b.licence_expiry || '', bakesOwnBread: !!b.bakes_own_bread, readyLeadMinutes: b.ready_lead_minutes ?? 30,
+    payoutPct: b.payout_pct ?? 60, onboarding: onboardingOf(b), licenceNo: b.licence_no || '', licenceExpiry: b.licence_expiry || '', bakesOwnBread: !!b.bakes_own_bread, readyLeadMinutes: b.ready_lead_minutes ?? 30,
     samples: db.prepare('SELECT id, product, result, note, created_at FROM bakery_samples WHERE bakery_id = ? ORDER BY id DESC LIMIT 50').all(b.id).map(x => ({ ...x, productName: COMPONENTS[x.product]?.name || x.product })),
     openSafety: db.prepare("SELECT COUNT(*) AS n FROM exceptions WHERE resolved = 0 AND category = 'Safety' AND responsible_party = ?").get(b.name).n,
     upcomingBoxes: booked,
@@ -85,6 +85,9 @@ adminRouter.get('/bakeries', (_req, res) => {
   res.json(db.prepare("SELECT * FROM bakeries ORDER BY CASE status WHEN 'Active' THEN 0 WHEN 'Under Review' THEN 1 ELSE 2 END, distance_km").all().map(bakeryOut));
 });
 
+/* Master Plan §6.1 onboarding gate items recorded in Admin (eligibility, product approval and capacity are checked separately). */
+export const ONBOARDING = { allergenRecords: 'Ingredient, allergen and dietary records received', packaging: 'Packaging meets separation and protection requirements', systemReady: 'Order receipt, confirmation, status and exception workflow tested', pilotPassed: 'Controlled production and handoff test passed' };
+const onboardingOf = b => { try { return { ...Object.fromEntries(Object.keys(ONBOARDING).map(k => [k, false])), ...(JSON.parse(b.onboarding || '{}') || {}) }; } catch { return Object.fromEntries(Object.keys(ONBOARDING).map(k => [k, false])); } };
 const validDate = v => { if (!v) return null; if (!isIsoDate(v)) throw bad('date_invalid', 'Licence expiry must be a date.'); return v; };
 const payoutPct = v => { const n = Number(v); if (!Number.isFinite(n) || n < 0 || n > 100) throw bad('payout_invalid', 'Payout must be 0–100% of the breakfast price.'); return n; };
 const readyLead = v => { const n = Number(v); if (!Number.isInteger(n) || n < 10 || n > 180) throw bad('lead_invalid', 'Ready-by lead time must be 10–180 minutes before the window.'); return n; };
@@ -93,6 +96,19 @@ function validateBakery(input, existing = {}) {
   const area = clean(input.area ?? existing.area, 60);
   const distance = Number(input.distanceKm ?? existing.distance_km);
   const daily = Number(input.dailyCapacity ?? existing.daily_capacity);
+  /* Optional distance to each later service area (blank = not set; allocation then uses the DIFC distance). */
+  let distances = areaDistances(existing);
+  if (input.areaDistances !== undefined) {
+    if (!input.areaDistances || typeof input.areaDistances !== 'object' || Array.isArray(input.areaDistances)) throw bad('distance_invalid', 'Distances must be set per area.');
+    distances = {};
+    for (const a of SERVICE_AREAS.filter(x => x.id !== 'DIFC')) {
+      const raw = input.areaDistances[a.id];
+      if (raw === '' || raw == null) continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || n > 100) throw bad('distance_invalid', `Distance to ${a.label} must be 0–100 km.`);
+      distances[a.id] = n;
+    }
+  }
   const effective = input.effectiveCapacity === '' || input.effectiveCapacity == null ? null : Number(input.effectiveCapacity);
   /* Optional capacity per delivery window (blank = no limit for that window); null when none is set. */
   let perWindow = input.windowCapacity === undefined ? windowCapacity(existing) : null;
@@ -122,12 +138,13 @@ function validateBakery(input, existing = {}) {
   }
   const flavours = input.danishFlavours === undefined ? danishFlavours(existing) : (Array.isArray(input.danishFlavours) ? input.danishFlavours.filter(f => DANISH_FLAVOURS.includes(f)) : []);
   return {
-    name, area, distance_km: distance, daily_capacity: daily, effective_capacity: effective, window_capacity: perWindow ? json(perWindow) : null,
+    name, area, distance_km: distance, area_distances: json(distances), daily_capacity: daily, effective_capacity: effective, window_capacity: perWindow ? json(perWindow) : null,
     gluten_free_certified: input.glutenFreeCertified === undefined ? existing.gluten_free_certified || 0 : input.glutenFreeCertified ? 1 : 0,
     capabilities: json(caps), products: products === null ? null : json(products), danish_flavours: json([...new Set(flavours)]),
     contact_name: clean(input.contactName ?? existing.contact_name ?? ''), contact_phone: clean(input.contactPhone ?? existing.contact_phone ?? '', 30),
     licence_no: clean(input.licenceNo ?? existing.licence_no ?? '', 40), licence_expiry: validDate(input.licenceExpiry ?? existing.licence_expiry),
     bakes_own_bread: input.bakesOwnBread === undefined ? existing.bakes_own_bread || 0 : input.bakesOwnBread ? 1 : 0,
+    onboarding: json(input.onboarding && typeof input.onboarding === 'object' ? Object.fromEntries(Object.keys(ONBOARDING).map(k => [k, input.onboarding[k] === true])) : onboardingOf(existing)),
     ready_lead_minutes: readyLead(input.readyLeadMinutes ?? existing.ready_lead_minutes ?? 30),
     payout_pct: payoutPct(input.payoutPct ?? existing.payout_pct ?? 60)
   };
@@ -170,6 +187,10 @@ adminRouter.post('/bakeries/:id/status', (req, res) => {
     if (b.licence_expiry && b.licence_expiry < new Date().toLocaleDateString('en-CA')) throw bad('licence_expired', 'The food business licence has expired.');
     /* §8: onboarding sample production approved for at least one product before the first orders. */
     if (b.status !== 'Active' && !db.prepare("SELECT 1 FROM bakery_samples WHERE bakery_id = ? AND result = 'Approved'").get(b.id)) throw bad('sample_required', 'Record at least one Approved onboarding sample before making the bakery Active.');
+    /* Master Plan §6.1 onboarding gate: every item evidenced before the partner goes live. */
+    const gate = onboardingOf(b);
+    const open = Object.keys(ONBOARDING).filter(k => !gate[k]);
+    if (b.status !== 'Active' && open.length) throw bad('onboarding_incomplete', `Complete the onboarding gate first: ${open.map(k => ONBOARDING[k]).join('; ')}.`);
     /* §10: Identify Issue → Corrective Action → Verification → Return to Active (for a partner that was taken off Active). */
     const wasActive = db.prepare("SELECT 1 FROM bakery_log WHERE bakery_id = ? AND message LIKE 'Active →%'").get(b.id);
     if (b.status !== 'Active' && wasActive && !clean(req.body.verification, 300)) throw bad('verification_required', 'Record the corrective action and how it was verified before returning to Active.');
@@ -208,6 +229,7 @@ adminRouter.post('/bakeries/:id/samples', (req, res) => {
 export function addCondition(bakeryId, body) {
   const b = bakeryById(bakeryId);
   if (!isIsoDate(body.date)) throw bad('date_invalid', 'Choose the date.');
+  if (body.date < dubaiTodayIso()) throw bad('date_past', 'Conditions can only be reported for today or a later date.');
   if (!BAKERY_CONDITIONS.includes(body.kind)) throw bad('kind_invalid', `Condition must be one of: ${BAKERY_CONDITIONS.join(', ')}.`);
   const item = body.kind === 'Item Unavailable' ? body.item : null;
   if (body.kind === 'Item Unavailable' && !COMPONENTS[item]) throw bad('item_invalid', 'Choose the item that is unavailable.');
@@ -218,6 +240,9 @@ export function addCondition(bakeryId, body) {
   db.prepare('INSERT INTO bakery_conditions (bakery_id, date, kind, item, capacity, need, note) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(b.id, body.date, body.kind, item, capacity, need, clean(body.note, 200) || null);
   log(b.id, `${body.date}: ${body.kind}${item ? ` — ${COMPONENTS[item].name}` : ''}${capacity !== null ? ` — ${capacity} boxes` : ''}${need ? ` — ${need}` : ''}`);
+  /* MB-BKY-001 §6: affected orders move to another eligible bakery straight away (orders already started stay);
+     any that can't be placed go to the exception queue. */
+  try { allocate(body.date); } catch (e) { console.error('[allocation]', e); }
   return bakeryOut(bakeryById(b.id));
 }
 adminRouter.post('/bakeries/:id/conditions', (req, res) => res.status(201).json(addCondition(req.params.id, req.body)));

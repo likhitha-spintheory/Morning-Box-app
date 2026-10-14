@@ -298,6 +298,15 @@ img { max-width: 100%; display: block; }
 .home-wide { max-width: 1200px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 48px); }
 .home-hero { display: flex; flex-wrap: wrap; align-items: center; gap: clamp(24px, 5vw, 72px); }
 .home-hero > * { flex: 1 1 380px; min-width: 0; }
+/* MB-DSN-001 §8: trust strip and launch-area band under the hero. */
+.home-strip { list-style: none; margin: 0; padding: 24px 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 24px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.home-strip li { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; font-size: 16px; line-height: 1.4; }
+.home-areas { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; padding: 28px; background: var(--sand-soft); border: 0; }
+.home-area-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; flex: 1 1 320px; }
+.home-area-list li { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; color: var(--text-3); }
+.home-area-list .ico { width: 64px; height: 64px; border-radius: 999px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; background: var(--white); }
+.home-area-list li.on { color: var(--espresso); }
+.home-area-list li.on .ico { border: 2px solid var(--muted-gold); }
 @media (min-width: 761px) {
   .home-photo img { height: 480px; border-radius: 30px; }
   .h-hero.big { font-size: 64px; }

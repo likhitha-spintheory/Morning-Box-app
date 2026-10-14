@@ -5,7 +5,7 @@ import { windowLabel } from '../domain/app.js';
    before, then each delivery from preparation to handover. Normal orders flow;
    the dashboard surfaces what needs attention. */
 
-const HEALTH_CLASS = { 'On Track': 'ok', 'Attention Required': 'prep', Late: 'off', Failed: 'off', Delivered: 'done', 'Delivered late': 'done' };
+const HEALTH_CLASS = { 'On Track': 'ok', 'Attention Required': 'prep', Late: 'off', Failed: 'off', Delivered: 'done', 'Delivered late': 'done', Completed: 'done' };
 const STAGE = ['Confirmed', 'Being prepared', 'Out for delivery', 'Delivered'];
 const bakeryOf = (r, names) => (r.kind === 'personal' ? (r.bakeryId ? names[r.bakeryId] || `#${r.bakeryId}` : '—') : (r.allocation || []).map(p => `${names[p.bakeryId] || `#${p.bakeryId}`} ×${p.boxes}`).join(', ') || '—');
 const small = { width: 'auto', padding: '0 14px', minHeight: 36, fontSize: 14 };
@@ -14,7 +14,7 @@ export function Live({ data, meta, busy, act, call }) {
   const [filter, setFilter] = useState('attention');
   const [open, setOpen] = useState(null);
   const names = Object.fromEntries(data.plans.map(p => [p.bakeryId, p.bakery]));
-  const rows = filter === 'all' ? data.rows : data.rows.filter(r => !['On Track', 'Delivered'].includes(r.health));
+  const rows = filter === 'all' ? data.rows : data.rows.filter(r => !['On Track', 'Delivered', 'Completed'].includes(r.health));
   const boxes = data.rows.reduce((t, r) => t + r.boxes, 0);
   return (
     <section className="stack gap-16">
@@ -32,7 +32,7 @@ export function Live({ data, meta, busy, act, call }) {
             <tr key={p.bakeryId} className={p.booked && p.plan?.status !== 'Confirmed' ? 'warn' : ''}>
               <td>{p.bakery}</td><td>{p.booked} / {p.capacity}{p.windowCapacity ? <><br /><small>{Object.entries(p.windowCapacity).map(([w, n]) => `${windowLabel(w)}: ${p.bookedByWindow?.[w] ?? 0} / ${n}`).join(' · ')}</small></> : null}</td>
               <td>{p.plan ? `${p.plan.status}${p.plan.reason ? ` — ${p.plan.reason}` : ''}` : p.booked ? 'Waiting for the bakery to confirm' : '—'}</td>
-              <td>{p.booked > 0 && p.plan?.status !== 'Confirmed' && <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `/plans/${p.bakeryId}/${data.date}/confirm`)}>Confirm for bakery</button>}</td>
+              <td>{p.booked > 0 && p.plan?.status !== 'Confirmed' && <small>Only the bakery can confirm (Bakery View). Chase the bakery or reallocate.</small>}</td>
             </tr>
           ))}</tbody>
         </table>
@@ -105,7 +105,8 @@ function Actions({ r, meta, busy, act, call, names = {} }) {
     ? r.allocation.map(p => ({ bakeryId: p.bakeryId, boxes: p.boxes, special: (p.items || []).filter(it => r.production[it.entry]?.special?.length).reduce((t, it) => t + it.qty, 0) }))
     : [{ bakeryId: undefined, boxes: r.boxes, special: r.specialBoxes }];
   const [f, setF] = useState({ delay: '', reason: meta.planIssues[0], route: r.routeId || '', eta: '', fail: meta.failureReasons[0], remedy: meta.remedies[1], amount: '', why: '',
-    counts: Object.fromEntries(parts.map(p => [p.bakeryId ?? 'one', { boxes: String(p.boxes), special: String(p.special) }])), qc: {}, failPart: '' });
+    /* OPS §6: the boxes are physically counted at pickup — the fields start empty, never pre-filled with the expected numbers. */
+    counts: Object.fromEntries(parts.map(p => [p.bakeryId ?? 'one', { boxes: '', special: '' }])), qc: {}, failPart: '' });
   /* Final quality check before Ready (MB-BKY-001 §4): each check is ticked, never a blanket pass. */
   const split = parts.length > 1 && parts[0].bakeryId !== undefined;
   const qcChecks = meta.qcChecks || {};
@@ -164,7 +165,7 @@ function Actions({ r, meta, busy, act, call, names = {} }) {
             <input className="input" style={{ ...input, width: 80 }} inputMode="numeric" aria-label="Boxes counted" value={c.boxes} onChange={e => setC('boxes', e.target.value)} />
             <span className="xs">boxes, of which special</span>
             <input className="input" style={{ ...input, width: 80 }} inputMode="numeric" aria-label="Special boxes counted" value={c.special} onChange={e => setC('special', e.target.value)} />
-            <button type="button" className="btn-secondary" style={small} disabled={busy || blocked} onClick={() => act('POST', `${path}/handover`, { bakeryId: p.bakeryId, boxes: Number(c.boxes), specialBoxes: Number(c.special), routeId: f.route })}>Record pickup</button>
+            <button type="button" className="btn-secondary" style={small} disabled={busy || blocked || c.boxes === '' || c.special === ''} onClick={() => act('POST', `${path}/handover`, { bakeryId: p.bakeryId, boxes: Number(c.boxes), specialBoxes: Number(c.special), routeId: f.route })}>Record pickup</button>
           </div>
         );
       })}

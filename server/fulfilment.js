@@ -575,7 +575,8 @@ export function registerFulfilmentRoutes(router) {
     const couriers = db.prepare('SELECT name, route_id FROM couriers WHERE active = 1 ORDER BY route_id').all().map(c => ({ name: c.name, routeId: c.route_id }));
     res.json({ date, rows, counts, plans, allocated, couriers });
   });
-  router.post('/days/:kind/:id/bakery-state', (req, res) => { const [k, i] = kindId(req); setBakeryState(k, i, req.body.state, { ...req.body, bakeryId: req.body.bakeryId ? Number(req.body.bakeryId) : undefined, byOps: true }); res.json({ ok: true }); });
+  /* The final check is ticked item by item (MB-BKY-001 §4); a blanket qcPassed is not accepted over the API. */
+  router.post('/days/:kind/:id/bakery-state', (req, res) => { const [k, i] = kindId(req); const { qcPassed, ...body } = req.body; setBakeryState(k, i, body.state, { ...body, bakeryId: req.body.bakeryId ? Number(req.body.bakeryId) : undefined, byOps: true }); res.json({ ok: true }); });
   router.post('/days/:kind/:id/route', (req, res) => { const [k, i] = kindId(req); assignRoute(k, i, req.body.routeId); res.json({ ok: true }); });
   /* Assign one courier/route to every delivery in a window the night before. */
   router.post('/routes', (req, res) => {
@@ -605,7 +606,7 @@ export function registerFulfilmentRoutes(router) {
   });
   router.post('/days/:kind/:id/failed', (req, res) => { const [k, i] = kindId(req); markFailed(k, i, req.body.reason, req.body.note); res.json({ ok: true }); });
   router.post('/days/:kind/:id/remedy', (req, res) => { const [k, i] = kindId(req); res.json(applyRemedy(k, i, req.body)); });
-  router.post('/plans/:bakeryId/:date/confirm', (req, res) => { confirmPlan(Number(req.params.bakeryId), req.params.date); res.json({ ok: true }); });
+  /* No "confirm for bakery": the bakery confirms its own production plan in the Bakery View (MB-OPS-001 §4). */
   router.get('/prep', (req, res) => {
     const date = String(req.query.date || '');
     if (!isIsoDate(date)) throw bad('date_invalid', 'Pass a date as YYYY-MM-DD');
@@ -665,7 +666,8 @@ bakeryRouter.post('/days/:kind/:id/handover', (req, res) => {
   res.json({ ok: true });
 });
 bakeryRouter.post('/days/:kind/:id/state', (req, res) => {
-  setBakeryState(req.params.kind, Number(req.params.id), req.body.state, { ...req.body, bakeryId: req.bakery.id });
+  const { qcPassed, ...body } = req.body;
+  setBakeryState(req.params.kind, Number(req.params.id), body.state, { ...body, bakeryId: req.bakery.id });
   res.json({ ok: true });
 });
 bakeryRouter.post('/conditions', (req, res) => res.status(201).json(addCondition(req.bakery.id, req.body).conditions));

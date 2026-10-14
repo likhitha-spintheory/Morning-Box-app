@@ -1,13 +1,17 @@
 import { Fragment, useEffect, useState } from 'react';
+import { SERVICE_AREAS } from '../domain/standards.js';
 
 /* Admin for the Morning Box team: partner bakeries (MB-BKY-001), prices
    (MB-BOX-001 §8, MB-B2B-001 §7) and company / support details. */
 
 const CAP_LABEL = { glutenFree: 'Gluten-free', nutFree: 'Tree-nut-free', peanutFree: 'Peanut-free', dairyFree: 'Dairy-free', eggFree: 'Egg-free', vegan: 'Vegan', sesameFree: 'Sesame-free', soyFree: 'Soy-free' };
+const ONBOARDING_LABEL = { allergenRecords: 'Ingredient, allergen and dietary records received', packaging: 'Packaging meets separation and protection requirements', systemReady: 'Order receipt, confirmation, status and exception workflow tested', pilotPassed: 'Controlled production and handoff test passed' };
 const STATUS_CLASS = { Active: 'ok', 'Under Review': 'prep', Suspended: 'off' };
 const small = { width: 'auto', padding: '0 16px', minHeight: 40 };
 const WINDOWS = [['w1', '7:30–8:30'], ['w2', '8:30–9:30'], ['w3', '9:30–10:30']];
 const windowCaps = wc => (wc ? ` · per window ${WINDOWS.filter(([w]) => wc[w] != null).map(([w, label]) => `${label}: ${wc[w]}`).join(', ')}` : '');
+/* Service areas after DIFC: each bakery can have its own distance to them, so the nearest bakery is chosen per delivery area. */
+const LATER_AREAS = SERVICE_AREAS.filter(a => a.id !== 'DIFC');
 const Field = ({ label, children }) => <div className="field" style={{ gap: 6 }}><label>{label}</label>{children}</div>;
 
 /* ---------- Bakeries ---------- */
@@ -105,9 +109,10 @@ function BakeryForm({ b, catalog, busy, onSave }) {
     name: b?.name || '', area: b?.area || 'DIFC', distanceKm: b?.distanceKm ?? '', dailyCapacity: b?.dailyCapacity ?? '', effectiveCapacity: b?.effectiveCapacity ?? '',
     /* A new bakery starts with no approved products; each is added as its onboarding sample is approved (MB-BKY-001 §8). */
     windowCapacity: Object.fromEntries(WINDOWS.map(([w]) => [w, b?.windowCapacity?.[w] ?? ''])),
+    areaDistances: Object.fromEntries(LATER_AREAS.map(a => [a.id, b?.areaDistances?.[a.id] ?? ''])),
     glutenFreeCertified: !!b?.glutenFreeCertified, capabilities: b?.capabilities || {}, allProducts: b ? !b.products : false, products: b?.products || [],
     danishFlavours: b?.danishFlavours || [], contactName: b?.contactName || '', contactPhone: b?.contactPhone || '',
-    licenceNo: b?.licenceNo || '', licenceExpiry: b?.licenceExpiry || '', bakesOwnBread: !!b?.bakesOwnBread, readyLeadMinutes: b?.readyLeadMinutes ?? 30, payoutPct: b?.payoutPct ?? 60
+    licenceNo: b?.licenceNo || '', licenceExpiry: b?.licenceExpiry || '', bakesOwnBread: !!b?.bakesOwnBread, onboarding: { ...(b?.onboarding || {}) }, readyLeadMinutes: b?.readyLeadMinutes ?? 30, payoutPct: b?.payoutPct ?? 60
   }));
   const set = k => e => setV(x => ({ ...x, [k]: e.target.value }));
   const toggle = (k, id) => setV(x => ({ ...x, [k]: x[k].includes(id) ? x[k].filter(y => y !== id) : [...x[k], id] }));
@@ -116,7 +121,8 @@ function BakeryForm({ b, catalog, busy, onSave }) {
     ...v, distanceKm: Number(v.distanceKm), dailyCapacity: Number(v.dailyCapacity), readyLeadMinutes: Number(v.readyLeadMinutes), payoutPct: Number(v.payoutPct), licenceExpiry: v.licenceExpiry || null, effectiveCapacity: v.effectiveCapacity === '' ? null : Number(v.effectiveCapacity),
     products: v.allProducts ? null : v.products,
     /* Blank = no limit for that window; all blank = only the daily capacity applies. */
-    windowCapacity: Object.fromEntries(WINDOWS.map(([w]) => [w, v.windowCapacity[w] === '' ? '' : Number(v.windowCapacity[w])]))
+    windowCapacity: Object.fromEntries(WINDOWS.map(([w]) => [w, v.windowCapacity[w] === '' ? '' : Number(v.windowCapacity[w])])),
+    areaDistances: Object.fromEntries(LATER_AREAS.map(a => [a.id, v.areaDistances[a.id] === '' ? '' : Number(v.areaDistances[a.id])]))
   });
   return (
     <div className="stack gap-12" style={{ borderTop: '1px solid var(--line-soft)', paddingTop: 12 }}>
@@ -124,6 +130,7 @@ function BakeryForm({ b, catalog, busy, onSave }) {
         <Field label="Name"><input className="input" value={v.name} onChange={set('name')} /></Field>
         <Field label="Area"><input className="input" value={v.area} onChange={set('area')} /></Field>
         <Field label="Distance to DIFC (km)"><input className="input" inputMode="decimal" value={v.distanceKm} onChange={set('distanceKm')} /></Field>
+        {LATER_AREAS.map(a => <Field key={a.id} label={`Distance to ${a.label} (km, optional)`}><input className="input" inputMode="decimal" placeholder="Uses the DIFC distance" value={v.areaDistances[a.id]} onChange={e => setV(x => ({ ...x, areaDistances: { ...x.areaDistances, [a.id]: e.target.value } }))} /></Field>)}
         <Field label="Stated daily capacity (boxes)"><input className="input" inputMode="numeric" value={v.dailyCapacity} onChange={set('dailyCapacity')} /></Field>
         <Field label="Effective capacity we allocate (optional)"><input className="input" inputMode="numeric" placeholder="Same as stated" value={v.effectiveCapacity} onChange={set('effectiveCapacity')} /></Field>
         {WINDOWS.map(([w, label]) => <Field key={w} label={`Capacity ${label} (optional)`}><input className="input" inputMode="numeric" placeholder="No window limit" value={v.windowCapacity[w]} onChange={e => setV(x => ({ ...x, windowCapacity: { ...x.windowCapacity, [w]: e.target.value } }))} /></Field>)}
@@ -135,6 +142,10 @@ function BakeryForm({ b, catalog, busy, onSave }) {
         <Field label="Bakery payout (% of breakfast price)"><input className="input" inputMode="decimal" value={v.payoutPct} onChange={set('payoutPct')} /></Field>
       </div>
       <label className="row" style={{ gap: 8, justifyContent: 'flex-start' }}><input type="checkbox" checked={v.bakesOwnBread} onChange={e => setV(x => ({ ...x, bakesOwnBread: e.target.checked }))} /> Bakes its own bread in-house (required, MB-BKY-001 §1)</label>
+      <span className="label">Onboarding gate (Master Plan §6.1) — all required before the first Active</span>
+      {Object.entries(ONBOARDING_LABEL).map(([k, label]) => (
+        <label key={k} className="row" style={{ gap: 8, justifyContent: 'flex-start' }}><input type="checkbox" checked={!!v.onboarding[k]} onChange={e => setV(x => ({ ...x, onboarding: { ...x.onboarding, [k]: e.target.checked } }))} /> {label}</label>
+      ))}
       <span className="label">Allergy & dietary capability (from the audit)</span>
       <div className="chips">
         {catalog.capabilities.map(k => <button key={k} type="button" className={`chip${v.capabilities[k] ? ' on' : ''}`} aria-pressed={!!v.capabilities[k]} onClick={() => setV(x => ({ ...x, capabilities: { ...x.capabilities, [k]: !x.capabilities[k] } }))}>{CAP_LABEL[k]}</button>)}
@@ -341,7 +352,7 @@ export function Company({ data, act, busy, call }) {
       <button type="button" className="btn" style={{ width: 'auto', padding: '0 28px', alignSelf: 'flex-start' }} disabled={busy} onClick={() => act('PUT', '/admin/company', v)}>Save details</button>
       {areas && <>
         <h2 className="h3">Service areas</h2>
-        <span className="xs">Morning Box launches area by area (MB-PRD-001 §3). Customers can only choose areas that are on. Bakery distances are measured from DIFC, so check partner bakeries before opening a new area.</span>
+        <span className="xs">Morning Box launches area by area (MB-PRD-001 §3). Customers can only choose areas that are on. Before opening a new area, add each partner bakery’s distance to it (Bakeries → Edit); otherwise its DIFC distance is used.</span>
         <div className="stack gap-8">{areas.map(a => (
           <label key={a.id} className="row xs" style={{ gap: 8, justifyContent: 'flex-start' }}>
             <input type="checkbox" checked={a.active} onChange={e => setAreas(list => list.map(x => (x.id === a.id ? { ...x, active: e.target.checked } : x)))} />

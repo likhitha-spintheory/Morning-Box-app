@@ -4,7 +4,7 @@ import { Icon, Logo, Ring } from '../components/ui.jsx';
 import { useStore } from '../state/store.jsx';
 import { get, track } from '../api.js';
 import { planningWeeks, timeLeft, tomorrowIso, fromPrice, dubaiNote } from '../domain/app.js';
-import { cutoffFor, areasText } from '../domain/standards.js';
+import { cutoffFor, areasText, SERVICE_AREAS, ACTIVE_AREAS } from '../domain/standards.js';
 
 
 function greeting() {
@@ -89,6 +89,36 @@ export default function Home() {
             <Link to="/legal/terms" className="link-hit" style={{ color: 'inherit' }}>Terms</Link>
             <Link to="/legal/privacy" className="link-hit" style={{ color: 'inherit' }}>Privacy</Link>
           </nav>
+        </div>
+      </section>
+
+      {/* MB-DSN-001 §8 approved homepage direction: a quiet trust strip and the launch-area band (copy is provisional). */}
+      <section className="home-wide" aria-label="Why Morning Box" style={{ paddingBottom: 32 }}>
+        <ul className="home-strip">
+          {[['leaf', 'Curated from trusted partner bakeries'], ['sparkle', 'Personalized to your mornings'], ['bread', 'Freshly prepared for your morning'], ['clock', 'Delivered in the window you choose']].map(([icon, text]) => (
+            <li key={icon}><Icon name={icon} size={28} stroke={1.4} color="var(--muted-gold)" /><span>{text}</span></li>
+          ))}
+        </ul>
+      </section>
+      <section className="home-wide" aria-label="Delivery areas" style={{ paddingBottom: 48 }}>
+        <div className="card home-areas">
+          <div className="stack gap-8">
+            <span className="eyebrow">Now in</span>
+            <span className="h-display">{areasText()}</span>
+            {SERVICE_AREAS.some(a => !ACTIVE_AREAS.includes(a.id)) && <span className="help">More areas coming soon</span>}
+          </div>
+          <ul className="home-area-list">
+            {SERVICE_AREAS.map(a => {
+              const on = ACTIVE_AREAS.includes(a.id);
+              return (
+                <li key={a.id} className={on ? 'on' : ''}>
+                  <span className="ico"><Icon name={on ? 'building' : 'pin'} size={24} stroke={1.4} /></span>
+                  <span className="strong">{a.label}</span>
+                  <span className="xs">{on ? 'Delivering now' : 'Coming soon'}</span>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       </section>
     </div>

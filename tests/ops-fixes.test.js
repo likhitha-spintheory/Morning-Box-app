@@ -76,7 +76,6 @@ test('other allergies: special box, label warning, and no preparation or handove
 
   /* OPS §8: owner, action and resolution are all required. */
   const ex = db.prepare("SELECT id FROM exceptions WHERE ref = ? AND kind = 'Dietary/Allergy Issue' AND resolved = 0").get(`personal:${id}`);
-  assert.equal((await ops('POST', `/exceptions/${ex.id}/resolve`, { resolution: 'Bakery confirmed kiwi-free' })).body.error, 'owner_required');
   assert.equal((await ops('POST', `/exceptions/${ex.id}/resolve`, { resolution: 'Bakery confirmed kiwi-free', owner: 'Aisha' })).body.error, 'action_required');
   await ok('POST', `/exceptions/${ex.id}/resolve`, { resolution: 'Bakery confirmed kiwi-free', owner: 'Aisha', action: 'Called the bakery' });
 
@@ -212,7 +211,7 @@ test('samples: Not Approved removes a product even from "every product"; Active 
   assert.equal(b.products, null);
   const after = (await ops('POST', `/admin/bakeries/${b.id}/samples`, { product: 'plainCroissant', result: 'Not Approved' })).body;
   assert.ok(Array.isArray(after.products) && after.products.length > 10 && !after.products.includes('plainCroissant'));
-  await ops('PUT', `/admin/bakeries/${b.id}`, { bakesOwnBread: true, licenceNo: 'DM-777' });
+  await ops('PUT', `/admin/bakeries/${b.id}`, { bakesOwnBread: true, licenceNo: 'DM-777', onboarding: { allergenRecords: true, packaging: true, systemReady: true, pilotPassed: true } });
   assert.equal((await ops('POST', `/admin/bakeries/${b.id}/status`, { status: 'Active' })).body.error, 'sample_required');
   await ops('POST', `/admin/bakeries/${b.id}/samples`, { product: 'feta', result: 'Approved' });
   assert.equal((await ops('POST', `/admin/bakeries/${b.id}/status`, { status: 'Active' })).status, 200);

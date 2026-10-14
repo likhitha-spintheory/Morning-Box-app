@@ -166,11 +166,21 @@ addColumns('business_days', { late_note: 'TEXT' });
 const FULFIL_DETAIL = { part_states: 'TEXT', ready_at: 'TEXT', handed_over_at: 'TEXT', picked_up_at: 'TEXT', at_risk: 'INTEGER NOT NULL DEFAULT 0', route_id: 'TEXT' };
 addColumns('order_days', FULFIL_DETAIL);
 addColumns('business_days', FULFIL_DETAIL);
+/* Distance from the bakery to each service area other than DIFC (DIFC uses distance_km) — proximity-first allocation (MB-PRD-001 §10). */
+addColumns('bakeries', { area_distances: 'TEXT' });
+/* Master Plan §6.1 onboarding gate evidence: safety data, packaging, system readiness, pilot handoff test. */
+addColumns('bakeries', { onboarding: 'TEXT' });
+/* MB-OPS-001 §9: reconciliation outcome, financial record and completion per delivery day. */
+const RECONCILE = { reconcile_status: 'TEXT', reconcile_issues: 'TEXT', finance: 'TEXT', completed_at: 'TEXT', reconciled_at: 'TEXT' };
+addColumns('order_days', RECONCILE);
+addColumns('business_days', RECONCILE);
 addColumns('bakeries', { ready_lead_minutes: 'INTEGER NOT NULL DEFAULT 30', licence_no: 'TEXT', licence_expiry: 'TEXT', bakes_own_bread: 'INTEGER NOT NULL DEFAULT 0', payout_pct: 'REAL NOT NULL DEFAULT 60' });
 addColumns('exceptions', {
   category: 'TEXT', priority: 'INTEGER NOT NULL DEFAULT 3', owner: 'TEXT', action: 'TEXT', resolution: 'TEXT',
   cause: 'TEXT', responsible_party: 'TEXT', customer_category: 'TEXT', resolved_at: 'TEXT'
 });
+/* MB-OPS-001 §8: open exceptions raised before owners were required belong to Operations. */
+db.exec("UPDATE exceptions SET owner = 'Operations' WHERE owner IS NULL AND resolved = 0");
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS delivery_attempts (

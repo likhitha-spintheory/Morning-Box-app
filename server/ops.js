@@ -10,6 +10,7 @@ import { menuRouter } from './menu.js';
 import { dayRows, readyBy as rbBy } from './days.js';
 import { DELIVERY_COST } from './settings.js';
 import { allocate } from './allocation.js';
+import { reconcileDate } from './reconcile.js';
 export { allocate };
 import { registerFulfilmentRoutes, flagAtRisk, demoStep, reportLate } from './fulfilment.js';
 export { flagAtRisk };
@@ -74,6 +75,13 @@ opsRouter.get('/days', (req, res) => {
 opsRouter.post('/allocate', (req, res) => {
   const date = requireDate(req.body.date);
   res.json(allocate(date));
+});
+
+/** Reconcile one morning now (it also runs automatically each morning — MB-OPS-001 §9). */
+opsRouter.post('/reconcile', (req, res) => {
+  const date = requireDate(req.body.date);
+  if (date >= dubaiIsoOf(new Date())) throw bad('date_not_over', 'Only mornings that are over can be reconciled.');
+  res.json(reconcileDate(date));
 });
 
 /** Final allocation at the 9:00 PM cutoff: once per date, for the morning that just closed. */
@@ -257,7 +265,8 @@ opsRouter.post('/exceptions', (req, res) => {
 opsRouter.patch('/exceptions/:id', (req, res) => {
   const fields = { owner: 60, action: 200, cause: 200, responsible_party: 60 };
   const body = { owner: req.body.owner, action: req.body.action, cause: req.body.cause, responsible_party: req.body.responsibleParty };
-  const set = Object.keys(fields).filter(k => typeof body[k] === 'string');
+  /* An owner can be changed but never cleared (MB-OPS-001 §8). */
+  const set = Object.keys(fields).filter(k => typeof body[k] === 'string' && !(k === 'owner' && !plainText(body[k], 60)));
   if (!set.length) throw bad('nothing_to_update', 'Nothing to update.');
   const r = db.prepare(`UPDATE exceptions SET ${set.map(k => `${k} = ?`).join(', ')} WHERE id = ?`).run(...set.map(k => plainText(body[k], fields[k]) || null), Number(req.params.id));
   if (!r.changes) throw new ApiError(404, 'not_found', 'Exception not found.');

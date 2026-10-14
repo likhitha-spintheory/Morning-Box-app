@@ -133,7 +133,7 @@ businessRouter.post('/orders', (req, res) => {
   const id = newOrderId('MB-B', 'business_orders');
   const order = tx(() => {
     built.forEach(b => assertCapacity(b.date, b.window, b.people));
-    built.forEach(b => assertAllocatable(b.date, [{ kind: 'business', window: b.window, boxes: b.people, units: businessUnits(b.lines, b.specials) }]));
+    built.forEach(b => assertAllocatable(b.date, [{ kind: 'business', window: b.window, area: b.delivery.area, boxes: b.people, units: businessUnits(b.lines, b.specials) }]));
     // Payment gateway integration point: charge `total` before persisting.
     db.prepare('INSERT INTO business_orders (id, user_id, company, email, invoice, payment_ref, total, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, req.userId, acct.company, acct.email, json(invoice), `demo_${randomBytes(6).toString('hex')}`, total, key);
@@ -165,7 +165,7 @@ businessRouter.patch('/orders/:id/days/:date', (req, res) => {
   tx(() => {
     if (window !== d.window || b.people > d.people) assertCapacity(d.date, window, b.people, { excludeBusinessDay: d.id });
     /* Any change of boxes or Special Breakfasts must still be allocatable (DLV §8). */
-    assertAllocatable(d.date, [{ kind: 'business', window, boxes: b.people, units: businessUnits(b.lines, b.specials) }], { exclude: [`business:${d.id}`] });
+    assertAllocatable(d.date, [{ kind: 'business', window, area: delivery.area, boxes: b.people, units: businessUnits(b.lines, b.specials) }], { exclude: [`business:${d.id}`] });
     db.prepare('UPDATE business_days SET window = ?, delivery = ?, people = ?, lines = ?, specials = ?, gross = ?, discount = ?, total = ? WHERE id = ?')
       .run(window, json(delivery), b.people, json(b.lines), json(b.specials), b.gross, b.discount, b.total, d.id);
     /* Business Breakfast is prepaid: an edit that changes the total is settled.
