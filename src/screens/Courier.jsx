@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Screen, TopBar, Icon, PhotoPicker } from '../components/ui.jsx';
+import { Icon, PhotoPicker } from '../components/ui.jsx';
+import { StaffSignIn, Stepper } from './StaffUi.jsx';
 import { dubaiTodayIso } from '../domain/standards.js';
 
 /* Courier View (MB-OPS-001 §6–7; MB-DLV-001 §4–6, §10).
@@ -10,6 +11,8 @@ import { dubaiTodayIso } from '../domain/standards.js';
    Pickup counts must match before anything is dispatched; handover is delivery. */
 const KEY = 'morningbox.courier';
 const big = { minHeight: 56, fontSize: 17 };
+const STEPS = ['Collect', 'Picked up', 'On the way', 'Delivered'];
+const stepOf = d => (d.stage >= 3 ? 3 : ['Out for Delivery', 'Failed'].includes(d.deliveryState) ? 2 : d.deliveryState === 'Picked Up' ? 1 : 0);
 
 const at = s => (s ? new Date(/Z$|[+-]\d\d:?\d\d$/.test(s) ? s : `${s.replace(' ', 'T')}Z`).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' }).toUpperCase() : '');
 function badge(d) {
@@ -55,45 +58,50 @@ export default function Courier() {
 
   if (!code) {
     return (
-      <Screen>
-        <TopBar back="/" close={null}><span className="topbar-title">Courier</span></TopBar>
-        <main className="screen-main" style={{ paddingTop: 24, gap: 18 }}>
-          <h1 className="h-display" style={{ fontSize: 34 }}>Courier sign-in</h1>
-          <p className="help">Use the access code Morning Box gave you for your route.</p>
+      <StaffSignIn icon="truck" eyebrow="Morning Box courier" title="Courier sign-in" help="Use the access code Morning Box gave you for your route.">
           <div className="field"><label htmlFor="cr-c">Access code</label>
             <input id="cr-c" className="input" inputMode="numeric" autoComplete="off" value={draft} onChange={e => setDraft(e.target.value.replace(/\D/g, '').slice(0, 8))} onKeyDown={e => e.key === 'Enter' && draft.length === 8 && save(draft)} /></div>
           <button type="button" className="btn" disabled={draft.length < 8} onClick={() => save(draft)}>Open my route</button>
-        </main>
-      </Screen>
+      </StaffSignIn>
     );
   }
 
   const windows = [...new Set((list || []).map(d => d.window))];
   const left = (list || []).filter(d => d.stage < 3).length;
+  const total = (list || []).length;
   return (
-    <Screen>
-      <TopBar close={null}><span className="topbar-title">{me ? `Route ${me.routeId}` : 'Courier'}</span></TopBar>
-      <main className="screen-main tight" style={{ paddingTop: 8 }}>
-        <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
-          <span className="strong">{me?.name || ''}</span>
-          <button type="button" className="btn-text" onClick={() => save('')}>Sign out</button>
+    <div className="courier">
+      <header className="courier-hero">
+        <div className="row" style={{ gap: 12 }}>
+          <span className="row" style={{ gap: 12, justifyContent: 'flex-start' }}>
+            <span className="ops-brand-mark"><Icon name="truck" size={22} stroke={1.6} /></span>
+            <span className="stack" style={{ gap: 2 }}><strong className="serif" style={{ fontSize: 22 }}>{me ? `Route ${me.routeId}` : 'Courier'}</strong><span className="ops-brand-sub">{me?.name || 'Morning Box courier'}</span></span>
+          </span>
+          <button type="button" className="ops-signout courier-signout" onClick={() => save('')}><Icon name="logout" size={18} stroke={1.6} /><span>Sign out</span></button>
         </div>
+        {list && total > 0 && (
+          <div className="courier-progress">
+            <span className="row"><b>{total - left} of {total} delivered</b><span>{left ? `${left} to go` : 'All delivered'}</span></span>
+            <span className="courier-meter"><i style={{ width: `${Math.round(((total - left) / total) * 100)}%` }} /></span>
+          </div>
+        )}
         <div className="row" style={{ gap: 10 }}>
           <input className="input" type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} aria-label="Date" style={{ flex: 1, minHeight: 48 }} />
           <button type="button" className="btn-secondary" style={{ width: 'auto', minHeight: 48 }} disabled={busy} onClick={load}>Refresh</button>
         </div>
+      </header>
+      <main className="courier-main">
         {error && <div className="banner-err" role="alert"><Icon name="alert" size={18} stroke={2} />{error}</div>}
-        {!list ? <p className="help">Loading…</p> : !list.length ? <p className="help">No deliveries on your route for this date.</p> : <>
-          <span className="xs">{list.length} deliveries · {left ? `${left} to go` : 'all delivered'}</span>
+        {!list ? <p className="help">Loading…</p> : !list.length ? <div className="staff-empty"><Icon name="truck" size={30} stroke={1.4} /><p className="help">No deliveries on your route for this date.</p></div> : <>
           {windows.map(w => (
             <section key={w} className="stack gap-12">
-              <h2 className="h3" style={{ marginTop: 8 }}>{list.find(d => d.window === w).windowLabel}</h2>
+              <h2 className="courier-window"><Icon name="clock" size={18} stroke={1.8} />{list.find(d => d.window === w).windowLabel}<span className="xs">{list.filter(d => d.window === w).length} stop{list.filter(d => d.window === w).length === 1 ? '' : 's'}</span></h2>
               {list.filter(d => d.window === w).map(d => <Delivery key={`${d.kind}/${d.id}`} d={d} me={me} busy={busy} act={act} />)}
             </section>
           ))}
         </>}
       </main>
-    </Screen>
+    </div>
   );
 }
 
@@ -109,12 +117,17 @@ function Delivery({ d, me, busy, act }) {
   const done = d.stage >= 3;
   const toCollect = !d.deliveryState && !done;
   return (
-    <article className={`card stack gap-10${d.specialBoxes || d.hold ? ' warn' : ''}`} style={{ padding: 16 }}>
-      <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <b style={{ fontSize: 20 }}>{d.ref}</b>
+    <article className={`staff-card${d.hold ? ' risk' : d.specialBoxes ? ' special' : ''}${done ? ' finished' : ''}`}>
+      <div className="staff-card-head">
+        <b className="staff-ref">{d.ref}</b>
         <span className={`status ${cls}`}>{label}</span>
       </div>
-      <span style={{ fontSize: 17 }}><b>{d.boxes} box{d.boxes === 1 ? '' : 'es'}</b>{d.specialBoxes ? <b> · {d.specialBoxes} SPECIAL</b> : <span className="xs"> · no special boxes</span>} · ready by {d.readyBy}</span>
+      <Stepper steps={STEPS} current={stepOf(d)} bad={d.deliveryState === 'Failed' || d.deliveryState === 'Not Fulfilled'} />
+      <div className="courier-chips">
+        <span className="courier-chip"><Icon name="box" size={18} stroke={1.7} /><b>{d.boxes}</b> box{d.boxes === 1 ? '' : 'es'}</span>
+        <span className={`courier-chip${d.specialBoxes ? ' special' : ''}`}><Icon name="shieldAlert" size={18} stroke={1.7} />{d.specialBoxes ? <><b>{d.specialBoxes}</b> SPECIAL</> : 'No special'}</span>
+        <span className="courier-chip"><Icon name="clock" size={18} stroke={1.7} />Ready by {d.readyBy}</span>
+      </div>
       {d.hold && toCollect && <div className="banner-warn" role="status"><span><b>On hold.</b> Don’t collect this order until Morning Box clears it.</span></div>}
 
       {/* Pickup at each bakery: count boxes and special boxes; they must match (OPS §6–7). */}
@@ -123,8 +136,10 @@ function Delivery({ d, me, busy, act }) {
         const set = (k, v) => setCount(x => ({ ...x, [p.bakeryId]: { ...c, [k]: v.replace(/\D/g, '').slice(0, 3) } }));
         const canPick = toCollect && !p.pickedUp && (p.state === 'Ready' || p.state === 'Handed Over') && !d.hold;
         return (
-          <div key={p.bakeryId} className="stack gap-6" style={{ borderTop: '1px solid var(--line-soft)', paddingTop: 10 }}>
-            <span><span className="xs">PICK UP</span><br /><b>{p.bakery}</b>{p.pickupPoint ? ` · ${p.pickupPoint}` : ''}</span>
+          <div key={p.bakeryId} className="courier-stop">
+            <span className="courier-stop-ico"><Icon name="croissant" size={18} stroke={1.7} /></span>
+            <div className="stack gap-6" style={{ flex: 1, minWidth: 0 }}>
+            <span><span className="eyebrow grey">Pick up</span><br /><b>{p.bakery}</b>{p.pickupPoint ? ` · ${p.pickupPoint}` : ''}</span>
             <span className="xs">Ready by {p.readyBy} · {p.boxes} box{p.boxes === 1 ? '' : 'es'}{p.specialBoxes ? ` (${p.specialBoxes} special)` : ''} · {p.pickedUp ? 'picked up ✓' : p.state === 'Handed Over' ? 'handed over by the bakery' : p.state || 'not started'}</span>
             {canPick && <>
               <div className="row" style={{ gap: 8 }}>
@@ -134,16 +149,20 @@ function Delivery({ d, me, busy, act }) {
               <button type="button" className="btn" style={big} disabled={busy || c.boxes === '' || c.special === ''} onClick={() => act(`${path}/pickup`, { bakeryId: p.bakeryId, boxes: Number(c.boxes), specialBoxes: Number(c.special) })}>Confirm pickup</button>
               <span className="xs">Count the boxes and the boxes marked special. Don’t open them. If the count doesn’t match, don’t leave — Morning Box will sort it out.</span>
             </>}
+            </div>
           </div>
         );
       })}
 
-      <div className="stack gap-6" style={{ borderTop: '1px solid var(--line-soft)', paddingTop: 10 }}>
-        <span className="xs">DROP OFF</span>
+      <div className="courier-stop">
+        <span className="courier-stop-ico drop"><Icon name="pin" size={18} stroke={1.7} /></span>
+        <div className="stack gap-6" style={{ flex: 1, minWidth: 0 }}>
+        <span className="eyebrow grey">Drop off</span>
         <span>{d.dropOff.company ? <><b>{d.dropOff.company}</b><br /></> : null}<b>{d.dropOff.building}</b>{d.dropOff.place ? `, ${d.dropOff.place}` : ''}</span>
         <span className="xs">Handover: <b>{d.handover}</b></span>
         {d.contact && <span className="xs">Contact: <b>{d.contact.name}</b>{d.contact.mobile ? <> · <a href={`tel:${d.contact.mobile}`}>{d.contact.mobile}</a></> : null}</span>}
         {d.dropOff.notes && <span className="xs">Note: {d.dropOff.notes}</span>}
+        </div>
       </div>
 
       {d.attempts.length > 0 && <span className="xs">Attempts: {d.attempts.map(a => `${a.reason} (${at(a.at)})`).join('; ')}</span>}

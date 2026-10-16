@@ -440,7 +440,7 @@ export function ReviewPay() {
           <Link to="/checkout/delivery" className="card row" style={{ textDecoration: 'none', gap: 16, padding: '16px 20px' }}>
             <Icon name="pin" size={22} stroke={1.6} />
             <span className="stack" style={{ flex: 1, gap: 2 }}><span className="strong" style={{ fontSize: 16 }}>{dl.address.building}{dl.address.unit ? `, ${dl.address.unit}` : ''}</span>
-              <span className="help" style={{ fontSize: 15 }}>{dl.address.handover === 'door' ? 'To your door' : 'At Reception'} · {dates.length > 1 ? 'all mornings' : 'DIFC'}</span></span>
+              <span className="help" style={{ fontSize: 15 }}>{dl.address.handover === 'door' ? 'To your door' : 'At Reception'} · {dates.length > 1 ? 'all mornings' : areaFor(dl.address.area)}</span></span>
             <span className="link">Edit</span>
           </Link>
         )}

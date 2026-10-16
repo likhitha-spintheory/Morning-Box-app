@@ -249,6 +249,13 @@ export function needsFor(dietary = [], allergies = []) {
 }
 export const bakeryCaps = b => { try { return JSON.parse(b.capabilities || '{}') || {}; } catch { return {}; } };
 export const bakeryCovers = (b, needs = []) => needs.every(k => bakeryCaps(b)[k]);
+/** Distances to service areas other than DIFC, as saved in Admin. */
+export const areaDistances = b => { try { return JSON.parse(b.area_distances || '{}') || {}; } catch { return {}; } };
+/** Distance from a bakery to a delivery area (MB-PRD-001 §10 proximity first). DIFC, or an area without its own distance, uses distance_km. */
+export const distanceTo = (b, area) => {
+  const km = area && area !== 'DIFC' ? areaDistances(b)[area] : null;
+  return Number.isFinite(km) ? km : b.distance_km;
+};
 /* Active partners only, and only while their food business licence is valid on that date (MB-BKY-001 §1). */
 export const activeBakeries = (date = dubaiTodayIso()) => db.prepare("SELECT * FROM bakeries WHERE status = 'Active' AND (licence_expiry IS NULL OR licence_expiry = '' OR licence_expiry >= ?) ORDER BY distance_km").all(date);
 
@@ -314,12 +321,12 @@ export const windowEnd = (date, window) => new Date(`${date}T${WINDOW_END[window
 
 /* ---------- Exceptions (MB-OPS-001 §8) ---------- */
 export const EXCEPTION_CATEGORIES = ['Safety', 'Bakery', 'Courier', 'Customer/Location', 'Payment'];
-export const EXCEPTION_KINDS = [...BASE_EXCEPTION_KINDS, 'Safety Incident', 'Pickup Delay', 'QC Failure', 'Delivery Failed', 'Payment Issue', 'Customer Issue', 'Handover Mismatch', 'Order Accuracy', 'Packaging Issue'];
+export const EXCEPTION_KINDS = [...BASE_EXCEPTION_KINDS, 'Safety Incident', 'Pickup Delay', 'QC Failure', 'Delivery Failed', 'Payment Issue', 'Customer Issue', 'Handover Mismatch', 'Order Accuracy', 'Packaging Issue', 'Reconciliation Mismatch'];
 const KIND_CATEGORY = {
   'Product/Ingredient Unavailable': 'Bakery', 'Capacity Issue': 'Bakery', 'Dietary/Allergy Issue': 'Safety',
   'Equipment/Operational Issue': 'Bakery', 'Courier Delay': 'Courier', 'Location Unavailable': 'Customer/Location',
   'Other': 'Customer/Location', 'Safety Incident': 'Safety', 'Pickup Delay': 'Bakery', 'QC Failure': 'Bakery',
-  'Delivery Failed': 'Courier', 'Payment Issue': 'Payment', 'Customer Issue': 'Customer/Location', 'Handover Mismatch': 'Bakery', 'Order Accuracy': 'Bakery', 'Packaging Issue': 'Bakery'
+  'Delivery Failed': 'Courier', 'Payment Issue': 'Payment', 'Customer Issue': 'Customer/Location', 'Handover Mismatch': 'Bakery', 'Order Accuracy': 'Bakery', 'Packaging Issue': 'Bakery', 'Reconciliation Mismatch': 'Payment'
 };
 /** Safety concerns receive the highest operational priority (1). */
 export const PRIORITY = { Safety: 1, Bakery: 2, Courier: 2, Payment: 2, 'Customer/Location': 3 };
@@ -338,7 +345,8 @@ export function raiseException({ ref, kind, note = '', category, owner = null, a
   }
   const r = db.prepare(`INSERT INTO exceptions (ref, kind, note, category, priority, owner, action, cause, responsible_party, customer_category)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(String(ref || ''), kind, String(note || '').slice(0, 1000), cat, PRIORITY[cat], owner, action, cause, responsibleParty, customerCategory);
+    /* MB-OPS-001 §2/§8: no exception without operational ownership — Operations owns it until reassigned. */
+    .run(String(ref || ''), kind, String(note || '').slice(0, 1000), cat, PRIORITY[cat], owner || 'Operations', action, cause, responsibleParty, customerCategory);
   return Number(r.lastInsertRowid);
 }
 

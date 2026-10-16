@@ -296,7 +296,7 @@ personalRouter.post('/orders', requireUser, (req, res) => {
   const id = newOrderId('MB', 'orders');
   const needs = needsFor(profile.dietary, profile.allergies);
   const order = tx(() => {
-    built.forEach(b => { assertCapacity(b.date, b.window, 1); assertAllocatable(b.date, [{ kind: 'personal', window: b.window, boxes: 1, units: personalUnits(b.cfg, b.trace.inputs) }]); });
+    built.forEach(b => { assertCapacity(b.date, b.window, 1); assertAllocatable(b.date, [{ kind: 'personal', window: b.window, area: b.address.area, boxes: 1, units: personalUnits(b.cfg, b.trace.inputs) }]); });
     /* Morning Box credit (service recovery) is used first; the card pays the rest. */
     const credit = Math.min(creditBalance(req.userId), total);
     // Payment gateway integration point: authorise `total - credit` before persisting.
@@ -323,7 +323,7 @@ personalRouter.post('/orders', requireUser, (req, res) => {
 
 const RECIPE_FIELDS = ['context', 'recipeId', 'components', 'size', 'addons', 'danishFlavour'];
 
-/** Edit one morning before its cutoff: context, size, add-ons, window.
+/** Edit one morning before its cutoff: context, size, add-ons, window, delivery address.
     A window-only change keeps the breakfast exactly as ordered. A morning on
     safety hold must be re-planned against the current profile. */
 personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res) => {
@@ -332,6 +332,10 @@ personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res) => {
   if (day.cancelled) throw bad('cancelled', 'This morning was cancelled.');
   assertEditable(day.date, day.stage);
   const window = req.body.window ?? day.window;
+  /* FLW §8 / DLV §2: the delivery location of a booked morning can change before cutoff too. */
+  const oldAddress = parse(day.address);
+  const address = req.body.address ? validateAddress(req.body.address) : oldAddress;
+  const addressChanged = ['building', 'unit', 'area', 'handover', 'notes'].some(k => (address[k] || '') !== (oldAddress[k] || ''));
   const rebuild = RECIPE_FIELDS.some(k => req.body[k] !== undefined) || !!day.safety_hold;
   let b = null;
   if (rebuild) {
@@ -348,6 +352,7 @@ personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res) => {
   }
   const changes = [];
   if (window !== day.window) changes.push(`delivery window to ${windowLabel(window)}`);
+  if (addressChanged) changes.push(`delivery address to ${[address.building, address.unit].filter(Boolean).join(', ')}`);
   if (b) {
     const cur = parse(day.cfg);
     if (b.cfg.recipeId !== cur.recipeId || b.cfg.context !== cur.context) changes.push(`breakfast to ${boxName(b.cfg)}`);
@@ -363,7 +368,7 @@ personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res) => {
     if (window !== day.window) assertCapacity(day.date, window, 1, { excludeOrderDay: day.id });
     /* The changed breakfast must still be makeable by a bakery with capacity (DLV §8). */
     /* Bakery capacity is per day and, where set, per delivery window (MB-B2B-001 §9). */
-    if (b || window !== day.window) assertAllocatable(day.date, [{ kind: 'personal', window, boxes: 1, units: b ? personalUnits(b.cfg, b.trace.inputs) : personalUnits(parse(day.cfg), parse(day.trace).inputs) }], { exclude: [`personal:${day.id}`] });
+    if (b || window !== day.window || addressChanged) assertAllocatable(day.date, [{ kind: 'personal', window, area: address.area, boxes: 1, units: b ? personalUnits(b.cfg, b.trace.inputs) : personalUnits(parse(day.cfg), parse(day.trace).inputs) }], { exclude: [`personal:${day.id}`] });
     if (b) {
       db.prepare('UPDATE order_days SET cfg = ?, trace = ?, price = ?, context = ?, window = ?, safety_hold = 0 WHERE id = ?')
         .run(json(b.cfg), json(b.trace), b.price, b.cfg.context, window, day.id);
@@ -372,9 +377,10 @@ personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res) => {
     } else {
       db.prepare('UPDATE order_days SET window = ? WHERE id = ?').run(window, day.id);
     }
+    if (addressChanged) db.prepare('UPDATE order_days SET address = ? WHERE id = ?').run(json(address), day.id);
     if (changes.length) logEvent(order.id, day.date, 'changed', `You changed ${changes.join(', ')}`);
   });
-  if (b) reallocateProvisional([day.date]);
+  if (b || addressChanged) reallocateProvisional([day.date]);
   res.json(serializeOrder(order));
 });
 
@@ -395,7 +401,8 @@ personalRouter.post('/orders/:id/days/:date/cancel', requireUser, (req, res) => 
 /** MB-PRD-001 §12 / MB-REC-001 §14: Loved it or Not for me, with an optional
     predefined reason after Not for me. Stored as a learning signal only — it never
     changes recommendations. Feedback can be changed for 7 days after delivery. */
-const FEEDBACK_REASONS = ['Not my taste', 'Too much', 'Too little', 'Not fresh enough', 'Arrived late'];
+/* REC §14: Not for me is a preference signal — delivery problems go to Report a problem instead. */
+const FEEDBACK_REASONS = ['Not my taste', 'Too much', 'Too little', 'Not fresh enough'];
 const FEEDBACK_DAYS = 7;
 personalRouter.post('/orders/:id/days/:date/feedback', requireUser, (req, res) => {
   const order = ownOrder(req.userId, req.params.id);

@@ -9,7 +9,7 @@
      it is split by line — Special Breakfasts go to bakeries able to make them.
    ============================================================ */
 import { db, json, parse, tx } from './db.js';
-import { bakeriesFor, bakeryCovers, bakeryMakes, danishFlavours, needsFor, needsGlutenFreeHandling, raiseException, bad, prettyDate } from './rules.js';
+import { bakeriesFor, distanceTo, bakeryCovers, bakeryMakes, danishFlavours, needsFor, needsGlutenFreeHandling, raiseException, bad, prettyDate } from './rules.js';
 import { recipeById } from '../src/domain/recipes.js';
 import { cutoffFor } from '../src/domain/standards.js';
 import { notify, alreadyNotified } from './notify.js';
@@ -33,14 +33,14 @@ const canMake = (b, u) => bakeryCovers(b, u.needs) && (!u.glutenFree || b.gluten
 
 function dayDemand(date) {
   const personal = db.prepare(`SELECT d.*, o.payment_status FROM order_days d JOIN orders o ON o.id = d.order_id WHERE d.date = ? AND d.cancelled = 0`).all(date).map(d => ({
-    kind: 'personal', id: d.id, ref: `personal:${d.id}`, window: d.window, boxes: 1, units: personalUnits(parse(d.cfg), parse(d.trace).inputs),
+    kind: 'personal', id: d.id, ref: `personal:${d.id}`, window: d.window, area: parse(d.address)?.area, boxes: 1, units: personalUnits(parse(d.cfg), parse(d.trace).inputs),
     current: d.bakery_id ? [{ bakeryId: d.bakery_id, boxes: 1, items: [{ entry: 0, qty: 1 }] }] : null,
     locked: LOCKED.includes(d.bakery_state) || d.stage >= 1, hold: !!d.safety_hold, paid: !/failed|refunded/.test(d.payment_status || '')
   }));
   const business = db.prepare(`SELECT d.*, o.payment_status FROM business_days d JOIN business_orders o ON o.id = d.order_id WHERE d.date = ? AND d.cancelled = 0`).all(date).map(d => {
     const alloc = parse(d.allocation);
     return {
-      kind: 'business', id: d.id, ref: `business:${d.id}`, window: d.window, boxes: d.people, units: businessUnits(parse(d.lines), parse(d.specials)),
+      kind: 'business', id: d.id, ref: `business:${d.id}`, window: d.window, area: parse(d.delivery)?.area, boxes: d.people, units: businessUnits(parse(d.lines), parse(d.specials)),
       current: Array.isArray(alloc) && alloc.length ? alloc : null,
       locked: LOCKED.includes(d.bakery_state) || d.stage >= 1, hold: false, paid: !/failed|refunded/.test(d.payment_status || '')
     };
@@ -56,7 +56,9 @@ function use(left, win, id, window, boxes) {
 }
 
 /** Allocate one delivery to one bakery, or split a business order by line. Mutates `left` and `win`. */
-function place(row, bakeries, left, win = {}) {
+function place(row, allBakeries, left, win = {}) {
+  /* Nearest to this delivery's area first (MB-PRD-001 §10, MB-DLV-001 §7). */
+  const bakeries = [...allBakeries].sort((a, b) => distanceTo(a, row.area) - distanceTo(b, row.area));
   const single = bakeries.find(b => room(left, win, b.id, row.window) >= row.boxes && row.units.every(u => canMake(b, u)));
   if (single) {
     use(left, win, single.id, row.window, row.boxes);

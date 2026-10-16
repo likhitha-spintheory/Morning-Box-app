@@ -65,7 +65,7 @@ test('admin prices change what customers pay, and the app receives them', async 
 test('admin manages bakeries: add, suspend, capacity, conditions; allocation follows', async () => {
   const added = await ops('POST', '/admin/bakeries', { name: 'Test Bakery', area: 'DIFC', distanceKm: 0.1, dailyCapacity: 50, capabilities: { glutenFree: true } });
   assert.equal((await ops('POST', `/admin/bakeries/${added.body.id}/status`, { status: 'Active' })).body.error, 'bread_required', 'must bake its own bread (BKY §1)');
-  await ops('PUT', `/admin/bakeries/${added.body.id}`, { bakesOwnBread: true, licenceNo: 'DM-12345' });
+  await ops('PUT', `/admin/bakeries/${added.body.id}`, { bakesOwnBread: true, licenceNo: 'DM-12345', onboarding: { allergenRecords: true, packaging: true, systemReady: true, pilotPassed: true } });
   assert.equal((await ops('POST', `/admin/bakeries/${added.body.id}/samples`, { product: 'plainCroissant', result: 'Approved' })).status, 201);
   assert.equal(added.status, 201);
   assert.equal(added.body.status, 'Under Review', 'new partners start under review');
@@ -152,7 +152,7 @@ test('unable to fulfil → reallocate; failed delivery; refunds and credits; cre
   assert.equal((await ops('POST', `/days/personal/${id}/bakery-state`, { state: 'Unable to Fulfil', reason: 'Equipment/Operational Issue' })).status, 200);
   assert.notEqual(db.prepare('SELECT bakery_id FROM order_days WHERE id = ?').get(id).bakery_id, first);
   await ops('POST', `/days/personal/${id}/route`, { routeId: 'R2' });
-  await ops('POST', `/days/personal/${id}/bakery-state`, { state: 'Ready', qcPassed: true });
+  await ops('POST', `/days/personal/${id}/bakery-state`, { state: 'Ready', qc: { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true } });
   await ops('POST', `/days/personal/${id}/handover`, { boxes: 1, specialBoxes: 0 });
   await ops('POST', `/days/personal/${id}/out`);
   assert.equal((await ops('POST', `/days/personal/${id}/failed`, { reason: 'Contact unreachable' })).status, 200);
@@ -189,7 +189,10 @@ test('exceptions: priority order, owner required to resolve, resolution text', a
   const list = (await ops('GET', '/exceptions')).body;
   assert.equal(list.find(e => !e.resolved).priority, 1, 'safety first');
   assert.equal((await ops('POST', `/exceptions/${x.body.id}/resolve`, { resolution: '' })).body.error, 'resolution_required');
-  assert.equal((await ops('POST', `/exceptions/${x.body.id}/resolve`, { resolution: 'Refunded' })).body.error, 'owner_required');
+  /* OPS §8: an exception always has an owner (Operations until reassigned); the action is still required. */
+  assert.equal(list.find(e => e.id === x.body.id).owner, 'Operations');
+  assert.equal((await ops('POST', `/exceptions/${x.body.id}/resolve`, { resolution: 'Refunded' })).body.error, 'action_required');
+  assert.equal((await ops('PATCH', `/exceptions/${x.body.id}`, { owner: '' })).body.error, 'nothing_to_update', 'an owner can’t be cleared');
   assert.equal((await ops('PATCH', `/exceptions/${x.body.id}`, { owner: 'Aisha', action: 'Call the customer', cause: 'Label error' })).status, 200);
   assert.equal((await ops('POST', `/exceptions/${x.body.id}/resolve`, { resolution: 'Refunded and bakery retrained' })).status, 200);
 });
@@ -237,7 +240,7 @@ test('a business order too big for one bakery is split by line; each bakery hand
   const prep = (await ops('GET', `/prep?date=${date}`)).body.bakeries;
   const bPlan = prep.find(p => p.bakeryId === B);
   assert.equal(bPlan.packing.find(x => x.ref === o.body.id).boxes, row.allocation.find(p => p.bakeryId === B).boxes, 'B sees only its share');
-  await ops('POST', `/days/business/${row.id}/bakery-state`, { state: 'Ready', qcPassed: true });
+  await ops('POST', `/days/business/${row.id}/bakery-state`, { state: 'Ready', qc: { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true } });
   await ops('POST', `/days/business/${row.id}/route`, { routeId: 'R9' });
   assert.equal((await ops('POST', `/days/business/${row.id}/handover`, { boxes: 10, specialBoxes: 2 })).body.error, 'part_required');
   for (const p of row.allocation) {

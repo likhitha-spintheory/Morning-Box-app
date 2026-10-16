@@ -14,7 +14,7 @@ import {
 import { usePruneExpired } from '../../state/orders.jsx';
 import { BoxEditor, FlavourPicker, offeredPastries } from '../../components/BoxEditor.jsx';
 import { addonGroups, applyUserSwaps } from '../../domain/engine.js';
-import { ADDON_PRICES, PRICING, cutoffFor } from '../../domain/standards.js';
+import { PRICING, cutoffFor } from '../../domain/standards.js';
 
 const CONTEXT_ICON = { active: 'bolt', regular: 'brief', busy: 'clock', relaxed: 'coffee' };
 /* MB-PER-001 §2 — the purpose of each Daily Context, word for word. */
@@ -469,7 +469,7 @@ export function Extras() {
 
         {bread && (
           <section className="stack gap-10">
-            <div className="row"><span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>Bread to take home</span><span className="xs">Half AED {ADDON_PRICES.bread.half} · Whole AED {ADDON_PRICES.bread.whole}</span></div>
+            <div className="row"><span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>Bread to take home</span><span className="xs">Half or whole loaf</span></div>
             <div className="card list" style={{ padding: '4px 16px' }}>
               {breadItems.map(item => {
                 const l = loaf(item);
@@ -483,7 +483,7 @@ export function Extras() {
                           <span key={u}>{k ? ' · ' : ''}
                             <button type="button" disabled={!l} onClick={() => setAddon('bread', item, u, l.qty)} aria-pressed={l?.unit === u}
                               style={{ background: 'none', border: 0, padding: '12px 2px', minHeight: 44, font: 'inherit', color: 'inherit', cursor: l ? 'pointer' : 'default', textDecoration: l?.unit === u ? 'underline' : 'none', textUnderlineOffset: 3 }}>
-                              {u === 'half' ? 'Half loaf' : 'Whole loaf'}
+                              {u === 'half' ? 'Half loaf' : 'Whole loaf'} · AED {addonPrice({ group: 'bread', item, unit: u, qty: 1 })}
                             </button>
                           </span>
                         ))}

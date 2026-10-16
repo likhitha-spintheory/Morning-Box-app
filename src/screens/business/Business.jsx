@@ -272,8 +272,10 @@ export function BizWelcome() {
     .sort((a, b) => a.d.date.localeCompare(b.d.date))[0];
   const last = orders[0];
 
+  /* FLW §18: previous company and delivery information is reused (still editable); boxes, dates and window start fresh. */
   const fresh = () => {
-    set(s => { s.business = { ...emptyBusiness(), delivery: { ...emptyBusiness().delivery, company: user?.company || '' } }; });
+    const prev = last?.days.find(x => !x.cancelled)?.delivery || last?.days[0]?.delivery || {};
+    set(s => { s.business = { ...emptyBusiness(), delivery: { ...emptyBusiness().delivery, ...structuredClone(prev), company: prev.company || user?.company || '', area: areaFor(prev.area) || emptyBusiness().delivery.area, window: null } }; });
     nav('/business/people');
   };
   /* FLW §18: reorder any previous order; a multi-day order keeps each day's boxes for the dates chosen next. */
@@ -544,8 +546,12 @@ export function Selection() {
             return (
               <div key={l.recipeId} className="stack gap-10" style={{ padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>
                 <div className="row" style={{ alignItems: 'flex-start' }}>
-                  <span className="stack"><span className="strong">{modelName(r)}</span><span className="xs">{describe(r)}</span></span>
-                  <span className="strong" style={{ whiteSpace: 'nowrap' }}>× {l.qty}</span>
+                  <span className="stack"><span className="strong">{modelName(r)}</span><span className="xs">{describe(r)}</span>
+                    {mode === 'mix' && <span className="xs">AED {linePrice(l)} each · {sizeLabel(l.size)}</span>}</span>
+                  {/* FLW §13: the Mix is a starting point — quantities stay editable (Total Boxes = Total People is checked below). */}
+                  {mode === 'mix'
+                    ? <Qty value={l.qty} max={MAX_PEOPLE} label={modelName(r)} onChange={q => setLines(ls => ls.map((x, k) => (k === i ? { ...x, qty: q } : x)))} />
+                    : <span className="strong" style={{ whiteSpace: 'nowrap' }}>× {l.qty}</span>}
                 </div>
                 {mode === 'mix'
                   ? <SizeSeg value={l.size} label={`Size for ${modelName(r)}`} onChange={sz => setLines(ls => ls.map((x, k) => (k === i ? { ...x, size: sz } : x)))} />
@@ -604,7 +610,8 @@ export function ChooseBoxes() {
               const r = m.recipe;
               const p = pick[r.id];
               const comps = r.components.map(id => COMPONENTS[id]).filter(Boolean);
-              const veg = comps.every(c => c.diet.includes('vegetarian'));
+              /* B2B §2: dietary information per model (Halal is left out: every model is Halal). */
+              const suits = DIETARY.filter(d => d.id !== 'halal' && comps.every(c => c.diet.includes(d.id)));
               const allergens = [...new Set(comps.flatMap(c => c.allergens))];
               return (
                 <div key={r.id} className="card stack gap-12" style={p.qty > 0 ? { border: '2px solid var(--gold)', background: 'var(--gold-wash)', padding: 17 } : undefined}>
@@ -614,7 +621,7 @@ export function ChooseBoxes() {
                     <span className="money">AED {m.base + SIZE_ADJUSTMENT[p.size]}</span>
                   </div>
                   <div className="tags">
-                    {veg && <span className="tag"><Icon name="leaf" size={13} stroke={2} />Vegetarian</span>}
+                    {suits.map(d => <span key={d.id} className="tag"><Icon name="leaf" size={13} stroke={2} />{d.label}</span>)}
                     {allergens.length > 0 && <span className="tag">Contains {allergens.map(a => allergyLabel(a).split(' /')[0].toLowerCase()).join(', ')}</span>}
                   </div>
                   <SizeSeg value={p.size} label={`Size for ${modelName(r)}`} onChange={sz => setP(r.id, { size: sz })} />
@@ -827,8 +834,8 @@ export function BizDelivery() {
   };
   /* FLW §15: a day can have its own location and contact when "Set per day" is chosen. */
   const own = iso => b.perDay?.[iso]?.delivery || null;
-  const setOwn = (iso, patch) => upd(d => { d.perDay[iso] = { ...(d.perDay[iso] || {}), delivery: patch === null ? null : { ...(d.perDay[iso]?.delivery || { building: d.delivery.building, office: d.delivery.office, contact: d.delivery.contact, mobile: d.delivery.mobile, notes: d.delivery.notes }), ...patch } }; });
-  const ownBad = iso => { const o = own(iso); return o && (!o.building?.trim() || !o.office?.trim() || !o.contact?.trim() || !/^5\d{8}$/.test(mobileDigits(o.mobile || ''))); };
+  const setOwn = (iso, patch) => upd(d => { d.perDay[iso] = { ...(d.perDay[iso] || {}), delivery: patch === null ? null : { ...(d.perDay[iso]?.delivery || { building: d.delivery.building, office: d.delivery.office, area: d.delivery.area, contact: d.delivery.contact, mobile: d.delivery.mobile, notes: d.delivery.notes }), ...patch } }; });
+  const ownBad = iso => { const o = own(iso); return o && (!o.building?.trim() || !o.office?.trim() || !areaFor(o.area || dl.area) || !o.contact?.trim() || !/^5\d{8}$/.test(mobileDigits(o.mobile || ''))); };
 
   return (
     <Screen>
@@ -880,6 +887,7 @@ export function BizDelivery() {
                   <div key={k} className="field"><label htmlFor={`bd-${iso}-${k}`}>{label}</label>
                     <input id={`bd-${iso}-${k}`} className={`input${touched && k !== 'notes' && ownBad(iso) && !(own(iso)[k] || '').trim() ? ' invalid' : ''}`} inputMode={k === 'mobile' ? 'tel' : undefined} value={own(iso)[k] || ''} onChange={e => setOwn(iso, { [k]: e.target.value })} /></div>
                 ))}
+                <AreaField id={`bd-${iso}-area`} value={own(iso).area || dl.area} invalid={touched} onChange={v => setOwn(iso, { area: v })} />
                 {touched && ownBad(iso) && <Err>Complete this day’s location and contact (UAE mobile, e.g. 50 123 4567)</Err>}
                 <button type="button" className="link" style={{ alignSelf: 'flex-start' }} onClick={() => setOwn(iso, null)}>Use the main location and contact</button>
               </div>
@@ -1104,7 +1112,7 @@ export function BizReview() {
     setTrnTouched(true);
     if (trnBad) return;
     setPaying(true); setError('');
-    const snap = { company: dl.company.trim(), building: dl.building.trim(), office: dl.office.trim(),
+    const snap = { company: dl.company.trim(), building: dl.building.trim(), office: dl.office.trim(), area: areaFor(dl.area),
       contact: dl.contact.trim(), mobile: fmtMobile(mobileDigits(dl.mobile)), notes: dl.notes.trim() };
     try {
       const order = await post('/business/orders', {
@@ -1115,12 +1123,12 @@ export function BizReview() {
           date: d.iso, window: d.window, people: d.people,
           lines: d.lines.filter(l => l.qty > 0).map(l => ({ recipeId: l.recipeId, size: l.size, qty: l.qty })),
           specials: d.specials.map(x => ({ dietary: x.dietary.slice(), allergies: x.allergies.slice(), qty: x.qty, size: x.size || 'regular' })),
-          delivery: d.delivery ? { ...snap, building: d.delivery.building.trim(), office: d.delivery.office.trim(), contact: d.delivery.contact.trim(), mobile: fmtMobile(mobileDigits(d.delivery.mobile)), notes: (d.delivery.notes || '').trim() } : snap
+          delivery: d.delivery ? { ...snap, building: d.delivery.building.trim(), office: d.delivery.office.trim(), area: areaFor(d.delivery.area || dl.area), contact: d.delivery.contact.trim(), mobile: fmtMobile(mobileDigits(d.delivery.mobile)), notes: (d.delivery.notes || '').trim() } : snap
         }))
       });
       set(s => {
         putOrder(s, order);
-        s.business = { ...emptyBusiness(), delivery: { ...emptyBusiness().delivery, company: snap.company, building: snap.building, office: snap.office, contact: snap.contact, mobile: s.business.delivery.mobile } };
+        s.business = { ...emptyBusiness(), delivery: { ...emptyBusiness().delivery, company: snap.company, building: snap.building, office: snap.office, area: snap.area, contact: snap.contact, mobile: s.business.delivery.mobile } };
       });
       nav(`/business/orders/${order.id}/confirmed`, { replace: true });
     } catch (e) {
@@ -1141,7 +1149,7 @@ export function BizReview() {
             <span className="sm" style={{ color: 'var(--espresso)' }}>{d.people} people · {windowLabel(d.window)}</span>
             <span className="xs">{linesText(d.lines) || 'No general breakfasts'}</span>
             {d.specials.length > 0 && <span className="xs"><Icon name="shield" size={12} stroke={2} style={{ verticalAlign: '-2px', marginRight: 4 }} />Special × {sum(d.specials)}: {d.specials.map(s => `${specialText(s)} × ${s.qty}`).join(' · ')}</span>}
-            <span className="xs">{(d.delivery || dl).building}, {(d.delivery || dl).office}, DIFC · {(d.delivery || dl).contact}, {fmtMobile(mobileDigits((d.delivery || dl).mobile))}</span>
+            <span className="xs">{(d.delivery || dl).building}, {(d.delivery || dl).office}, {areaFor((d.delivery || dl).area || dl.area)} · {(d.delivery || dl).contact}, {fmtMobile(mobileDigits((d.delivery || dl).mobile))}</span>
             <div className="sr">
               <span className="xs" style={d.price.discount ? { color: 'var(--ok)' } : undefined}>{d.price.discount ? `Includes ${Math.round(d.price.discountPct * 100)}% volume discount` : ''}</span>
               <span className="money">AED {d.price.total}</span>
@@ -1165,7 +1173,7 @@ export function BizReview() {
               <div className="field"><label htmlFor="bi-n">Billing name</label>
                 <input id="bi-n" className="input" placeholder={dl.company} value={inv.billingName} onChange={e => upd(d => { d.invoice.billingName = e.target.value; })} /></div>
               <div className="field"><label htmlFor="bi-a">Billing address</label>
-                <input id="bi-a" className="input" placeholder={`${dl.building}, DIFC, Dubai`} value={inv.address} onChange={e => upd(d => { d.invoice.address = e.target.value; })} /></div>
+                <input id="bi-a" className="input" placeholder={`${dl.building}, ${areaFor(dl.area) || ''}, Dubai`} value={inv.address} onChange={e => upd(d => { d.invoice.address = e.target.value; })} /></div>
               <div className="field"><label htmlFor="bi-t">TRN <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
                 <input id="bi-t" className={`input${trnTouched && trnBad ? ' invalid' : ''}`} inputMode="numeric" maxLength={20} value={inv.trn}
                   aria-invalid={trnTouched && trnBad} onBlur={() => setTrnTouched(true)} onChange={e => upd(d => { d.invoice.trn = e.target.value; })} />
@@ -1208,7 +1216,7 @@ export function BizConfirmed() {
     ['Order', order.id],
     ['Dates', order.days.map(d => dateInfo(d.date).label).join(' · ')],
     ['Headcount', heads.length > 1 ? `${Math.min(...heads)}–${Math.max(...heads)} people` : `${heads[0]} people`],
-    ['Location', `${first.delivery.building}, ${first.delivery.office}, DIFC`],
+    ['Location', [first.delivery.building, first.delivery.office, first.delivery.area].filter(Boolean).join(', ')],
     ['Window', wins.join(' · ')],
     ['Paid', `AED ${order.paid ?? order.total}`]
   ];
