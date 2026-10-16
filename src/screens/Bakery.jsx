@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Screen, TopBar, Icon } from '../components/ui.jsx';
+import { Icon } from '../components/ui.jsx';
+import { StaffSignIn, StaffTiles, Stepper } from './StaffUi.jsx';
 import { addDaysIso, dubaiTodayIso } from '../domain/standards.js';
 import { ProductionPlan, LabelGrid } from './OpsLive.jsx';
 
@@ -11,6 +12,9 @@ import { ProductionPlan, LabelGrid } from './OpsLive.jsx';
 const KEY = 'morningbox.bakery';
 const CONDITIONS = ['Item Unavailable', 'Reduced Capacity', 'Special Requirement Unavailable', 'Temporarily Unavailable'];
 const small = { width: 'auto', padding: '0 14px', minHeight: 40 };
+const VIEWS = [['plan', 'Production plan', 'doc'], ['orders', 'Orders', 'box'], ['labels', 'Labels', 'bookmark'], ['conditions', 'Availability', 'cal']];
+const STEPS = ['Confirmed', 'In Preparation', 'Ready', 'Handed Over'];
+const dayTitle = iso => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
 export default function Bakery() {
   const [code, setCode] = useState(() => { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } });
@@ -63,35 +67,59 @@ export default function Bakery() {
 
   if (!me) {
     return (
-      <Screen>
-        <TopBar back="/" close={null}><span className="topbar-title">Partner bakery</span></TopBar>
-        <main className="screen-main" style={{ paddingTop: 24, gap: 18 }}>
-          <h1 className="h-display" style={{ fontSize: 34 }}>Bakery sign-in</h1>
-          <p className="help">Use the access code Morning Box gave your bakery.</p>
+      <StaffSignIn icon="croissant" eyebrow="Partner bakery" title="Bakery sign-in" help="Use the access code Morning Box gave your bakery.">
           <form className="stack gap-12" onSubmit={e => { e.preventDefault(); if (draft.length === 8) { setOpening(true); save(draft); setAttempt(n => n + 1); } }}>
             <div className="field"><label htmlFor="bk-c">Access code</label>
               <input id="bk-c" className="input" inputMode="numeric" autoComplete="off" value={draft} onChange={e => setDraft(e.target.value.replace(/\D/g, '').slice(0, 8))} /></div>
             <button type="submit" className="btn" disabled={draft.length < 8 || opening}>{opening ? 'Opening your production plan…' : 'Open my production plan'}</button>
           </form>
           {error && <div className="banner-err" role="alert"><Icon name="alert" size={18} stroke={2} />{error}</div>}
-        </main>
-      </Screen>
+      </StaffSignIn>
     );
   }
 
+  const ready = plan ? plan.packing.filter(o => o.state === 'Ready' || o.state === 'Handed Over').length : 0;
+  const current = VIEWS.find(v => v[0] === view);
   return (
-    <div className="ops">
+    <div className="ops-shell">
+      <aside className="ops-side no-print">
+        <div className="ops-brand">
+          <span className="ops-brand-mark"><Icon name="croissant" size={22} stroke={1.6} /></span>
+          <span className="stack" style={{ gap: 2, minWidth: 0 }}><strong className="serif" style={{ fontSize: 20 }}>{me?.name || 'Partner bakery'}</strong><span className="ops-brand-sub">Partner bakery</span></span>
+        </div>
+        <nav className="ops-nav" aria-label="Bakery sections">
+          <div className="ops-nav-group">
+            <span className="ops-nav-label">Your mornings</span>
+            {VIEWS.map(([id, label, icon]) => (
+              <button key={id} type="button" aria-current={view === id ? 'page' : undefined} className={view === id ? 'on' : ''} onClick={() => setView(id)}>
+                <Icon name={icon} size={18} stroke={1.6} /><span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
+        <button type="button" className="ops-signout" onClick={() => save('')}><Icon name="logout" size={18} stroke={1.6} /><span>Sign out</span></button>
+      </aside>
+
+      <div className="ops">
       <header className="ops-head no-print">
-        <strong className="serif" style={{ fontSize: 24 }}>{me?.name || 'Partner bakery'} · Morning Box</strong>
-        <span className="row" style={{ gap: 10 }}>
-          <input className="input" type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} aria-label="Date" style={{ width: 170, minHeight: 44 }} />
-          <button type="button" className="btn-text" onClick={() => save('')}>Sign out</button>
+        <span className="stack" style={{ gap: 2 }}>
+          <span className="eyebrow">{dayTitle(date)}</span>
+          <h1 className="serif ops-title">{current?.[1]}</h1>
         </span>
+        <input className="input" type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} aria-label="Date" style={{ width: 170, minHeight: 44 }} />
       </header>
-      <nav className="ops-tabs no-print" role="tablist">
-        {[['plan', 'Production plan'], ['orders', 'Orders'], ['labels', 'Labels'], ['conditions', 'Availability']].map(([id, label]) => <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} onClick={() => setView(id)}>{label}</button>)}
-      </nav>
       {error && <div className="banner-err no-print" role="alert"><Icon name="alert" size={18} stroke={2} />{error}</div>}
+      {plan && view !== 'labels' && (
+        <div className="no-print">
+          <StaffTiles items={[
+            ['box', 'Orders', plan.packing.length],
+            ['croissant', 'Boxes to make', plan.boxes],
+            ['shieldAlert', 'Special boxes', plan.special || 0, plan.special ? 'warn' : ''],
+            ['check', 'Ready / handed over', `${ready} / ${plan.packing.length}`, plan.packing.length && ready === plan.packing.length ? 'ok' : ''],
+            ['doc', 'Plan', plan.status?.status || (plan.packing.length ? 'To confirm' : '—'), plan.status?.status === 'Confirmed' ? 'ok' : plan.packing.length ? 'warn' : '']
+          ]} />
+        </div>
+      )}
       {!plan ? <p className="help">Loading…</p> : <>
         {view === 'plan' && (
           <ProductionPlan plan={plan} date={date}>
@@ -105,6 +133,7 @@ export default function Bakery() {
         </> : <p className="help">No labels for this date.</p>)}
         {view === 'conditions' && <Availability plan={plan} items={me?.items || []} date={date} busy={busy} act={act} />}
       </>}
+      </div>
     </div>
   );
 }
@@ -140,7 +169,7 @@ function Orders({ plan, date, busy, act, checks, reasons }) {
   const pending = plan.packing.filter(o => (!o.state || o.state === 'Confirmed') && !o.safetyHold && !o.safetyCheck);
   return (
     <section className="stack gap-12">
-      <div className="row"><span className="strong">{plan.packing.length} orders · {plan.boxes} boxes</span>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}><span className="strong">{plan.packing.length} orders · {plan.boxes} boxes</span>
         {pending.length > 0 && <button type="button" className="btn-secondary" style={small} disabled={busy} onClick={() => act('POST', '/plan/start', { date })}>Start preparing all ({pending.length})</button>}</div>
       {plan.packing.map(o => {
         const k = `${o.kind}/${o.id}`;
@@ -149,15 +178,21 @@ function Orders({ plan, date, busy, act, checks, reasons }) {
         const blocked = o.safetyHold || o.safetyCheck;
         const c = count[k] || { boxes: '', special: '' };
         return (
-          <article key={k} className={`card stack gap-8${blocked || o.lines.some(l => l.special.length) ? ' warn' : ''}`} style={{ padding: 16 }}>
-            <div className="row" style={{ flexWrap: 'wrap' }}><b>{o.ref}{o.shared ? ` · your part: ${o.shared}` : ''}</b><span className="xs">Ready by {o.readyBy} · {o.window} · {o.state || 'Not started'}</span></div>
-            {o.safetyHold && <b>SAFETY HOLD — do not prepare until Morning Box confirms.</b>}
-            {!o.safetyHold && o.safetyCheck && <b>ALLERGY CHECK PENDING — Morning Box is confirming the customer’s allergy note. Do not prepare until it is cleared.</b>}
-            {o.lines.map((l, i) => <span key={i}>{l.qty}× {l.box} · {l.size}{l.special.length ? <b> · {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? ` + ${l.addons.join(', ')}` : ''}<br /><small>{l.components.join(', ')}</small></span>)}
-            {o.otherAllergies && !o.lines.some(l => l.special.some(w => w.startsWith('Also avoid'))) && <b>Also avoid: {o.otherAllergies}</b>}
+          <article key={k} className={`staff-card${blocked ? ' risk' : o.lines.some(l => l.special.length) ? ' special' : ''}`}>
+            <div className="staff-card-head">
+              <span className="stack" style={{ gap: 2 }}><b className="staff-ref">{o.ref}{o.shared ? ` · your part: ${o.shared}` : ''}</b><span className="xs">Ready by <b>{o.readyBy}</b> · {o.window}</span></span>
+              <span className={`status ${blocked || ['Delayed', 'Unable to Fulfil'].includes(o.state) ? 'off' : o.state === 'Ready' || gone ? 'ok' : o.state === 'In Preparation' ? 'prep' : 'done'}`}>{o.state || 'Not started'}</span>
+            </div>
+            <Stepper steps={STEPS} current={Math.max(0, STEPS.indexOf(o.state))} bad={['Delayed', 'Unable to Fulfil'].includes(o.state)} />
+            {o.safetyHold && <div className="banner-err" role="alert"><Icon name="shieldAlert" size={18} stroke={2} /><b>SAFETY HOLD — do not prepare until Morning Box confirms.</b></div>}
+            {!o.safetyHold && o.safetyCheck && <div className="banner-err" role="alert"><Icon name="shieldAlert" size={18} stroke={2} /><b>ALLERGY CHECK PENDING — Morning Box is confirming the customer’s allergy note. Do not prepare until it is cleared.</b></div>}
+            <div className="staff-lines">
+              {o.lines.map((l, i) => <span key={i}><b>{l.qty}× {l.box}</b> · {l.size}{l.special.length ? <b className="staff-special"> · {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? ` + ${l.addons.join(', ')}` : ''}<br /><small>{l.components.join(', ')}</small></span>)}
+            </div>
+            {o.otherAllergies && !o.lines.some(l => l.special.some(w => w.startsWith('Also avoid'))) && <b className="staff-special">Also avoid: {o.otherAllergies}</b>}
             {gone && <span className="xs">Handed over — waiting for the courier to confirm pickup.</span>}
             {!gone && (
-              <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
+              <div className="row staff-actions" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
                 {o.state !== 'In Preparation' && o.state !== 'Ready' && <button type="button" className="btn-text" disabled={busy || blocked} onClick={() => act('POST', path, { state: 'In Preparation' })}>In preparation</button>}
                 {o.state !== 'Ready' && <>
                   {/* Final check before Ready (MB-BKY-001 §4). */}
@@ -191,7 +226,7 @@ function Availability({ plan, items, date, busy, act }) {
   const [v, setV] = useState({ kind: CONDITIONS[0], item: '', capacity: '', need: 'glutenFree', note: '' });
   const name = id => items.find(i => i.id === id)?.name || id;
   return (
-    <section className="card stack gap-12" style={{ padding: 18 }}>
+    <section className="staff-card">
       <h2 className="h3">Tell Morning Box about {date}</h2>
       <span className="xs">Report it before 9:00 PM the evening before so orders can go to another bakery.</span>
       {plan.conditions.map(c => <span key={c.id} className="xs">• {c.kind}{c.item ? ` — ${name(c.item)}` : ''}{c.capacity != null ? ` — ${c.capacity} boxes` : ''}{c.need ? ` — ${c.need}` : ''}{c.note ? ` · ${c.note}` : ''}</span>)}

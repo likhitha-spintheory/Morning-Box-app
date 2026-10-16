@@ -4,14 +4,22 @@ import { addDaysIso, dubaiTodayIso } from '../domain/standards.js';
 import { Live, Prep, Labels } from './OpsLive.jsx';
 import { Bakeries, Pricing, Company, Products, Couriers } from './OpsAdmin.jsx';
 import { MenuRules } from './OpsMenu.jsx';
+import { Dashboard } from './OpsDashboard.jsx';
 
 /* Operations & admin console for the Morning Box team: live deliveries, production
    plans, labels, exceptions, support, feedback, reports, closed days, and Admin
    (partner bakeries, prices, company details).
    Protected by the server's OPS_KEY (kept for this browser tab only). */
 const KEY = 'morningbox.ops';
-const TABS = [['days', 'Live'], ['prep', 'Production'], ['labels', 'Labels'], ['exceptions', 'Exceptions'], ['support', 'Support'], ['feedback', 'Feedback'], ['report', 'Reports'], ['closed', 'Closed days'],
-  ['bakeries', 'Admin · Bakeries'], ['menu', 'Admin · Menu rules'], ['couriers', 'Admin · Couriers'], ['products', 'Admin · Products & allergens'], ['pricing', 'Admin · Prices'], ['company', 'Admin · Company']];
+/* Sections, grouped for the side navigation: [id, label, icon]. */
+const GROUPS = [
+  ['Overview', [['home', 'Dashboard', 'home']]],
+  ['Today', [['days', 'Live', 'clock'], ['prep', 'Production', 'bread'], ['labels', 'Labels', 'doc']]],
+  ['Service', [['exceptions', 'Exceptions', 'alert'], ['support', 'Support', 'help'], ['feedback', 'Feedback', 'heart']]],
+  ['Insights', [['report', 'Reports', 'bookmark'], ['closed', 'Closed days', 'cal']]],
+  ['Admin', [['bakeries', 'Bakeries', 'building'], ['menu', 'Menu rules', 'bowl'], ['couriers', 'Couriers', 'truck'], ['products', 'Products & allergens', 'shieldAlert'], ['pricing', 'Prices', 'card'], ['company', 'Company', 'brief']]]
+];
+const TABS = GROUPS.flatMap(([group, items]) => items.map(([id, label, icon]) => ({ id, label, icon, group })));
 
 function useOps() {
   const [key, setKey] = useState(() => { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } });
@@ -28,7 +36,7 @@ function useOps() {
 export default function Ops() {
   const { key, save, call } = useOps();
   const [draft, setDraft] = useState('');
-  const [tab, setTab] = useState('days');
+  const [tab, setTab] = useState('home');
   const [date, setDate] = useState(() => addDaysIso(dubaiTodayIso(), 1));
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -38,7 +46,7 @@ export default function Ops() {
   const load = useCallback(async () => {
     if (!key) return;
     setError(''); setData(null);
-    const path = { days: `/dashboard?date=${date}`, prep: `/prep?date=${date}`, labels: `/labels?date=${date}`, support: '/support', feedback: '/feedback', exceptions: '/exceptions', closed: '/closed-dates',
+    const path = { home: `/dashboard?date=${date}`, days: `/dashboard?date=${date}`, prep: `/prep?date=${date}`, labels: `/labels?date=${date}`, support: '/support', feedback: '/feedback', exceptions: '/exceptions', closed: '/closed-dates',
       report: `/report?from=${range.from}&to=${range.to}`, bakeries: '/admin/bakeries', menu: '/admin/menu', couriers: '/admin/couriers', products: '/admin/products', pricing: '/admin/pricing', company: '/admin/company' }[tab];
     try { const value = await call('GET', path); setData({ key: `${tab}|${date}|${range.from}|${range.to}`, value }); } catch (e) { setError(e.message); if (e.status === 401) save(''); }
   }, [key, tab, date, range, call]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -65,41 +73,64 @@ export default function Ops() {
     );
   }
 
-  const dated = ['days', 'prep', 'labels'].includes(tab);
+  const dated = ['home', 'days', 'prep', 'labels'].includes(tab);
   /* Only show data loaded for the current tab and date. */
   const view = data?.key === `${tab}|${date}|${range.from}|${range.to}` ? data.value : null;
+  const current = TABS.find(t => t.id === tab);
   return (
-    <div className="ops">
-      <header className="ops-head no-print">
-        <strong className="serif" style={{ fontSize: 24 }}>Morning Box · Operations</strong>
-        <span className="row" style={{ gap: 10 }}>
-          {dated && <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Date" style={{ width: 170, minHeight: 44 }} />}
-          {tab === 'report' && <>
-            <input className="input" type="date" value={range.from} max={range.to} onChange={e => e.target.value && setRange(r => ({ ...r, from: e.target.value }))} aria-label="From" style={{ width: 170, minHeight: 44 }} />
-            <input className="input" type="date" value={range.to} min={range.from} onChange={e => e.target.value && setRange(r => ({ ...r, to: e.target.value }))} aria-label="To" style={{ width: 170, minHeight: 44 }} />
-          </>}
-          <button type="button" className="btn-text" onClick={() => save('')}>Sign out</button>
-        </span>
-      </header>
-      <nav className="ops-tabs no-print" role="tablist">
-        {TABS.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
-      </nav>
-      {error && <div className="banner-err no-print" role="alert"><Icon name="alert" size={18} stroke={2} />{error}</div>}
-      {!view && !error && <p className="help">Loading…</p>}
-      {view && meta && tab === 'days' && <Live data={view} meta={meta} busy={busy} act={act} call={call} />}
-      {view && tab === 'prep' && <Prep data={view} />}
-      {view && tab === 'labels' && <Labels data={view} />}
-      {view && tab === 'support' && <Support items={view} busy={busy} act={act} />}
-      {view && tab === 'feedback' && <Feedback data={view} />}
-      {view && tab === 'exceptions' && <Exceptions items={view} busy={busy} act={act} call={call} />}
-      {view && tab === 'closed' && <Closed items={view} busy={busy} act={act} />}
-      {view && tab === 'report' && <Report data={view} />}
-      {view && tab === 'bakeries' && <Bakeries items={view} call={call} act={act} busy={busy} />}
-      {view && tab === 'menu' && <MenuRules data={view} act={act} busy={busy} call={call} />}
-      {view && tab === 'couriers' && <Couriers call={call} />}
-      {view && tab === 'products' && <Products data={view} />}
-      {view && tab === 'pricing' && <Pricing data={view} act={act} busy={busy} />}
-      {view && tab === 'company' && <Company data={view} act={act} busy={busy} call={call} />}
+    <div className="ops-shell">
+      <aside className="ops-side no-print">
+        <div className="ops-brand">
+          <span className="ops-brand-mark"><Icon name="sunny" size={22} stroke={1.6} /></span>
+          <span className="stack" style={{ gap: 2 }}><strong className="serif" style={{ fontSize: 20 }}>Morning Box</strong><span className="ops-brand-sub">Operations</span></span>
+        </div>
+        <nav className="ops-nav" aria-label="Console sections">
+          {GROUPS.map(([group, items]) => (
+            <div key={group} className="ops-nav-group">
+              <span className="ops-nav-label">{group}</span>
+              {items.map(([id, label, icon]) => (
+                <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>
+                  <Icon name={icon} size={18} stroke={1.6} /><span>{label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <button type="button" className="ops-signout" onClick={() => save('')}><Icon name="logout" size={18} stroke={1.6} /><span>Sign out</span></button>
+      </aside>
+
+      <div className="ops">
+        <header className="ops-head no-print">
+          <span className="stack" style={{ gap: 2 }}>
+            <span className="eyebrow">{current?.group}</span>
+            <h1 className="serif ops-title">{current?.label}</h1>
+          </span>
+          <span className="row" style={{ gap: 10 }}>
+            {dated && <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Date" style={{ width: 170, minHeight: 44 }} />}
+            {tab === 'report' && <>
+              <input className="input" type="date" value={range.from} max={range.to} onChange={e => e.target.value && setRange(r => ({ ...r, from: e.target.value }))} aria-label="From" style={{ width: 170, minHeight: 44 }} />
+              <input className="input" type="date" value={range.to} min={range.from} onChange={e => e.target.value && setRange(r => ({ ...r, to: e.target.value }))} aria-label="To" style={{ width: 170, minHeight: 44 }} />
+            </>}
+          </span>
+        </header>
+        {error && <div className="banner-err no-print" role="alert"><Icon name="alert" size={18} stroke={2} />{error}</div>}
+        {!view && !error && <p className="help">Loading…</p>}
+        {view && tab === 'home' && <Dashboard data={view} call={call} open={setTab} />}
+        {view && meta && tab === 'days' && <Live data={view} meta={meta} busy={busy} act={act} call={call} />}
+        {view && tab === 'prep' && <Prep data={view} />}
+        {view && tab === 'labels' && <Labels data={view} />}
+        {view && tab === 'support' && <Support items={view} busy={busy} act={act} />}
+        {view && tab === 'feedback' && <Feedback data={view} />}
+        {view && tab === 'exceptions' && <Exceptions items={view} busy={busy} act={act} call={call} />}
+        {view && tab === 'closed' && <Closed items={view} busy={busy} act={act} />}
+        {view && tab === 'report' && <Report data={view} />}
+        {view && tab === 'bakeries' && <Bakeries items={view} call={call} act={act} busy={busy} />}
+        {view && tab === 'menu' && <MenuRules data={view} act={act} busy={busy} call={call} />}
+        {view && tab === 'couriers' && <Couriers call={call} />}
+        {view && tab === 'products' && <Products data={view} />}
+        {view && tab === 'pricing' && <Pricing data={view} act={act} busy={busy} />}
+        {view && tab === 'company' && <Company data={view} act={act} busy={busy} call={call} />}
+      </div>
     </div>
   );
 }
