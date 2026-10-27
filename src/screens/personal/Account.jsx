@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { get, post, put, patch, del, setToken } from '../../api.js';
+import { get, post, put, patch, del, setToken, goToPayment } from '../../api.js';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Screen, TopBar, Footer, Icon, Logo, TabBar, Switch, Qty, Money, Chip, PhoneField, InfoTip, PhotoPicker, AreaField, Ring } from '../../components/ui.jsx';
-import { download, shareText } from '../../api.js';
+import { download, shareText, ownerOf } from '../../api.js';
 import { useUnread } from '../Notifications.jsx';
 import { LEGAL_PAGES } from '../Legal.jsx';
 import { useStore } from '../../state/store.jsx';
@@ -559,7 +559,11 @@ export function EditMorning() {
   };
   const run = async fn => {
     setBusy(true); setError('');
-    try { const o = await fn(); set(s => replaceOrder(s, o)); nav(`/orders/${id}/${date}`); }
+    try {
+      const o = await fn();
+      if (o.checkout) return goToPayment(o.checkout);   // the change costs more: pay the difference first
+      set(s => replaceOrder(s, o)); nav(`/orders/${id}/${date}`);
+    }
     catch (e) { setError(e.message); setBusy(false); }
   };
   /* Only what changed is sent: a window-only change keeps the breakfast exactly as ordered. */
@@ -829,9 +833,10 @@ export function Me() {
   const [name, setName] = useState(state.user?.firstName || '');
   const [email, setEmail] = useState(state.user?.email || '');
   const [mobileStep, setMobileStep] = useState(null);   // null | 'number' | 'code'
+  const [changing, setChanging] = useState('mobile');     // which sign-in detail: 'mobile' | 'email'
   const [newMobile, setNewMobile] = useState('');
+  const [newEmail, setNewEmail] = useState('');
   const [code, setCode] = useState('');
-  const [devCode, setDevCode] = useState('');
   const [confirm, setConfirm] = useState(null);          // null | 'delete'
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -860,14 +865,22 @@ export function Me() {
     if (email.trim() && !emailValid(email)) { setError('Enter a valid email, e.g. name@company.com — or leave it empty.'); return; }
     run(async () => { const r = await put('/me/settings', { email: email.trim() }); set(s => { s.user = r.user; }); setEditEmail(false); });
   };
+  const startChange = kind => { setChanging(kind); setMobileStep('number'); setError(''); };
   const sendMobileCode = () => {
-    if (!/^5\d{8}$/.test(digits)) { setError('Enter a UAE mobile number, e.g. 50 123 4567.'); return; }
-    run(async () => { const r = await post('/auth/otp', { mobile: digits }); setDevCode(r.devCode || ''); setCode(''); setMobileStep('code'); });
+    if (changing === 'email' ? !emailValid(newEmail) : !/^5\d{8}$/.test(digits)) {
+      setError(changing === 'email' ? 'Enter a valid email, e.g. name@company.com.' : 'Enter a UAE mobile number, e.g. 50 123 4567.'); return;
+    }
+    run(async () => {
+      await post('/auth/otp', changing === 'email' ? { email: newEmail.trim() } : { mobile: digits });
+      setCode(''); setMobileStep('code');
+    });
   };
   const verifyMobile = () => run(async () => {
-    const r = await post('/auth/change-mobile', { mobile: digits, code });
-    set(s => { s.user = r.user; s.owner = r.user.mobile; });
-    setMobileStep(null); setNewMobile(''); setDevCode('');
+    const r = changing === 'email'
+      ? await post('/auth/change-email', { email: newEmail.trim(), code })
+      : await post('/auth/change-mobile', { mobile: digits, code });
+    set(s => { s.user = r.user; s.owner = ownerOf(r.user); });
+    setMobileStep(null); setNewMobile(''); setNewEmail('');
   });
   const signOut = async all => {
     await post(all ? '/auth/logout-all' : '/auth/logout').catch(() => {});
@@ -884,9 +897,15 @@ export function Me() {
       <main className="screen-main" style={{ paddingTop: 4, gap: 22 }}>
         <div className="row" style={{ justifyContent: 'flex-start', gap: 16 }}>
           <span style={{ width: 60, height: 60, borderRadius: 999, background: 'var(--gold-soft)', color: 'var(--espresso)', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '400 28px/1 var(--serif)' }}>{state.user.firstName.charAt(0).toUpperCase()}</span>
-          <span className="stack" style={{ flex: 1 }}><button type="button" className="serif" aria-label="Edit name" onClick={() => { setEditName(true); setName(state.user.firstName); setError(''); }} style={{ fontSize: 32, lineHeight: 1.1, background: 'none', border: 0, padding: 0, textAlign: 'left', color: 'inherit', cursor: 'pointer' }}>{state.user.firstName} <Icon name="edit" size={18} stroke={1.6} color="var(--text-3)" /></button><span className="help" style={{ fontSize: 15 }}>{state.user.mobile}</span></span>
-          {!mobileStep && <button type="button" className="link" onClick={() => { setMobileStep('number'); setError(''); }}>Change number</button>}
+          <span className="stack" style={{ flex: 1 }}><button type="button" className="serif" aria-label="Edit name" onClick={() => { setEditName(true); setName(state.user.firstName); setError(''); }} style={{ fontSize: 32, lineHeight: 1.1, background: 'none', border: 0, padding: 0, textAlign: 'left', color: 'inherit', cursor: 'pointer' }}>{state.user.firstName} <Icon name="edit" size={18} stroke={1.6} color="var(--text-3)" /></button>{state.user.mobile && <span className="help" style={{ fontSize: 15 }}>{state.user.mobile}</span>}</span>
+          {!mobileStep && <button type="button" className="link" onClick={() => startChange('mobile')}>{state.user.mobile ? 'Change number' : 'Add number'}</button>}
         </div>
+        {!mobileStep && (
+          <div className="row" style={{ justifyContent: 'flex-start', gap: 8 }}>
+            <span className="help" style={{ fontSize: 15 }}>Sign-in email: {state.user.loginEmail || 'none'}</span>
+            <button type="button" className="link" style={{ padding: 0 }} onClick={() => startChange('email')}>{state.user.loginEmail ? 'Change' : 'Add'}</button>
+          </div>
+        )}
         {editName && (
           <section className="card stack gap-12" style={{ padding: 20 }} aria-label="Edit name">
             <div className="field"><label htmlFor="me-n">First name</label>
@@ -896,16 +915,18 @@ export function Me() {
           </section>
         )}
         {mobileStep && (
-          <section className="card stack gap-12" style={{ padding: 20 }} aria-label="Change mobile number">
-            {mobileStep === 'number' ? (
-              <div className="field"><label htmlFor="nm">New mobile number</label>
-                <PhoneField id="nm" value={newMobile} onChange={setNewMobile} /></div>
+          <section className="card stack gap-12" style={{ padding: 20 }} aria-label={changing === 'email' ? 'Change sign-in email' : 'Change mobile number'}>
+            {mobileStep === 'number' ? (changing === 'email' ? (
+              <div className="field"><label htmlFor="ne">Sign-in email</label>
+                <input id="ne" className="input" type="email" inputMode="email" autoComplete="email" placeholder="name@company.com" value={newEmail} onChange={e => setNewEmail(e.target.value)} /></div>
             ) : (
-              <div className="field"><label htmlFor="nm-c">Code sent to +971 {digits}</label>
+              <div className="field"><label htmlFor="nm">{state.user.mobile ? 'New mobile number' : 'Mobile number'}</label>
+                <PhoneField id="nm" value={newMobile} onChange={setNewMobile} /></div>
+            )) : (
+              <div className="field"><label htmlFor="nm-c">Code sent to {changing === 'email' ? newEmail.trim() : `+971 ${digits}`}</label>
                 <input id="nm-c" className="input" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code}
                   onPaste={e => { const t = pastedCode(e); if (t) { e.preventDefault(); setCode(t); } }}
-                  onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
-                {devCode && <span className="demo-note">Development build — your code is <b>{devCode}</b>.</span>}</div>
+                  onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} /></div>
             )}
             <div className="grid-2">
               <button type="button" className="btn-secondary" onClick={() => { setMobileStep(null); setError(''); }}>Cancel</button>

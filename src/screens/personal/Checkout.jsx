@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { get, post, put, applySession, setToken, resetPersonal, newIdempotencyKey, download, track } from '../../api.js';
+import { get, post, put, applySession, ownerOf, setToken, resetPersonal, newIdempotencyKey, download, track, goToPayment } from '../../api.js';
 import { Screen, TopBar, Footer, Icon, Chip, Switch, Option, Logo, PhoneField, Go, IconButton, InfoTip, AreaField } from '../../components/ui.jsx';
 import { useStore } from '../../state/store.jsx';
 import {
@@ -20,6 +20,9 @@ export function Agreement({ className = 'help center', style }) {
   return <p className={className} style={{ margin: 0, fontSize: 15, ...style }}>By continuing you agree to the {a(TERMS_URL, '/legal/terms', 'Terms')} &amp; {a(PRIVACY_URL, '/legal/privacy', 'Privacy Policy')}.</p>;
 }
 /** Fill all six code boxes from a pasted or auto-filled code. */
+/** Digits just entered in a code box: what was typed, pasted or autofilled (`data`), never what the box already held
+    — otherwise a digit typed into a filled box, or a code pasted after one, is glued to the old digit. */
+export const enteredDigits = e => (e.nativeEvent?.data ?? e.target.value).replace(/\D/g, '');
 export const pastedCode = e => { const t = (e.clipboardData?.getData('text') || '').replace(/\D/g, ''); return t.length > 1 ? t.slice(0, 6) : ''; };
 
 const SHOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_DEMO === '1';
@@ -33,20 +36,26 @@ export function SignIn() {
   const { state, set } = useStore();
   const nav = useNavigate();
   const [params] = useSearchParams();
-  const next = params.get('next') || '/today';
+  /* Only in-app paths: a crafted ?next= (//evil.com, /\evil.com, https://…) falls back to Today. */
+  const asked = params.get('next') || '';
+  const next = /^\/(?![/\\])[^\s\\]*$/.test(asked) ? asked : '/today';
   const [name, setName] = useState(state.user?.firstName || '');
   const [mobile, setMobile] = useState(state.user?.mobile?.replace(/^\+971\s?/, '') || '');
+  const [byEmail, setByEmail] = useState(!state.user?.mobile && !!state.user?.loginEmail);
+  const [email, setEmail] = useState(state.user?.loginEmail || '');
   const [sent, setSent] = useState(false);
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [devCode, setDevCode] = useState('');
   const [wait, setWait] = useState(0);
   const [needName, setNeedName] = useState(false);
   const refs = useRef([]);
   const digits = mobile.replace(/\D/g, '').replace(/^(00)?971/, '').replace(/^0/, '');
   const mobileOk = /^5\d{8}$/.test(digits);
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
+  /* Sign in with a mobile number (code on WhatsApp) or an email address (code by email). */
+  const target = byEmail ? { email: email.trim() } : { mobile: digits };
   const nameOk = name.trim().length > 0;
   const planned = state.plan.dates.filter(d => state.plan.days[d]?.saved);
   const total = planned.reduce((t, d) => t + dayPrice(state.plan.days[d].cfg, state.profile).total, 0);
@@ -70,11 +79,11 @@ export function SignIn() {
   };
   const send = async () => {
     setTouched(true); setError('');
-    if (!mobileOk) return;
+    if (byEmail ? !emailOk : !mobileOk) return;
     setBusy(true);
     try {
-      const r = await post('/auth/otp', { mobile: digits });
-      setDevCode(r.devCode || ''); setSent(true); setWait(30); setCode(['', '', '', '', '', '']);
+      await post('/auth/otp', target);
+      setSent(true); setWait(30); setCode(['', '', '', '', '', '']);
       setTimeout(() => refs.current[0]?.focus(), 50);
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   };
@@ -82,9 +91,9 @@ export function SignIn() {
     if (needName && !nameOk) { setTouched(true); setError('Enter your first name to create your account.'); return; }
     setBusy(true); setError('');
     try {
-      const r = await post('/auth/verify', { mobile: digits, code: code.join(''), firstName: nameOk ? name.trim() : undefined });
+      const r = await post('/auth/verify', { ...target, code: code.join(''), firstName: nameOk ? name.trim() : undefined });
       setToken(null);
-      const switching = !!state.owner && state.owner !== r.user.mobile;
+      const switching = !!state.owner && state.owner !== ownerOf(r.user);
       /* MB-FLW-001 §6–7: the plan built before sign-in is kept, with the profile it was
          built with. Safety never weakens: allergies and dietary needs already saved on the
          account are added to it, and any planned morning that no longer fits is re-checked. */
@@ -134,12 +143,12 @@ export function SignIn() {
           <div className="stack gap-8">
             <span className="eyebrow">Verify</span>
             <h1 className="h-display" style={{ fontSize: 34 }}>Enter the code</h1>
-            <p className="help" style={{ fontSize: 17 }}>Sent to {prettyMobile(digits)} · <button type="button" className="link" style={{ padding: 0, fontWeight: 400, color: 'var(--text-3)' }} onClick={() => setSent(false)}>Change</button></p>
+            <p className="help" style={{ fontSize: 17 }}>Sent {byEmail ? 'to' : 'on WhatsApp to'} {byEmail ? email.trim() : prettyMobile(digits)} · <button type="button" className="link" style={{ padding: 0, fontWeight: 400, color: 'var(--text-3)' }} onClick={() => setSent(false)}>Change</button></p>
           </div>
           <div className="otp" role="group" aria-label="6-digit code">
             {code.map((c, i) => (
-              <input key={i} ref={el => (refs.current[i] = el)} inputMode="numeric" autoComplete={i === 0 ? 'one-time-code' : 'off'} maxLength={i === 0 ? 6 : 1}
-                aria-label={`Digit ${i + 1}`} value={c} onChange={e => typeDigit(i, e.target.value)} onPaste={onPaste}
+              <input key={i} ref={el => (refs.current[i] = el)} inputMode="numeric" autoComplete={i === 0 ? 'one-time-code' : 'off'}
+                aria-label={`Digit ${i + 1}`} value={c} onChange={e => typeDigit(i, enteredDigits(e))} onPaste={onPaste}
                 onKeyDown={e => { if (e.key === 'Backspace' && !c && i > 0) refs.current[i - 1]?.focus(); }} />
             ))}
           </div>
@@ -155,7 +164,7 @@ export function SignIn() {
               <input id="fn2" className={`input${touched && !nameOk ? ' invalid' : ''}`} value={name} autoComplete="given-name" onChange={e => setName(e.target.value)} />
             </div>
           )}
-          {devCode && <span className="demo-note">Development build — your code is <b>{devCode}</b>. In production it arrives by SMS.</span>}
+          {byEmail && <p className="help" style={{ fontSize: 15 }}>Can’t find it? Check your spam or junk folder.</p>}
           <ErrorBanner>{error}</ErrorBanner>
         </main>
         <Footer><button className="btn" disabled={busy || code.join('').length < 6} onClick={verify}>{busy ? 'Checking…' : 'Verify & continue'}</button></Footer>
@@ -176,13 +185,27 @@ export function SignIn() {
               : 'Sign in to see your mornings.'}
           </p>
         </div>
-        <div className="field">
-          <label htmlFor="mb">Mobile number</label>
-          <PhoneField id="mb" value={mobile} onChange={setMobile} invalid={touched && !mobileOk} describedBy={touched && !mobileOk ? 'mb-h' : undefined} />
-          {touched && !mobileOk
-            ? <span id="mb-h" className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Enter a UAE mobile number, e.g. 50 123 4567</span>
-            : null}
-        </div>
+        {byEmail ? (
+          <div className="field">
+            <label htmlFor="em">Email</label>
+            <input id="em" className={`input${touched && !emailOk ? ' invalid' : ''}`} type="email" inputMode="email" autoComplete="email" value={email}
+              placeholder="name@company.com" onChange={e => setEmail(e.target.value)} aria-describedby={touched && !emailOk ? 'em-h' : undefined} />
+            {touched && !emailOk
+              ? <span id="em-h" className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Enter a valid email, e.g. name@company.com</span>
+              : null}
+          </div>
+        ) : (
+          <div className="field">
+            <label htmlFor="mb">Mobile number</label>
+            <PhoneField id="mb" value={mobile} onChange={setMobile} invalid={touched && !mobileOk} describedBy={touched && !mobileOk ? 'mb-h' : undefined} />
+            {touched && !mobileOk
+              ? <span id="mb-h" className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Enter a UAE mobile number, e.g. 50 123 4567</span>
+              : null}
+          </div>
+        )}
+        <button type="button" className="link" style={{ alignSelf: 'flex-start', padding: 0 }} onClick={() => { setByEmail(v => !v); setTouched(false); setError(''); }}>
+          {byEmail ? 'Use my mobile number instead' : 'Use my email instead'}
+        </button>
         {planned.length > 0 && (
           <div className="panel row" style={{ flexDirection: 'row', padding: '16px 20px', borderRadius: 999 }}>
             <span style={{ fontSize: 16 }}><b>Your plan:</b> {planned.length} morning{planned.length > 1 ? 's' : ''} · AED {total}</span>
@@ -232,6 +255,10 @@ export function Delivery() {
   const windowFor = iso => (sameForAll ? dl.window : dl.perDay[iso]?.window);
   const addrOk = (sameForAll ? [a] : dates.map(addrFor)).every(x => x.building.trim() && x.unit.trim() && areaFor(x.area));
   const windowsOk = dates.every(iso => windowFor(iso) && !isFull(iso, windowFor(iso)));
+  /* Accounts made by email have no mobile: the delivery needs one to reach the customer (DLV §6). */
+  const needsMobile = !state.user?.mobile;
+  const contactDigits = (dl.contactMobile || '').replace(/\D/g, '').replace(/^(00)?971/, '').replace(/^0/, '');
+  const mobileOk = !needsMobile || /^5\d{8}$/.test(contactDigits);
 
   const WindowCards = ({ iso }) => (
     <div className="stack gap-12" role="radiogroup" aria-label={`Delivery window${iso ? ` for ${dateInfo(iso).label}` : ''}`}>
@@ -301,6 +328,16 @@ export function Delivery() {
           </section>
         )}
 
+        {answered && needsMobile && (
+          <div className="field">
+            <label htmlFor="cm">Mobile for the delivery</label>
+            <PhoneField id="cm" value={dl.contactMobile || ''} onChange={v => upd(d => { d.contactMobile = v; })} invalid={touched && !mobileOk} describedBy={touched && !mobileOk ? 'cm-h' : undefined} />
+            {touched && !mobileOk
+              ? <span id="cm-h" className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Enter a UAE mobile number so we can reach you, e.g. 50 123 4567</span>
+              : <span className="help" style={{ fontSize: 15 }}>Only used if we need to reach you about a delivery.</span>}
+          </div>
+        )}
+
         {answered && !sameForAll && dates.map(iso => {
           const x = addrFor(iso);
           return (
@@ -335,9 +372,17 @@ export function Delivery() {
         {touched && !windowsOk && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Choose an available delivery window{sameForAll ? '' : ' for each morning'}</span>}
         </>}
       </main>
-      <Footer><button className="btn" onClick={() => { setTouched(true); if (!answered) return; if (addrOk && windowsOk) nav('/checkout/review'); else if (!addrOk) setEditing(true); }}><Go>Review my order</Go></button></Footer>
+      <Footer><button className="btn" onClick={() => { setTouched(true); if (!answered) return; if (addrOk && windowsOk && mobileOk) nav('/checkout/review'); else if (!addrOk) setEditing(true); }}><Go>Review my order</Go></button></Footer>
     </Screen>
   );
+}
+
+/** Store updates once a personal order is paid (here, or on the payment return page). */
+export function afterPersonalOrder(s, order) {
+  s.orders = [order, ...s.orders.filter(o => o.id !== order.id)];
+  if (order.email && s.user) s.user.email = order.email;
+  s.plan = { dates: [], days: {} };
+  s.onboarding = false;
 }
 
 /* ---------- Review your mornings (style-1 P17) ---------- */
@@ -383,17 +428,14 @@ export function ReviewPay() {
       const order = await post('/orders', {
         idempotencyKey: idemKey, expectedTotal: payTotal,
         method: method === 'apple' ? 'apple' : 'card', email: email.trim(), address: addrOf(dates[0]),
+        ...(!state.user?.mobile ? { contactMobile: dl.contactMobile || '' } : {}),
         days: dates.map(iso => {
           const c = plan.days[iso].cfg;
           return { date: iso, context: c.context, recipeId: c.recipeId, components: c.components, size: c.size, addons: c.addons, danishFlavour: c.danishFlavour, window: win(iso), address: addrOf(iso) };
         })
       });
-      set(s => {
-        s.orders = [order, ...s.orders.filter(o => o.id !== order.id)];
-        if (email.trim()) s.user.email = email.trim();
-        s.plan = { dates: [], days: {} };
-        s.onboarding = false;
-      });
+      if (order.checkout) return goToPayment(order.checkout);   // card payment page; comes back to #/pay/<id>
+      set(s => afterPersonalOrder(s, order));
       nav(`/orders/${order.id}/confirmed`, { replace: true });
     } catch (e) {
       if (e.code === 'price_changed' && typeof e.details?.total === 'number') setServerTotal(e.details.total);

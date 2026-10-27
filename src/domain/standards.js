@@ -105,7 +105,7 @@ export const BAKERY_STATES   = ['Assigned', 'Confirmed', 'In Preparation', 'Read
 export const DELIVERY_STATES = ['Picked Up', 'Out for Delivery', 'Delivered'];
 export const EXCEPTION_KINDS = [
   'Product/Ingredient Unavailable', 'Capacity Issue', 'Dietary/Allergy Issue',
-  'Equipment/Operational Issue', 'Courier Delay', 'Location Unavailable', 'Other'
+  'Equipment/Operational Issue', 'Delivery Delay', 'Location Unavailable', 'Other'
 ];
 
 /* ---------- MB-REC-001 §14 · Feedback ---------- */

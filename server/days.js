@@ -24,7 +24,7 @@ const builtName = (id, variants = {}, size = 'regular', flavour = null) =>
   `${componentName(id)}${variantLabel(id, variants[id]) ? ` (${variantLabel(id, variants[id]).toLowerCase()})` : ''}${id === 'fruitDanish' && flavour ? ` — ${flavour}` : ''} · ${componentPortion(id, size === 'standard' ? 'regular' : size)}`;
 
 /* Preparation standard per item for the bakery sheet (MB-PRO-001 §1, §4): the item's approved note,
-   and bread is served untoasted by default. Not sent to courier or customer views. */
+   and bread is served untoasted by default. Not sent to customer views. */
 const prepNote = id => {
   const k = COMPONENTS[id];
   if (!k) return '';
@@ -116,8 +116,6 @@ export function health(r, now = new Date()) {
   /* Attention: safety hold, no bakery, a delay or at-risk warning, an unconfirmed plan after cutoff, or not ready by ready-by. */
   const unconfirmed = now >= cutoffFor(r.date) && rowBakeries(r).some(b => db.prepare('SELECT status FROM bakery_plans WHERE bakery_id = ? AND date = ?').get(b, r.date)?.status !== 'Confirmed');
   const attention = r.safetyHold || r.safetyCheck || !rowBakeries(r).length || r.bakeryState === 'Delayed' || r.atRisk || (unconfirmed && !r.bakeryState?.match(/Ready|Handed/))
-    || (now > readyBy(r.date, r.window, rowBakeries(r)[0]) && !['Ready', 'Handed Over'].includes(r.bakeryState) && !r.deliveryState)
-    /* OPS §6: courier assignment is planned before food becomes Ready — after the cutoff, an order without a route needs attention. */
-    || (now >= cutoffFor(r.date) && !r.routeId && r.stage < 2);
+    || (now > readyBy(r.date, r.window, rowBakeries(r)[0]) && !['Ready', 'Handed Over'].includes(r.bakeryState) && !r.deliveryState);
   return attention ? 'Attention Required' : 'On Track';
 }

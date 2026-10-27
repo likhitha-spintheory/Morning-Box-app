@@ -4,8 +4,8 @@ import {
   Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch, InfoTip, AreaField, PhotoPicker
 } from '../../components/ui.jsx';
 import { useStore, emptyBusiness } from '../../state/store.jsx';
-import { get, post, patch, del, download, applySession, setToken, resetPersonal, newIdempotencyKey, track } from '../../api.js';
-import { pastedCode, Agreement } from '../personal/Checkout.jsx';
+import { get, post, patch, del, download, applySession, ownerOf, setToken, resetPersonal, newIdempotencyKey, track, goToPayment } from '../../api.js';
+import { pastedCode, enteredDigits, Agreement } from '../personal/Checkout.jsx';
 import { useConfig, closedOn } from '../../state/config.js';
 
 const SHOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_DEMO === '1';
@@ -209,8 +209,16 @@ const ApiErr = ({ error }) => (error
   ? <div className="banner-err" role="alert"><Icon name="alert" size={18} stroke={2.2} style={{ flex: 'none' }} /><span>{error}</span></div>
   : null);
 
+/** Store updates once a business order is paid (here, or on the payment return page): the draft is
+    cleared, keeping the company and delivery details for next time. */
+export function afterBusinessOrder(s, order) {
+  const dl = s.business.delivery;
+  putOrder(s, order);
+  s.business = { ...emptyBusiness(), delivery: { ...emptyBusiness().delivery, company: dl.company.trim(), building: dl.building.trim(), office: dl.office.trim(), area: areaFor(dl.area), contact: dl.contact.trim(), mobile: dl.mobile } };
+}
+
 /** Replace an order by id, or add it to the top. */
-function putOrder(s, order) {
+export function putOrder(s, order) {
   const i = s.businessOrders.findIndex(o => o.id === order.id);
   if (i >= 0) s.businessOrders[i] = order; else s.businessOrders.unshift(order);
 }
@@ -915,7 +923,6 @@ export function BizAccount() {
   const [company, setCompany] = useState(state.businessUser?.company || b.delivery.company || '');
   const [email, setEmail] = useState(state.businessUser?.email || state.user?.email || '');
   const [sent, setSent] = useState(false);
-  const [devCode, setDevCode] = useState('');
   const [needName, setNeedName] = useState(false);
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [touched, setTouched] = useState(false);
@@ -964,8 +971,7 @@ export function BizAccount() {
     setTouched(true);
     if (!mobileOk) return;
     run(async () => {
-      const res = await post('/auth/otp', { mobile: digits });
-      setDevCode(res.devCode || '');
+      await post('/auth/otp', { mobile: digits });
       setSent(true); setWait(30); setCode(['', '', '', '', '', '']);
       setTimeout(() => refs.current[0]?.focus(), 50);
     });
@@ -979,7 +985,7 @@ export function BizAccount() {
         const res = await post('/auth/verify', { mobile: digits, code: code.join(''), firstName: nameOk ? name.trim() : undefined });
         setToken(null);
         /* A different customer signing in on this device: drop the previous customer's data (the business draft stays). */
-        set(s => { if (s.owner && s.owner !== res.user.mobile) resetPersonal(s); applySession(s, res); });
+        set(s => { if (s.owner && s.owner !== ownerOf(res.user)) resetPersonal(s); applySession(s, res); });
         await saveAccount();
       } catch (e) {
         if (e.code === 'name_required') { setNeedName(true); setError('New to Morning Box? Enter your first name to create your account.'); }
@@ -1008,7 +1014,9 @@ export function BizAccount() {
         {signedIn ? (
           <section className="card list" aria-label="Signed in as">
             <div className="sr" style={{ padding: '12px 0' }}><span className="sm">First name</span><span className="strong">{state.user?.firstName}</span></div>
-            <div className="sr" style={{ padding: '12px 0', borderTop: '1px solid var(--line-soft)' }}><span className="sm">Mobile</span><span className="strong">{state.user?.mobile}</span></div>
+            <div className="sr" style={{ padding: '12px 0', borderTop: '1px solid var(--line-soft)' }}>{state.user?.mobile
+              ? <><span className="sm">Mobile</span><span className="strong">{state.user.mobile}</span></>
+              : <><span className="sm">Email</span><span className="strong">{state.user?.loginEmail}</span></>}</div>
           </section>
         ) : (
           <>
@@ -1025,12 +1033,12 @@ export function BizAccount() {
               <div className="stack gap-10">
                 <div className="row">
                   <span className="label">Enter the 6-digit code</span>
-                  <button type="button" className="link" disabled={busy} onClick={() => { setSent(false); setDevCode(''); setError(''); setTouched(false); setCode(['', '', '', '', '', '']); }}>Change number</button>
+                  <button type="button" className="link" disabled={busy} onClick={() => { setSent(false); setError(''); setTouched(false); setCode(['', '', '', '', '', '']); }}>Change number</button>
                 </div>
                 <div className="otp">
                   {code.map((c, i) => (
-                    <input key={i} ref={el => (refs.current[i] = el)} inputMode="numeric" maxLength={i === 0 ? 6 : 1} aria-label={`Digit ${i + 1}`}
-                      autoComplete={i === 0 ? 'one-time-code' : 'off'} value={c} onChange={e => typeDigit(i, e.target.value)} onPaste={onPaste}
+                    <input key={i} ref={el => (refs.current[i] = el)} inputMode="numeric" aria-label={`Digit ${i + 1}`}
+                      autoComplete={i === 0 ? 'one-time-code' : 'off'} value={c} onChange={e => typeDigit(i, enteredDigits(e))} onPaste={onPaste}
                       onKeyDown={e => { if (e.key === 'Backspace' && !c && i > 0) refs.current[i - 1]?.focus(); }} />
                   ))}
                 </div>
@@ -1040,7 +1048,6 @@ export function BizAccount() {
                     ? <span className="strong" style={{ fontSize: 15 }}>Resend in 0:{String(wait).padStart(2, '0')}</span>
                     : <button type="button" className="link" disabled={busy} onClick={sendCode}>Resend code</button>}
                 </div>
-                {devCode && <span className="demo-note">Development build — your code is <b>{devCode}</b>. In production it arrives by SMS.</span>}
               </div>
             )}
             {sent && needName && (
@@ -1126,10 +1133,8 @@ export function BizReview() {
           delivery: d.delivery ? { ...snap, building: d.delivery.building.trim(), office: d.delivery.office.trim(), area: areaFor(d.delivery.area || dl.area), contact: d.delivery.contact.trim(), mobile: fmtMobile(mobileDigits(d.delivery.mobile)), notes: (d.delivery.notes || '').trim() } : snap
         }))
       });
-      set(s => {
-        putOrder(s, order);
-        s.business = { ...emptyBusiness(), delivery: { ...emptyBusiness().delivery, company: snap.company, building: snap.building, office: snap.office, area: snap.area, contact: snap.contact, mobile: s.business.delivery.mobile } };
-      });
+      if (order.checkout) return goToPayment(order.checkout);   // card payment page; comes back to #/pay/<id>
+      set(s => afterBusinessOrder(s, order));
       nav(`/business/orders/${order.id}/confirmed`, { replace: true });
     } catch (e) {
       if (e.code === 'price_changed' && typeof e.details?.total === 'number') setServerTotal(e.details.total);
@@ -1415,6 +1420,7 @@ function DayEditor({ order, day, set, signedIn }) {
       specials: specials.map(x => ({ dietary: x.dietary, allergies: x.allergies, qty: x.qty, size: x.size || 'regular' })),
       ...(contactChanged ? { delivery: { building: contact.building.trim(), office: contact.office.trim(), contact: contact.contact.trim(), mobile: contact.mobile.trim(), notes: contact.notes.trim() } } : {})
     });
+    if (res.checkout) return goToPayment(res.checkout);   // the change costs more: pay the difference first
     set(s => putOrder(s, res));
     setLines(kept);
     setSaved(true);

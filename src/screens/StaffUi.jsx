@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/ui.jsx';
 
-/* Shared look for the partner screens (Bakery View, Courier View): Morning Box ivory,
+/* Shared look for the partner screens (Bakery View): Morning Box ivory,
    gold and espresso (MB-DSN-001 §3, §6). Layout only — each screen keeps its own logic. */
 
 /** Branded sign-in card: the screen passes its own fields and button as children. */

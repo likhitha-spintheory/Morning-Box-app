@@ -3,13 +3,15 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ApiError } from './rules.js';
+import { db } from './db.js';
 import { authRouter } from './auth.js';
 import { personalRouter } from './personal.js';
 import { businessRouter } from './business.js';
 import { opsRouter, demoRouter } from './ops.js';
-import { bakeryRouter, courierRouter } from './fulfilment.js';
+import { bakeryRouter } from './fulfilment.js';
+import { paymentsRouter } from './payments.js';
 
-const PROD = process.env.NODE_ENV === 'production';
+import { PROD } from './env.js';
 const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com", "img-src 'self' data: blob:", "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
@@ -31,16 +33,21 @@ export function createApp() {
   /* Behind a load balancer set TRUST_PROXY (e.g. 1) so rate limits see the real client IP. */
   if (process.env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
   app.use(securityHeaders);
-  app.use(express.json({ limit: '200kb' }));
+  /* The raw body is kept for verifying payment webhook signatures. */
+  app.use(express.json({ limit: '200kb', verify: (req, _res, buf) => { if (req.originalUrl.startsWith('/api/payments/webhook')) req.rawBody = buf; } }));
 
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-  app.get('/api/health', (_req, res) => res.json({ ok: true, time: new Date().toString() }));
+  app.get('/api/health', (_req, res) => {
+    /* Used by the hosting platform / uptime monitor: fails when the database can't be read. */
+    try { db.prepare('SELECT 1').get(); res.json({ ok: true, time: new Date().toString() }); }
+    catch { res.status(503).json({ ok: false }); }
+  });
   app.use('/api/auth', authRouter);
+  app.use('/api/payments', paymentsRouter);
   app.use('/api', personalRouter);
   app.use('/api/business', businessRouter);
   app.use('/api/ops', opsRouter);
   app.use('/api/bakery', bakeryRouter);
-  app.use('/api/courier', courierRouter);
   app.use('/api/demo', demoRouter);
   app.use('/api', (_req, _res, next) => next(new ApiError(404, 'not_found', 'Not found.')));
 

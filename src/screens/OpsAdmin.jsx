@@ -163,70 +163,6 @@ function BakeryForm({ b, catalog, busy, onSave }) {
   );
 }
 
-/* ---------- Couriers (MB-OPS-001 §6): one courier per route, each with a Courier View access code ---------- */
-/* Admin → Couriers: each route's driver signs in to the Courier View (#/courier) with their own access code. */
-export function Couriers({ call }) {
-  const [list, setList] = useState(null);
-  const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [codes, setCodes] = useState({});
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const load = () => call('GET', '/admin/couriers').then(setList).catch(e => setError(e.message));
-  useEffect(() => { load(); }, [call]); // eslint-disable-line react-hooks/exhaustive-deps
-  /* Its own calls (not the console's reload), so a new access code stays on screen. */
-  const run = async (method, path, body) => {
-    setBusy(true); setError('');
-    try { const r = await call(method, path, body); await load(); return r || true; } catch (e) { setError(e.message); return false; } finally { setBusy(false); }
-  };
-  const issueCode = async c => { const r = await run('POST', `/admin/couriers/${c.id}/access-code`); if (r) setCodes(x => ({ ...x, [c.id]: r.code })); };
-  return (
-    <div className="card stack gap-12" style={{ padding: 18 }}>
-      <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
-        <h2 className="h3">Couriers</h2>
-        <button type="button" className="btn-secondary" style={small} onClick={() => setAdding(a => !a)}>{adding ? 'Cancel' : 'Add a courier'}</button>
-      </div>
-      <span className="xs">Each courier has one route. Deliveries assigned to that route (Live → Routes) show in the courier’s view at <b>#/courier</b>: pickup, out for delivery, delivered or failed.</span>
-      {error && <div className="banner-err" role="alert">{error}</div>}
-      {adding && <CourierForm busy={busy} onSave={v => run('POST', '/admin/couriers', v).then(ok => ok && setAdding(false))} />}
-      {!list ? <p className="help">Loading…</p> : !list.length ? <p className="help" style={{ margin: 0 }}>No couriers yet.</p> : (
-        <table className="ops-table">
-          <thead><tr><th>Route</th><th>Courier</th><th>Phone</th><th>Status</th><th /></tr></thead>
-          <tbody>{list.map(c => (
-            <Fragment key={c.id}>
-              <tr className={c.active ? '' : 'warn'}>
-                <td><b>{c.routeId}</b>{c.capacity ? <span className="xs"><br />up to {c.capacity} boxes / window</span> : null}</td><td>{c.name}</td><td>{c.phone || '—'}</td>
-                <td><span className={`status ${c.active ? 'ok' : 'off'}`}>{c.active ? 'Active' : 'Inactive'}</span>{c.active && !c.hasAccessCode ? <><br /><small>No access code yet</small></> : null}</td>
-                <td>
-                  <button type="button" className="btn-text" onClick={() => setEditing(editing === c.id ? null : c.id)}>{editing === c.id ? 'Close' : 'Edit'}</button>
-                  {c.active && <button type="button" className="btn-text" disabled={busy} onClick={() => issueCode(c)}>{c.hasAccessCode ? 'New access code' : 'Create access code'}</button>}
-                  <button type="button" className="btn-text" disabled={busy} onClick={() => run('PUT', `/admin/couriers/${c.id}`, { active: !c.active })}>{c.active ? 'Deactivate' : 'Reactivate'}</button>
-                </td>
-              </tr>
-              {codes[c.id] && <tr><td colSpan={5}><div className="note"><span>Courier View access code for {c.name} ({c.routeId}): <b style={{ fontSize: 18, letterSpacing: '.1em' }}>{codes[c.id]}</b> — share it with the courier now; it isn’t shown again. They sign in at <b>#/courier</b>.</span></div></td></tr>}
-              {editing === c.id && <tr><td colSpan={5}><CourierForm c={c} busy={busy} onSave={v => run('PUT', `/admin/couriers/${c.id}`, v).then(ok => ok && setEditing(null))} /></td></tr>}
-            </Fragment>
-          ))}</tbody>
-        </table>
-      )}
-    </div>
-  );
-}
-
-function CourierForm({ c, busy, onSave }) {
-  const [v, setV] = useState({ name: c?.name || '', phone: c?.phone || '', routeId: c?.routeId || '', capacity: c?.capacity ?? '' });
-  const set = k => e => setV(x => ({ ...x, [k]: e.target.value }));
-  return (
-    <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start', alignItems: 'flex-end' }}>
-      <Field label="Name"><input className="input" style={{ width: 200 }} value={v.name} onChange={set('name')} /></Field>
-      <Field label="Mobile"><input className="input" style={{ width: 170 }} inputMode="tel" value={v.phone} onChange={set('phone')} /></Field>
-      <Field label="Route id"><input className="input" style={{ width: 120 }} placeholder="e.g. R1" value={v.routeId} onChange={set('routeId')} /></Field>
-      <Field label="Boxes per window"><input className="input" style={{ width: 130 }} inputMode="numeric" placeholder="No limit" value={v.capacity} onChange={e => setV(x => ({ ...x, capacity: e.target.value.replace(/D/g, '').slice(0, 3) }))} /></Field>
-      <button type="button" className="btn-secondary" style={small} disabled={busy || !v.name.trim() || !v.routeId.trim()} onClick={() => onSave({ ...v, capacity: v.capacity === '' ? '' : Number(v.capacity) })}>{c ? 'Save' : 'Add courier'}</button>
-    </div>
-  );
-}
-
 /* ---------- Products & allergens (read-only, MB-PRO-001 §15.1) ---------- */
 export function Products({ data }) {
   const [q, setQ] = useState('');
@@ -364,7 +300,7 @@ export function Company({ data, act, busy, call }) {
       </>}
       {cap && <>
         <h2 className="h3">Delivery capacity per window (boxes)</h2>
-        <span className="xs">How many boxes the couriers can deliver in each window. When a window is full it can’t be chosen (MB-DLV-001 §8).</span>
+        <span className="xs">How many boxes the bakeries can deliver in each window. When a window is full it can’t be chosen (MB-DLV-001 §8).</span>
         <div className="grid-2">{[['w1', '7:30 – 8:30 AM'], ['w2', '8:30 – 9:30 AM'], ['w3', '9:30 – 10:30 AM']].map(([w, label]) => (
           <Field key={w} label={label}><input className="input" inputMode="numeric" value={cap[w]} onChange={e => setCap(c => ({ ...c, [w]: e.target.value }))} /></Field>
         ))}

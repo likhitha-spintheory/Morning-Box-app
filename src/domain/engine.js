@@ -268,7 +268,8 @@ export function priceBox(config) {
   const base = PRICE_LEVELS[priceLevel(config.recipe)];
   const sizeAdj = hasSizeSelector(config.recipe) ? SIZE_ADJUSTMENT[config.size] : 0;
   const addons = (config.addons || []).reduce((t, a) => t + addonPrice(a), 0);
-  return { base, sizeAdj, addons, total: base + sizeAdj + addons };
+  /* Prices may have fils (e.g. 32.10): round so sums never carry floating-point noise. */
+  return { base, sizeAdj, addons, total: Math.round((base + sizeAdj + addons) * 100) / 100 };
 }
 
 export function addonPrice(a) {
@@ -391,5 +392,8 @@ export function priceBusinessDay(lines, specials) {
     lines.reduce((t, l) => t + (l.model.base + SIZE_ADJUSTMENT[l.size]) * l.qty, 0) +
     specials.reduce((t, s) => t + (s.resolved ? PRICE_LEVELS[priceLevel(s.resolved.recipe)] + SIZE_ADJUSTMENT[s.size || 'regular'] : 0) * s.qty, 0);
   const pct = volumeDiscount(boxes);
-  return { boxes, gross, discountPct: pct, discount: gross * pct, total: gross * (1 - pct) };
+  /* Whole dirhams, and the invoice always adds up: total = gross − discount. */
+  const g = Math.round(gross);
+  const discount = Math.round(g * pct);
+  return { boxes, gross: g, discountPct: pct, discount, total: g - discount };
 }

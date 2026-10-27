@@ -57,7 +57,7 @@ async function splitOrder(mobile, date) {
 }
 const dayOf = id => { const d = db.prepare('SELECT * FROM business_days WHERE id = ?').get(id); return { ...d, allocation: JSON.parse(d.allocation || 'null'), states: JSON.parse(d.part_states || '{}') }; };
 
-test('a window is unavailable when every bakery is at capacity, though couriers still have room (DLV §8)', async () => {
+test('a window is unavailable when every bakery is at capacity, (DLV §8)', async () => {
   const date = dates[3];
   const conds = [];
   for (const name of ['Partner Bakery A', 'Partner Bakery B', 'Partner Bakery C']) conds.push(await condition(bakery(name), date, 1));

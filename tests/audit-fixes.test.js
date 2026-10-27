@@ -1,5 +1,5 @@
 /* Final spec audit fixes: bakery pay before volume discount (MB-BKY-001 §11), full final check (MB-PRO-001 §15.3),
-   route capacity and courier delay (MB-OPS-001 §6, MB-DLV-001 §6), optional issue photo (OPS §10),
+   bakery delivery delay (MB-OPS-001 §6, MB-DLV-001 §6), optional issue photo (OPS §10),
    "Prepared by" once the bakery is final (MB-PRD-001 §11). */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -66,39 +66,19 @@ test('final check before Ready includes swaps and freshness & appearance', async
   setBakeryState('personal', id, 'Ready', { qc: { ...partial, freshness: true }, byOps: true });
 });
 
-test('route capacity limits boxes per window; bulk assignment lists what did not fit', async () => {
-  const date = dates[7];
-  const a = await personal('500000403', date), b = await personal('500000404', date);
-  const c = await ops('POST', '/admin/couriers', { name: 'Small Van', routeId: 'CAP-1', capacity: 1 });
-  assert.equal(c.status, 201, JSON.stringify(c.body));
-  assert.equal(c.body.capacity, 1);
-  assert.equal((await ops('POST', '/admin/couriers', { name: 'Bad', routeId: 'CAP-2', capacity: 0 })).status, 400);
-  assert.equal((await ops('POST', `/days/personal/${a.id}/route`, { routeId: 'CAP-1' })).status, 200);
-  const full = await ops('POST', `/days/personal/${b.id}/route`, { routeId: 'CAP-1' });
-  assert.equal(full.body.error, 'route_full');
-  await ops('PUT', `/admin/couriers/${c.body.id}`, { capacity: 3 });
-  const bulk = await ops('POST', '/routes', { date, window: 'w2', routeId: 'CAP-1' });
-  assert.equal(bulk.status, 200, JSON.stringify(bulk.body));
-  assert.deepEqual(bulk.body.skipped, []);
-  await ops('PUT', `/admin/couriers/${c.body.id}`, { capacity: '' });
-  assert.equal((await ops('GET', '/admin/couriers')).body.find(x => x.id === c.body.id).capacity, null, 'blank = no limit');
-});
-
-test('a courier can report running late: customer told, Courier Delay recorded', async () => {
+test('the delivering bakery can report running late: customer told, Delivery Delay recorded', async () => {
   const date = dates[8];
   const { t, o, id } = await personal('500000405', date);
-  const c = await ops('POST', '/admin/couriers', { name: 'Late Van', routeId: 'LATE-1' });
-  const code = (await ops('POST', `/admin/couriers/${c.body.id}/access-code`)).body.code;
-  await ops('POST', `/days/personal/${id}/route`, { routeId: 'LATE-1' });
-  const C = { 'x-courier-code': code };
-  /* Not yet picked up: the courier view only offers it once moving, but the API also accepts it before delivery. */
-  assert.equal((await call('POST', `/courier/days/personal/${id}/late`, { eta: '' }, null, C)).body.error, 'eta_required');
-  assert.equal((await call('POST', `/courier/days/personal/${id}/late`, { eta: '9:45 AM', note: 'traffic' }, null, C)).status, 200);
+  await ops('POST', '/allocate', { date });
+  const bakeryId = db.prepare('SELECT bakery_id FROM order_days WHERE id = ?').get(id).bakery_id;
+  const B = { 'x-bakery-code': (await ops('POST', `/admin/bakeries/${bakeryId}/access-code`)).body.code };
+  assert.equal((await call('POST', `/bakery/days/personal/${id}/late`, { eta: '' }, null, B)).body.error, 'eta_required');
+  assert.equal((await call('POST', `/bakery/days/personal/${id}/late`, { eta: '9:45 AM', note: 'traffic' }, null, B)).status, 200);
   const n = (await call('GET', '/me/notifications', null, t)).body;
   assert.ok((n.items || n).some(x => x.kind === 'late' && /9:45 AM/.test(x.message)), 'customer told the new time');
-  assert.ok(db.prepare("SELECT 1 FROM exceptions WHERE ref = ? AND kind = 'Courier Delay'").get(`personal:${id}`), 'Courier Delay recorded');
-  const list = (await call('GET', `/courier/deliveries?date=${date}`, null, null, C)).body.deliveries;
-  assert.equal(list.find(x => x.id === id).lateNote, '9:45 AM');
+  assert.ok(db.prepare("SELECT 1 FROM exceptions WHERE ref = ? AND kind = 'Delivery Delay' AND category = 'Bakery'").get(`personal:${id}`), 'Delivery Delay recorded');
+  const plan = (await call('GET', `/bakery/plan?date=${date}`, null, null, B)).body;
+  assert.equal(plan.packing.find(x => x.id === id).lateNote, '9:45 AM');
   assert.ok(o.id);
 });
 

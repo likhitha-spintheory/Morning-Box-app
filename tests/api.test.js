@@ -141,12 +141,9 @@ test('ops: key required, allocation and forward-only status', async () => {
   assert.equal(a.body.allocations[0].allocated, true);
   const id = days.body[0].id;
   const step = (p, b) => call('POST', `/ops/days/business/${id}/${p}`, b, null, H);
-  assert.equal((await step('out')).body.error, 'not_picked_up', 'nothing leaves before a counted pickup');
+  assert.equal((await step('out')).body.error, 'not_dispatched', 'nothing leaves before a counted dispatch');
   assert.equal((await step('bakery-state', { state: 'Ready' })).body.error, 'qc_required', 'Ready needs the final check');
   assert.equal((await step('bakery-state', { state: 'Ready', qc: { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true } })).status, 200);
-  assert.equal((await step('handover', { boxes: days.body[0].boxes, specialBoxes: days.body[0].specialBoxes })).body.error, 'route_required');
-  assert.equal((await step('route', { routeId: 'R7' })).status, 200);
   assert.equal((await step('handover', { boxes: days.body[0].boxes, specialBoxes: days.body[0].specialBoxes })).status, 200);
-  assert.equal((await step('out')).status, 200);
   assert.equal((await step('bakery-state', { state: 'In Preparation' })).body.error, 'already_handed_over', 'forward only');
 });

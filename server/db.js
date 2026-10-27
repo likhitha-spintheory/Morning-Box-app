@@ -8,7 +8,7 @@ const file = process.env.DB_FILE || join(here, '..', 'data', 'morningbox.db');
 if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
 
 export const db = new DatabaseSync(file);
-db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -155,14 +155,20 @@ addColumns('bakeries', {
 addColumns('sessions', { expires_at: 'INTEGER' });
 addColumns('otp_codes', { sends: 'INTEGER NOT NULL DEFAULT 0', window_start: 'INTEGER', last_sent: 'INTEGER', failures: 'INTEGER NOT NULL DEFAULT 0' });
 addColumns('orders', { idempotency_key: 'TEXT', credit_used: 'REAL NOT NULL DEFAULT 0' });
+/* Card money already paid back on the order, so refunds never exceed what the card paid. */
+addColumns('orders', { card_refunded: 'REAL NOT NULL DEFAULT 0' });
 addColumns('business_orders', { idempotency_key: 'TEXT' });
 addColumns('order_days', { safety_hold: 'INTEGER NOT NULL DEFAULT 0', feedback_note: 'TEXT', feedback_at: 'TEXT' });
 addColumns('profiles', { other_allergies: 'TEXT' });
 /* Terms acceptance, marketing consent; rating/feedback_tags are no longer written (kept for old rows). */
 addColumns('users', { terms_version: 'TEXT', terms_accepted_at: 'TEXT', marketing_opt_in: 'INTEGER NOT NULL DEFAULT 0' });
+/* Sign-in by email: login_email is only ever set by a verified email code (users.email is the
+   unverified contact address). Accounts created by email have no mobile; theirs is 'none:<random>'. */
+addColumns('users', { login_email: 'TEXT' });
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_login_email ON users(login_email)');
 addColumns('order_days', { rating: 'INTEGER', feedback_tags: 'TEXT', late_note: 'TEXT' });
 addColumns('business_days', { late_note: 'TEXT' });
-/* Fulfilment detail: per-bakery parts, timestamps for Ready-on-Time and Pickup vs Courier delay, at-risk flag, route. */
+/* Fulfilment detail: per-bakery parts, timestamps for Ready-on-Time and Pickup vs Delivery delay, at-risk flag (route_id is no longer written). */
 const FULFIL_DETAIL = { part_states: 'TEXT', ready_at: 'TEXT', handed_over_at: 'TEXT', picked_up_at: 'TEXT', at_risk: 'INTEGER NOT NULL DEFAULT 0', route_id: 'TEXT' };
 addColumns('order_days', FULFIL_DETAIL);
 addColumns('business_days', FULFIL_DETAIL);
@@ -336,19 +342,6 @@ CREATE TABLE IF NOT EXISTS bakery_events (
 CREATE INDEX IF NOT EXISTS idx_bakery_events ON bakery_events(bakery_id, date);
 `);
 
-/* Couriers (MB-OPS-001 §6, MB-DLV-001 §4): one courier per route, each with its own
-   access code for the Courier View. Deliveries carry the route id ops assigns the night before. */
-db.exec(`
-CREATE TABLE IF NOT EXISTS couriers (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  phone TEXT,
-  route_id TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  access_hash TEXT,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-`);
 /* Optional capacity per delivery window, JSON { w1, w2, w3 } (MB-B2B-001 §9; DLV §7).
    NULL = only the daily capacity applies. */
 addColumns('bakeries', { window_capacity: 'TEXT' });
@@ -393,17 +386,19 @@ export function logEvent(orderId, date, kind, message) {
 export const parse = s => (s == null ? null : JSON.parse(s));
 
 /** Run fn inside a transaction; rolls back on throw. */
+/* Nested calls become savepoints, so a helper that needs a transaction can run inside a caller's. */
+let depth = 0;
 export function tx(fn) {
-  db.exec('BEGIN');
-  try { const r = fn(); db.exec('COMMIT'); return r; }
-  catch (e) { db.exec('ROLLBACK'); throw e; }
+  const sp = depth > 0 ? `sp${depth}` : null;
+  db.exec(sp ? `SAVEPOINT ${sp}` : 'BEGIN');
+  depth++;
+  try { const r = fn(); depth--; db.exec(sp ? `RELEASE ${sp}` : 'COMMIT'); return r; }
+  catch (e) { depth--; db.exec(sp ? `ROLLBACK TO ${sp}; RELEASE ${sp}` : 'ROLLBACK'); throw e; }
 }
 
-/* Route capacity: most boxes one courier carries in a delivery window; null = no limit (MB-OPS-001 §6). */
-addColumns('couriers', { capacity: 'INTEGER' });
 /* Optional photo on a customer's problem report (MB-OPS-001 §10), a small data URL. */
 addColumns('customer_issues', { photo: 'TEXT' });
-/* Optional proof-of-delivery photo from the courier (MB-DLV-001 §10: "Photo proof may be used operationally
+/* Optional proof-of-delivery photo from the bakery's delivery (MB-DLV-001 §10: "Photo proof may be used operationally
    where supported, without requiring a photograph of the customer"), a small data URL. */
 addColumns('order_days', { delivery_photo: 'TEXT' });
 addColumns('business_days', { delivery_photo: 'TEXT' });

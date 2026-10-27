@@ -126,13 +126,11 @@ test('Bakery View: confirm plan, prepare, QC before Ready; handover must match; 
   assert.equal((await call('POST', `/bakery/days/personal/${id}/state`, { state: 'Ready', qc: { order: true } }, {}, B)).body.error, 'qc_required', 'every check is needed');
   const qc = { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true };
   assert.equal((await call('POST', `/bakery/days/personal/${id}/state`, { state: 'Ready', qc }, {}, B)).status, 200);
-  assert.equal((await ops('POST', `/days/personal/${id}/handover`, { boxes: 1, specialBoxes: 0 })).body.error, 'route_required', 'courier planned before pickup');
-  await ops('POST', `/days/personal/${id}/route`, { routeId: 'R1' });
   const mismatch = await ops('POST', `/days/personal/${id}/handover`, { boxes: 2, specialBoxes: 0 });
   assert.equal(mismatch.body.error, 'handover_mismatch');
   assert.ok(db.prepare("SELECT 1 FROM exceptions WHERE kind = 'Handover Mismatch' AND ref = ?").get(`personal:${id}`));
-  assert.equal((await ops('POST', `/days/personal/${id}/handover`, { boxes: 1, specialBoxes: 0, routeId: 'R1' })).status, 200);
-  assert.equal((await ops('POST', `/days/personal/${id}/out`)).status, 200);
+  /* The bakery delivers itself: the counted dispatch takes it out for delivery — no courier route. */
+  assert.equal((await ops('POST', `/days/personal/${id}/handover`, { boxes: 1, specialBoxes: 0 })).status, 200);
   assert.equal((await call('GET', `/orders/${o.id}`, null, a)).body.days[0].stage, 2);
   assert.equal((await ops('POST', `/days/personal/${id}/delivered`, {})).body.error, 'point_required');
   assert.equal((await ops('POST', `/days/personal/${id}/delivered`, { deliveryPoint: 'Reception' })).status, 200);
@@ -151,10 +149,8 @@ test('unable to fulfil → reallocate; failed delivery; refunds and credits; cre
   /* Unable to fulfil → moved automatically to the next eligible bakery. */
   assert.equal((await ops('POST', `/days/personal/${id}/bakery-state`, { state: 'Unable to Fulfil', reason: 'Equipment/Operational Issue' })).status, 200);
   assert.notEqual(db.prepare('SELECT bakery_id FROM order_days WHERE id = ?').get(id).bakery_id, first);
-  await ops('POST', `/days/personal/${id}/route`, { routeId: 'R2' });
   await ops('POST', `/days/personal/${id}/bakery-state`, { state: 'Ready', qc: { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true } });
   await ops('POST', `/days/personal/${id}/handover`, { boxes: 1, specialBoxes: 0 });
-  await ops('POST', `/days/personal/${id}/out`);
   assert.equal((await ops('POST', `/days/personal/${id}/failed`, { reason: 'Contact unreachable' })).status, 200);
   const dash = await ops('GET', `/dashboard?date=${dates[4]}`);
   assert.equal(dash.body.rows.find(r => r.id === id && r.kind === 'personal').health, 'Failed');
@@ -241,13 +237,13 @@ test('a business order too big for one bakery is split by line; each bakery hand
   const bPlan = prep.find(p => p.bakeryId === B);
   assert.equal(bPlan.packing.find(x => x.ref === o.body.id).boxes, row.allocation.find(p => p.bakeryId === B).boxes, 'B sees only its share');
   await ops('POST', `/days/business/${row.id}/bakery-state`, { state: 'Ready', qc: { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true } });
-  await ops('POST', `/days/business/${row.id}/route`, { routeId: 'R9' });
   assert.equal((await ops('POST', `/days/business/${row.id}/handover`, { boxes: 10, specialBoxes: 2 })).body.error, 'part_required');
   for (const p of row.allocation) {
+    assert.equal(db.prepare('SELECT delivery_state FROM business_days WHERE id = ?').get(row.id).delivery_state, null, 'out only after every share is dispatched');
     const special = p.items.filter(it => it.entry === 1).reduce((t, it) => t + it.qty, 0);
     assert.equal((await ops('POST', `/days/business/${row.id}/handover`, { bakeryId: p.bakeryId, boxes: p.boxes, specialBoxes: special })).status, 200);
   }
-  assert.equal((await ops('POST', `/days/business/${row.id}/out`)).status, 200, 'dispatch only after every share is handed over');
+  assert.equal(db.prepare('SELECT delivery_state FROM business_days WHERE id = ?').get(row.id).delivery_state, 'Out for Delivery');
   for (const id of conds) await ops('DELETE', `/admin/conditions/${id}`);
 });
 

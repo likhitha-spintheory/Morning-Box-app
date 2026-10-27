@@ -2,6 +2,7 @@
    and company / support details. Saved values are applied to the shared
    objects in place, so every route prices and prints from the same numbers. */
 import { db, json, parse } from './db.js';
+import { DEV } from './env.js';
 import { applyPricing, pricingSnapshot, DEFAULT_PRICING, PRICE_LEVELS, ADDON_PRICES, expandBreadPrices } from '../src/domain/standards.js';
 import { SUPPLIER, SUPPORT } from './company.js';
 import { LIBRARY_SETTINGS, setLibrarySettings, COMPONENTS } from '../src/domain/library.js';
@@ -163,7 +164,7 @@ export function saveDelivery(input = {}) {
 /* Apply what was saved when the server starts. */
 const savedDelivery = read('delivery');
 if (savedDelivery) { Object.assign(DELIVERY_CAPACITY, savedDelivery.capacity); DELIVERY_COST.perDelivery = savedDelivery.costPerDelivery ?? 0; }
-setLibrarySettings(read('library') || { samples: process.env.NODE_ENV !== 'production' });
+setLibrarySettings(read('library') || { samples: DEV });
 applyPricing(read('pricing'));
 /* A saved menu is re-checked on start; one that no longer passes is ignored (approved menu used) rather than half-applied. */
 try { const m = read('menu'); if (m) applyMenu(validateMenu(m, failMenu)); } catch (e) { console.error('[menu] Saved menu ignored:', e.message); }

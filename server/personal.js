@@ -2,13 +2,15 @@ import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
 import { db, json, parse, tx, logEvent } from './db.js';
 import { SUPPLIER, VAT_RATE, SUPPORT, TERMS_VERSION } from './company.js';
-import { requireUser, userPayload, cleanName, SESSION_COOKIE } from './auth.js';
+import { requireUser, userPayload, cleanName, SESSION_COOKIE, sessionUserId, limitIp, normaliseMobile } from './auth.js';
 import {
   ApiError, bad, validateProfile, assertOrderable, assertEditable, assertCapacity, availability,
   buildPersonalDay, validateAddress, unsafeComponents, inHorizon, emailOk, plain, raiseException,
   assertBakeryCapacity, needsFor, upcomingClosedDates, prettyDate
 } from './rules.js';
-import { creditBalance } from './fulfilment.js';
+import { creditBalance, payBack, paidBackText, money as roundAed } from './fulfilment.js';
+import { startCheckout, registerCheckoutHandler, recordPayment } from './payments.js';
+import { sendOrderEmail } from './mail.js';
 import { assertAllocatable, personalUnits, reallocateProvisional, isFinal } from './allocation.js';
 import { activeBakeries, danishFlavours, cleanPhoto } from './rules.js';
 import { pricingSnapshot } from '../src/domain/standards.js';
@@ -92,16 +94,18 @@ personalRouter.get('/config', (_req, res) => {
 /** Product analytics (Master Plan §15): the app reports funnel steps and no-match results. */
 const EVENT_KINDS = ['visit', 'profile_completed', 'plan_started', 'recommendation_shown', 'another_option_viewed', 'no_match', 'summary_viewed', 'checkout_started', 'business_inquiry'];
 personalRouter.post('/events', (req, res) => {
+  limitIp(req, 'events', 300);   // public endpoint: keeps the analytics table from being flooded
   const kind = req.body?.kind;
   if (!EVENT_KINDS.includes(kind)) throw bad('kind_invalid', 'Unknown event.');
   const token = (req.get('authorization') || '').replace(/^Bearer /, '');
-  const userId = token ? db.prepare('SELECT user_id FROM sessions WHERE token = ?').get(token)?.user_id ?? null : null;
+  const userId = sessionUserId(token);
   db.prepare('INSERT INTO analytics_events (kind, user_id, data) VALUES (?, ?, ?)').run(kind, userId, json(req.body.data ?? null).slice(0, 500));
   res.status(204).end();
 });
 
 /** Deterministic preview. The order endpoint re-runs the same engine. */
 personalRouter.post('/recommendations', (req, res) => {
+  limitIp(req, 'recommendations', 600);
   const profile = validateProfile(req.body.profile);
   const r = recommend(profile, req.body.context);
   const out = c => c && { recipeId: c.recipe.id, components: c.components, substitutions: c.substitutions };
@@ -154,7 +158,8 @@ personalRouter.post('/me/accept-terms', requireUser, (req, res) => {
 
 /** Everything we hold about me, as JSON (UAE PDPL right of access). */
 personalRouter.get('/me/export', requireUser, (req, res) => {
-  const user = db.prepare('SELECT mobile, first_name, email, created_at, terms_version, terms_accepted_at, marketing_opt_in FROM users WHERE id = ?').get(req.userId);
+  const user = db.prepare('SELECT mobile, first_name, email, login_email, created_at, terms_version, terms_accepted_at, marketing_opt_in FROM users WHERE id = ?').get(req.userId);
+  if (!user.mobile.startsWith('+')) user.mobile = null;   // email-only account
   const orders = serializeOrders(db.prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at').all(req.userId));
   res.set('Content-Disposition', 'attachment; filename="morning-box-my-data.json"').json({
     exportedAt: new Date().toISOString(), account: user, ...userPayload(req.userId), orders,
@@ -189,13 +194,13 @@ personalRouter.delete('/me', requireUser, (req, res) => {
     + db.prepare(`SELECT COUNT(*) AS n FROM business_days d JOIN business_orders o ON o.id = d.order_id
         WHERE o.user_id = ? AND d.cancelled = 0 AND d.stage < 3 AND d.date >= ?`).get(req.userId, dubaiTodayIso()).n;
   if (open) throw new ApiError(409, 'orders_open', 'Cancel your upcoming mornings first, then delete your account.');
-  const u = db.prepare('SELECT mobile FROM users WHERE id = ?').get(req.userId);
+  const u = db.prepare('SELECT mobile, login_email FROM users WHERE id = ?').get(req.userId);
   tx(() => {
     for (const t of ['sessions', 'profiles', 'addresses', 'business_accounts', 'business_plans', 'notifications', 'support_requests', 'nps_responses']) {
       db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(req.userId);
     }
-    db.prepare('DELETE FROM otp_codes WHERE mobile = ?').run(u.mobile);
-    db.prepare(`UPDATE users SET mobile = ?, first_name = 'Deleted customer', email = NULL WHERE id = ?`).run(`deleted:${req.userId}:${randomBytes(4).toString('hex')}`, req.userId);
+    db.prepare('DELETE FROM otp_codes WHERE mobile IN (?, ?)').run(u.mobile, `email:${u.login_email}`);
+    db.prepare(`UPDATE users SET mobile = ?, first_name = 'Deleted customer', email = NULL, login_email = NULL WHERE id = ?`).run(`deleted:${req.userId}:${randomBytes(4).toString('hex')}`, req.userId);
     db.prepare('UPDATE orders SET email = NULL WHERE user_id = ?').run(req.userId);
     db.prepare(`UPDATE order_days SET feedback_note = NULL, address = json_set(address, '$.notes', '') WHERE order_id IN (SELECT id FROM orders WHERE user_id = ?)`).run(req.userId);
   });
@@ -268,86 +273,125 @@ personalRouter.get('/orders/:id', requireUser, (req, res) => res.json(serializeO
  * A repeated idempotencyKey returns the order already created (double taps, retries).
  * If expectedTotal differs from the server price, nothing is charged and 409 price_changed is returned.
  */
-personalRouter.post('/orders', requireUser, (req, res) => {
-  const key = idemKey(req.body.idempotencyKey);
-  if (key) {
-    const existing = db.prepare('SELECT * FROM orders WHERE user_id = ? AND idempotency_key = ?').get(req.userId, key);
-    if (existing) return res.status(200).json(serializeOrder(existing));
-  }
-  const profile = loadProfile(req.userId);
-  const days = Array.isArray(req.body.days) ? req.body.days : [];
+/** Validates and prices an order without saving anything. Throws on any problem (cutoff, eligibility, capacity, price). */
+function preparePersonalOrder(userId, body) {
+  const profile = loadProfile(userId);
+  const days = Array.isArray(body.days) ? body.days : [];
   if (!days.length || days.length > 28) throw bad('days_invalid', 'Plan at least one morning.');
   if (new Set(days.map(d => d?.date)).size !== days.length) throw bad('days_invalid', 'Each morning can only appear once.');
-  const address = validateAddress(req.body.address);
-  const method = ['card', 'apple'].includes(req.body.method) ? req.body.method : 'card';
-  const email = typeof req.body.email === 'string' ? req.body.email.trim() : '';
+  const address = validateAddress(body.address);
+  const method = ['card', 'apple'].includes(body.method) ? body.method : 'card';
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
   if (email && !emailOk(email)) throw bad('email_invalid', 'Enter a valid email for your confirmation, or leave it empty.');
 
+  /* DLV §6: the delivery must be able to reach the customer. Accounts made by email have no mobile, so one is asked at checkout. */
+  const own = db.prepare('SELECT mobile FROM users WHERE id = ?').get(userId)?.mobile || '';
+  const contactMobile = own.startsWith('+') ? '' : normaliseMobile(body.contactMobile);
   const built = days.map(d => {
     assertOrderable(d.date);
     const b = buildPersonalDay(d, profile);
-    const dayAddress = d.address ? validateAddress(d.address) : address;
+    const dayAddress = { ...(d.address ? validateAddress(d.address) : address), ...(contactMobile ? { mobile: contactMobile } : {}) };
     return { ...b, date: d.date, window: d.window, address: dayAddress };
   });
-  const total = built.reduce((t, b) => t + b.price, 0);
-  if (req.body.expectedTotal !== undefined && Number(req.body.expectedTotal) !== total) {
+  const total = roundAed(built.reduce((t, b) => t + b.price, 0));
+  if (body.expectedTotal !== undefined && Number(body.expectedTotal) !== total) {
     throw new ApiError(409, 'price_changed', `Your total is now AED ${total}. Please check it and pay again.`, { total, prices: built.map(b => ({ date: b.date, price: b.price })) });
   }
+  const capacity = () => built.forEach(b => { assertCapacity(b.date, b.window, 1); assertAllocatable(b.date, [{ kind: 'personal', window: b.window, area: b.address.area, boxes: 1, units: personalUnits(b.cfg, b.trace.inputs) }]); });
+  return { profile, built, total, address, method, email, capacity };
+}
+
+/** Saves a paid order. `payment` is { provider, ref, amount } for the card part; credit is used first. */
+function createPersonalOrder(userId, body, payment, key = null) {
+  const { profile, built, total, address, method, email, capacity } = preparePersonalOrder(userId, body);
   const id = newOrderId('MB', 'orders');
-  const needs = needsFor(profile.dietary, profile.allergies);
   const order = tx(() => {
-    built.forEach(b => { assertCapacity(b.date, b.window, 1); assertAllocatable(b.date, [{ kind: 'personal', window: b.window, area: b.address.area, boxes: 1, units: personalUnits(b.cfg, b.trace.inputs) }]); });
+    capacity();
     /* Morning Box credit (service recovery) is used first; the card pays the rest. */
-    const credit = Math.min(creditBalance(req.userId), total);
-    // Payment gateway integration point: authorise `total - credit` before persisting.
-    const paymentRef = `demo_${randomBytes(6).toString('hex')}`;
-    db.prepare('INSERT INTO orders (id, user_id, email, payment_method, payment_ref, total, idempotency_key, credit_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, req.userId, email || null, method, paymentRef, total, key, credit);
-    if (credit > 0) db.prepare('INSERT INTO customer_credits (user_id, amount, reason, ref) VALUES (?, ?, ?, ?)').run(req.userId, -credit, 'Used on order', id);
+    const credit = roundAed(total - payment.amount);
+    if (credit < 0 || credit > creditBalance(userId) + 0.001) throw new ApiError(409, 'credit_changed', 'Your Morning Box credit changed while you were paying. Your payment is being refunded — please order again.');
+    db.prepare('INSERT INTO orders (id, user_id, email, payment_method, payment_ref, total, idempotency_key, credit_used, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, userId, email || null, method, payment.ref || 'credit', total, key, credit, payment.provider === 'stripe' ? 'captured' : 'captured_demo');
+    recordPayment('personal', id, payment);
+    if (credit > 0) db.prepare('INSERT INTO customer_credits (user_id, amount, reason, ref) VALUES (?, ?, ?, ?)').run(userId, -credit, 'Used on order', id);
     const ins = db.prepare('INSERT INTO order_days (order_id, date, window, context, cfg, trace, price, address) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     built.forEach(b => ins.run(id, b.date, b.window, b.cfg.context, json(b.cfg), json(b.trace), b.price, json(b.address)));
     db.prepare(`INSERT INTO addresses (user_id, building, unit, area, handover, notes, default_window) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET building = excluded.building, unit = excluded.unit, area = excluded.area,
       handover = excluded.handover, notes = excluded.notes, default_window = excluded.default_window`)
-      .run(req.userId, address.building, address.unit, address.area, address.handover, address.notes, built[0].window);
-    if (email) db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email, req.userId);
+      .run(userId, address.building, address.unit, address.area, address.handover, address.notes, built[0].window);
+    if (email) db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email, userId);
     return db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
   });
-  flagOtherAllergies(req.userId, profile, db.prepare('SELECT * FROM order_days WHERE order_id = ?').all(id));
+  flagOtherAllergies(userId, profile, db.prepare('SELECT * FROM order_days WHERE order_id = ?').all(id));
   reallocateProvisional(built.map(b => b.date));
-  db.prepare("INSERT INTO analytics_events (kind, user_id) VALUES ('order_placed', ?)").run(req.userId);
+  db.prepare("INSERT INTO analytics_events (kind, user_id) VALUES ('order_placed', ?)").run(userId);
   logEvent(id, null, 'placed', `Order placed and paid · AED ${total}${order.credit_used ? ` (AED ${order.credit_used} credit used)` : ''}`);
-  notify(req.userId, id, 'confirmed', `Order ${id} is confirmed: ${built.length} morning${built.length > 1 ? 's' : ''}, AED ${total}.`);
-  res.status(201).json(serializeOrder(order));
+  notify(userId, id, 'confirmed', `Order ${id} is confirmed: ${built.length} morning${built.length > 1 ? 's' : ''}, AED ${total}.`);
+  sendOrderEmail(order);
+  return id;
+}
+registerCheckoutHandler('personal_order', (userId, payload, payment) => createPersonalOrder(userId, payload.body, payment, payload.key));
+
+/**
+ * Create an order. Body:
+ * { days: [{ date, context, recipeId, components, size, addons, window, address? }], address, email, method,
+ *   idempotencyKey?, expectedTotal? }
+ * Every day is re-validated (cutoff, eligibility, swaps, add-ons, capacity) and re-priced, before payment and again after it.
+ * A repeated idempotencyKey returns the order already created (double taps, retries).
+ * If expectedTotal differs from the server price, nothing is charged and 409 price_changed is returned.
+ * Response: 201 with the order when nothing is left to pay by card (or in demo mode), otherwise
+ * 202 { checkout: { id, url } } — the app opens `url` and comes back to #/pay/<id> (server/payments.js).
+ */
+personalRouter.post('/orders', requireUser, (req, res, next) => {
+  const key = idemKey(req.body.idempotencyKey);
+  if (key) {
+    const existing = db.prepare('SELECT * FROM orders WHERE user_id = ? AND idempotency_key = ?').get(req.userId, key);
+    if (existing) return res.status(200).json(serializeOrder(existing));
+  }
+  const { built, total, email, capacity } = preparePersonalOrder(req.userId, req.body);
+  capacity();   // checked before payment (DLV §8); checked again when the paid order is saved
+  const card = roundAed(total - Math.min(creditBalance(req.userId), total));
+  const body = { ...req.body, idempotencyKey: undefined };
+  startCheckout(req, {
+    kind: 'personal_order', payload: { body, key }, amount: card, idempotencyKey: key,
+    email: email || db.prepare('SELECT login_email FROM users WHERE id = ?').get(req.userId)?.login_email,
+    description: `Morning Box · ${built.length} morning${built.length > 1 ? 's' : ''}`
+  }).then(r => (r.checkout
+    ? res.status(202).json({ checkout: r.checkout })
+    : res.status(201).json(serializeOrder(db.prepare('SELECT * FROM orders WHERE id = ?').get(r.done))))).catch(next);
 });
 
 const RECIPE_FIELDS = ['context', 'recipeId', 'components', 'size', 'addons', 'danishFlavour'];
 
 /** Edit one morning before its cutoff: context, size, add-ons, window, delivery address.
     A window-only change keeps the breakfast exactly as ordered. A morning on
-    safety hold must be re-planned against the current profile. */
-personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res) => {
-  const order = ownOrder(req.userId, req.params.id);
-  const day = ownDay(order, req.params.date);
+    safety hold must be re-planned against the current profile.
+    A higher price is paid first: without `payment` such an edit changes nothing and returns { due }. */
+function editPersonalDay(userId, orderId, date, body, payment = null) {
+  const order = ownOrder(userId, orderId);
+  const day = ownDay(order, date);
   if (day.cancelled) throw bad('cancelled', 'This morning was cancelled.');
+  /* A refunded morning (e.g. the bakery couldn't make it) is settled: changing it could pay back twice. */
+  if ((day.refund || 0) > 0 || day.delivery_state === 'Not Fulfilled') throw bad('refunded', 'This morning has already been refunded, so it can’t be changed. Contact us if you need help.');
   assertEditable(day.date, day.stage);
-  const window = req.body.window ?? day.window;
+  const window = body.window ?? day.window;
   /* FLW §8 / DLV §2: the delivery location of a booked morning can change before cutoff too. */
   const oldAddress = parse(day.address);
-  const address = req.body.address ? validateAddress(req.body.address) : oldAddress;
+  const address = body.address ? { ...validateAddress(body.address), ...(oldAddress.mobile ? { mobile: oldAddress.mobile } : {}) } : oldAddress;
   const addressChanged = ['building', 'unit', 'area', 'handover', 'notes'].some(k => (address[k] || '') !== (oldAddress[k] || ''));
-  const rebuild = RECIPE_FIELDS.some(k => req.body[k] !== undefined) || !!day.safety_hold;
+  const rebuild = RECIPE_FIELDS.some(k => body[k] !== undefined) || !!day.safety_hold;
   let b = null;
   if (rebuild) {
-    const profile = loadProfile(req.userId);
+    const profile = loadProfile(userId);
     const current = parse(day.cfg);
     b = buildPersonalDay({
-      context: req.body.context ?? current.context,
-      recipeId: req.body.recipeId ?? current.recipeId,
-      components: req.body.components ?? current.components,
-      danishFlavour: req.body.danishFlavour ?? current.danishFlavour,
-      size: req.body.size ?? current.size,
-      addons: req.body.addons ?? current.addons
+      context: body.context ?? current.context,
+      recipeId: body.recipeId ?? current.recipeId,
+      components: body.components ?? current.components,
+      danishFlavour: body.danishFlavour ?? current.danishFlavour,
+      size: body.size ?? current.size,
+      addons: body.addons ?? current.addons
     }, profile);
   }
   const changes = [];
@@ -364,6 +408,9 @@ personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res) => {
     if (JSON.stringify(b.cfg.addons) !== JSON.stringify(cur.addons)) changes.push(b.cfg.addons.length ? `extras to ${extrasText(b.cfg.addons)}` : 'removed extras');
     if (b.price !== day.price) changes.push(`price AED ${day.price} → AED ${b.price}`);
   }
+  const due = b ? roundAed(b.price - day.price) : 0;
+  if (due > 0 && !payment) return { due, label: `Morning Box · change to ${prettyDate(day.date)}` };
+  if (due > 0 && roundAed(payment.amount) !== due) throw new ApiError(409, 'price_changed', 'The price of this change moved while you were paying. Your payment is being refunded — please try again.');
   tx(() => {
     if (window !== day.window) assertCapacity(day.date, window, 1, { excludeOrderDay: day.id });
     /* The changed breakfast must still be makeable by a bakery with capacity (DLV §8). */
@@ -372,8 +419,11 @@ personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res) => {
     if (b) {
       db.prepare('UPDATE order_days SET cfg = ?, trace = ?, price = ?, context = ?, window = ?, safety_hold = 0 WHERE id = ?')
         .run(json(b.cfg), json(b.trace), b.price, b.cfg.context, window, day.id);
-      // Payment gateway integration point: charge (positive) or refund (negative) the difference.
-      if (b.price !== day.price) db.prepare('INSERT INTO payment_adjustments (order_day_id, amount) VALUES (?, ?)').run(day.id, b.price - day.price);
+      /* A higher price was paid before getting here; it is recorded against the order so refunds can reach it. */
+      if (b.price !== day.price) db.prepare('INSERT INTO payment_adjustments (order_day_id, amount) VALUES (?, ?)').run(day.id, roundAed(b.price - day.price));
+      if (due > 0) recordPayment('personal', order.id, payment);
+      /* A lower price is paid back the same way as a refund: card first up to what it paid, the rest as credit. */
+      if (b.price < day.price) payBack(order.id, userId, roundAed(day.price - b.price), `price change ${day.date}`);
     } else {
       db.prepare('UPDATE order_days SET window = ? WHERE id = ?').run(window, day.id);
     }
@@ -381,7 +431,18 @@ personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res) => {
     if (changes.length) logEvent(order.id, day.date, 'changed', `You changed ${changes.join(', ')}`);
   });
   if (b || addressChanged) reallocateProvisional([day.date]);
-  res.json(serializeOrder(order));
+  return { order };
+}
+registerCheckoutHandler('personal_change', (userId, p, payment) => { editPersonalDay(userId, p.orderId, p.date, p.body, payment); return p.orderId; });
+
+/** Response: the order, or 202 { checkout } when the change costs more and must be paid first. */
+personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res, next) => {
+  const r = editPersonalDay(req.userId, req.params.id, req.params.date, req.body);
+  if (r.order) return res.json(serializeOrder(r.order));
+  const p = { orderId: req.params.id, date: req.params.date, body: req.body };
+  startCheckout(req, { kind: 'personal_change', payload: p, amount: r.due, description: r.label,
+    email: db.prepare('SELECT COALESCE(email, login_email) AS e FROM users WHERE id = ?').get(req.userId)?.e })
+    .then(x => (x.checkout ? res.status(202).json({ checkout: x.checkout }) : res.json(serializeOrder(ownOrder(req.userId, req.params.id))))).catch(next);
 });
 
 /** Cancel before cutoff → full refund for that morning; other mornings unaffected (MB-DLV-001 §11). */
@@ -390,10 +451,14 @@ personalRouter.post('/orders/:id/days/:date/cancel', requireUser, (req, res) => 
   const day = ownDay(order, req.params.date);
   if (!day.cancelled) {
     assertEditable(day.date, day.stage);
-    // Payment gateway integration point: refund `day.price` against order.payment_ref.
-    db.prepare('UPDATE order_days SET cancelled = 1, refund = price, safety_hold = 0 WHERE id = ?').run(day.id);
-    logEvent(order.id, day.date, 'cancelled', `You cancelled this morning · AED ${day.price} refund`);
-    notify(req.userId, `${order.id}:${day.date}`, 'refund', `Your ${prettyDate(day.date)} morning is cancelled. AED ${day.price} will be refunded to your original payment method.`);
+    /* Only what has not been refunded already is paid back (e.g. after a bakery couldn't make it). */
+    const due = Math.max(0, roundAed(day.price - (day.refund || 0)));
+    const back = tx(() => {
+      db.prepare('UPDATE order_days SET cancelled = 1, refund = ?, safety_hold = 0 WHERE id = ?').run(roundAed((day.refund || 0) + due), day.id);
+      return due > 0 ? payBack(order.id, req.userId, due, `cancelled ${day.date}`) : { card: 0, credit: 0 };
+    });
+    logEvent(order.id, day.date, 'cancelled', `You cancelled this morning · ${paidBackText(back)}`);
+    notify(req.userId, `${order.id}:${day.date}`, 'refund', `Your ${prettyDate(day.date)} morning is cancelled. ${paidBackText(back)}.`);
   }
   res.json(serializeOrder(order));
 });
@@ -424,7 +489,7 @@ personalRouter.post('/orders/:id/days/:date/feedback', requireUser, (req, res) =
     Each report opens an operations exception; allergy concerns are top priority. */
 export const ISSUE_REASONS = {
   'Not delivered': 'Delivery Failed',
-  'Arrived late': 'Courier Delay',
+  'Arrived late': 'Delivery Delay',
   'Wrong or missing items': 'Order Accuracy',
   'Allergy concern': 'Safety Incident',
   'Quality issue': 'QC Failure',
@@ -443,11 +508,10 @@ personalRouter.post('/orders/:id/days/:date/issue', requireUser, (req, res) => {
   }
   const note = plain(req.body.note, 500);
   const photo = cleanPhoto(req.body.photo);
-  /* Complaint data feeds partner performance (OPS §10): link it to the bakery that prepared it, or the route that delivered it. */
+  /* Complaint data feeds partner performance (OPS §10): link it to the bakery that prepared and delivered it. */
   const bakery = day.bakery_id ? db.prepare('SELECT name FROM bakeries WHERE id = ?').get(day.bakery_id)?.name : null;
-  const courierSide = ['Not delivered', 'Arrived late'].includes(req.body.reason);
   const exceptionId = raiseException({ ref: `personal:${day.id}`, kind, note: `${req.body.reason}${note ? `: ${note}` : ''}`, customerCategory: 'personal', dedupe: false,
-    owner: 'Operations', responsibleParty: courierSide ? (day.route_id ? `Route ${day.route_id}` : 'Delivery partner') : bakery, action: 'Contact the customer; decide the remedy' });
+    owner: 'Operations', responsibleParty: bakery, action: 'Contact the customer; decide the remedy' });
   db.prepare('INSERT INTO customer_issues (user_id, order_id, date, reason, note, exception_id, photo) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(req.userId, order.id, day.date, req.body.reason, note || null, exceptionId, photo);
   logEvent(order.id, day.date, 'issue', `You reported: ${req.body.reason}`);
@@ -476,7 +540,7 @@ personalRouter.get('/orders/:id/receipt', requireUser, (req, res) => {
 <p class="r">Delivery: included<br>Total excluding VAT: AED ${money(o.total - vat)}<br>VAT ${Math.round(VAT_RATE * 100)}%: AED ${money(vat)}</p>
 <p class="r" style="font-size:18px"><b>Total AED ${money(o.total)}</b></p>
 ${refunded ? `<p class="r">Refunded for cancelled mornings: AED ${money(refunded)}</p>` : ''}
-<p style="font-size:12px">Paid by ${o.method === 'apple' ? 'Apple Pay' : 'card'}. Prices include VAT.</p>`);
+<p style="font-size:12px">${o.creditUsed ? `Paid with Morning Box credit: AED ${money(o.creditUsed)}. Paid by ${o.method === 'apple' ? 'Apple Pay' : 'card'}: AED ${money(o.total - o.creditUsed)}.` : `Paid by ${o.method === 'apple' ? 'Apple Pay' : 'card'}.`} Prices include VAT.</p>`);
 });
 
 /** Add the order's mornings to a calendar (.ics). Times are Dubai local (UTC+4, no daylight saving). */

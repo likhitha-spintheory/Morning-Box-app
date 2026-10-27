@@ -75,7 +75,7 @@ export function assertEditable(date, stage = 0) {
    A window stays available only while production and delivery capacity
    remain. Capacity is counted in boxes per date and window. */
 export const WINDOW_CAPACITY = Number(process.env.WINDOW_CAPACITY || 120);
-/* Delivery capacity per window (boxes the couriers can carry), set in Admin → Company & delivery. */
+/* Delivery capacity per window (boxes the bakeries can deliver), set in Admin → Company & delivery. */
 export const DELIVERY_CAPACITY = { w1: WINDOW_CAPACITY, w2: WINDOW_CAPACITY, w3: WINDOW_CAPACITY };
 const capOf = w => DELIVERY_CAPACITY[w] ?? WINDOW_CAPACITY;
 export function boxesBooked(date, window, { excludeOrderDay, excludeBusinessDay } = {}) {
@@ -127,6 +127,7 @@ export function buildPersonalDay(input, profile) {
   }
 
   const groups = addonGroups(profile);
+  if (Array.isArray(addons) && addons.length > 10) throw bad('addon_invalid', 'Up to 10 extras per morning.');
   config.addons = (Array.isArray(addons) ? addons : []).map(a => {
     const g = groups.find(x => x.id === a?.group);
     if (!g || !g.items.includes(a.item)) throw bad('addon_invalid', 'One of your extras is not available for your profile.');
@@ -192,10 +193,12 @@ export function buildBusinessDay(input) {
     merged.set(key, { recipeId: l.recipeId, size: l.size, qty: (merged.get(key)?.qty || 0) + l.qty });
   }
   const lines = [...merged.values()].map(l => ({ ...l, model: modelFor(l.recipeId) }));
+  if (input.specials != null && !Array.isArray(input.specials)) throw bad('special_invalid', 'Special Breakfasts must be a list.');
   if ((input.specials || []).length > 20) throw bad('special_invalid', 'Up to 20 Special Breakfast groups per day.');
   const specials = (input.specials || []).map(s => {
-    const dietary = (s.dietary || []).filter(x => ids(DIETARY).includes(x));
-    const allergies = (s.allergies || []).filter(x => ids(ALLERGENS).includes(x));
+    if (!s || typeof s !== 'object') throw bad('special_invalid', 'Each Special Breakfast needs at least one requirement.');
+    const dietary = (Array.isArray(s.dietary) ? s.dietary : []).filter(x => ids(DIETARY).includes(x));
+    const allergies = (Array.isArray(s.allergies) ? s.allergies : []).filter(x => ids(ALLERGENS).includes(x));
     if (!dietary.length && !allergies.length) throw bad('special_invalid', 'Each Special Breakfast needs at least one requirement.');
     if (!Number.isInteger(s.qty) || s.qty < 1) throw bad('special_invalid', 'Each Special Breakfast needs a quantity.');
     const size = s.size || 'regular';
@@ -216,7 +219,7 @@ export function buildBusinessDay(input) {
       dietary: s.dietary, allergies: s.allergies, qty: s.qty, size: s.size, recipeId: s.resolved.recipe.id,
       components: s.resolved.components, substitutions: s.resolved.substitutions, variants: s.resolved.variants || {}
     })),
-    gross: Math.round(p.gross), discount: Math.round(p.discount), total: Math.round(p.total), discountPct: p.discountPct
+    gross: p.gross, discount: p.discount, total: p.total, discountPct: p.discountPct
   };
 }
 
@@ -280,8 +283,6 @@ export const windowRoom = (b, window, usedInWindow = 0) => {
   const cap = windowCapacity(b)?.[window];
   return cap == null ? Infinity : cap - usedInWindow;
 };
-/** A route / courier id as stored on a delivery (letters, digits, dash, space). */
-export const cleanRouteId = v => String(v || '').replace(/[^\w\- ]/g, '').trim().slice(0, 30);
 export function bakeriesFor(date) {
   const conds = db.prepare('SELECT * FROM bakery_conditions WHERE date = ?').all(date);
   return activeBakeries(date).flatMap(b => {
@@ -320,16 +321,17 @@ export const windowStart = (date, window) => new Date(`${date}T${WINDOW_START[wi
 export const windowEnd = (date, window) => new Date(`${date}T${WINDOW_END[window] || '10:30'}:00`);
 
 /* ---------- Exceptions (MB-OPS-001 §8) ---------- */
-export const EXCEPTION_CATEGORIES = ['Safety', 'Bakery', 'Courier', 'Customer/Location', 'Payment'];
+/* The partner bakery delivers its own orders, so delivery delays and failures are the bakery's. */
+export const EXCEPTION_CATEGORIES = ['Safety', 'Bakery', 'Customer/Location', 'Payment'];
 export const EXCEPTION_KINDS = [...BASE_EXCEPTION_KINDS, 'Safety Incident', 'Pickup Delay', 'QC Failure', 'Delivery Failed', 'Payment Issue', 'Customer Issue', 'Handover Mismatch', 'Order Accuracy', 'Packaging Issue', 'Reconciliation Mismatch'];
 const KIND_CATEGORY = {
   'Product/Ingredient Unavailable': 'Bakery', 'Capacity Issue': 'Bakery', 'Dietary/Allergy Issue': 'Safety',
-  'Equipment/Operational Issue': 'Bakery', 'Courier Delay': 'Courier', 'Location Unavailable': 'Customer/Location',
+  'Equipment/Operational Issue': 'Bakery', 'Delivery Delay': 'Bakery', 'Location Unavailable': 'Customer/Location',
   'Other': 'Customer/Location', 'Safety Incident': 'Safety', 'Pickup Delay': 'Bakery', 'QC Failure': 'Bakery',
-  'Delivery Failed': 'Courier', 'Payment Issue': 'Payment', 'Customer Issue': 'Customer/Location', 'Handover Mismatch': 'Bakery', 'Order Accuracy': 'Bakery', 'Packaging Issue': 'Bakery', 'Reconciliation Mismatch': 'Payment'
+  'Delivery Failed': 'Bakery', 'Payment Issue': 'Payment', 'Customer Issue': 'Customer/Location', 'Handover Mismatch': 'Bakery', 'Order Accuracy': 'Bakery', 'Packaging Issue': 'Bakery', 'Reconciliation Mismatch': 'Payment'
 };
 /** Safety concerns receive the highest operational priority (1). */
-export const PRIORITY = { Safety: 1, Bakery: 2, Courier: 2, Payment: 2, 'Customer/Location': 3 };
+export const PRIORITY = { Safety: 1, Bakery: 2, Payment: 2, 'Customer/Location': 3 };
 
 /**
  * Record an exception. Unless `dedupe` is false, an unresolved exception with

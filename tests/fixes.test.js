@@ -1,6 +1,7 @@
 /* Regression tests for the issues found in the October 2026 review. */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
 process.env.TZ = 'Asia/Dubai';
 process.env.DB_FILE = ':memory:';
@@ -46,7 +47,7 @@ async function opsDeliver(kind, id, date, point = 'Reception') {
   const ops = (m, p, b) => call(m, `/ops${p}`, b, {}, H);
   await ops('POST', '/allocate', { date });
   const row = (await ops('GET', `/dashboard?date=${date}`)).body.rows.find(r => r.kind === kind && r.id === id);
-  for (const [p, b] of [['bakery-state', { state: 'In Preparation' }], ['bakery-state', { state: 'Ready', qc: { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true } }], ['route', { routeId: 'R1' }]]) {
+  for (const [p, b] of [['bakery-state', { state: 'In Preparation' }], ['bakery-state', { state: 'Ready', qc: { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true } }]]) {
     const r = await ops('POST', `/days/${kind}/${id}/${p}`, b); if (r.status !== 200) throw new Error(`${p}: ${JSON.stringify(r.body)}`);
   }
   const parts = kind === 'business' && row.allocation?.length > 1 ? row.allocation : [{ bakeryId: undefined, boxes: row.boxes }];
@@ -54,7 +55,7 @@ async function opsDeliver(kind, id, date, point = 'Reception') {
     const r = await ops('POST', `/days/${kind}/${id}/handover`, { bakeryId: part.bakeryId, boxes: part.boxes, specialBoxes: parts.length > 1 ? undefined : row.specialBoxes });
     if (r.status !== 200) throw new Error(`handover: ${JSON.stringify(r.body)}`);
   }
-  for (const [p, b] of [['out', {}], ['delivered', { deliveryPoint: point }]]) {
+  for (const [p, b] of [['delivered', { deliveryPoint: point }]]) {
     const r = await ops('POST', `/days/${kind}/${id}/${p}`, b); if (r.status !== 200) throw new Error(`${p}: ${JSON.stringify(r.body)}`);
   }
 }
@@ -101,7 +102,7 @@ test('sessions: httpOnly cookie, expiry, sign out on all devices', async () => {
   await call('POST', '/auth/logout-all', {}, { token: a.token });
   assert.equal((await call('GET', '/me', null, { token: b.token })).status, 401);
   const c = await signIn('502220000');
-  db.prepare('UPDATE sessions SET expires_at = 1 WHERE token = ?').run(c.token);
+  db.prepare('UPDATE sessions SET expires_at = 1 WHERE token = ?').run(createHash('sha256').update(`session:${c.token}`).digest('hex'));   // stored hashed
   assert.equal((await call('GET', '/me', null, { token: c.token })).status, 401);
 });
 

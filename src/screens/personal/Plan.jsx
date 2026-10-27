@@ -60,7 +60,8 @@ const profileKey = p => JSON.stringify([p.eatingStyle, [...p.preferences].sort()
 /* ---------- Start: skip onboarding for returning users ---------- */
 export function Start() {
   const { state } = useStore();
-  return <Navigate to={state.profileDone ? '/plan/dates' : '/profile/eating'} replace />;
+  /* A first plan that is still unpaid restarts at step 1 (answers kept), so the 5-step flow never opens on step 4. */
+  return <Navigate to={state.profileDone && !state.onboarding ? '/plan/dates' : '/profile/eating'} replace />;
 }
 
 /* ---------- Choose dates (style-1 P07) ---------- */

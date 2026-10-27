@@ -19,7 +19,8 @@ const BizReview = biz('BizReview'), BizConfirmed = biz('BizConfirmed'), BizManag
 /* The operations console is for the Morning Box team only. */
 const Ops = lazy(() => import('./screens/Ops.jsx'));
 const Bakery = lazy(() => import('./screens/Bakery.jsx'));
-const Courier = lazy(() => import('./screens/Courier.jsx'));
+/* Back from the card payment page. */
+const PayReturn = lazy(() => import('./screens/PayReturn.jsx'));
 
 function ScrollTop() {
   const { pathname } = useLocation();
@@ -79,7 +80,7 @@ export default function App() {
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/ops" element={<Ops />} />
         <Route path="/bakery" element={<Bakery />} />
-        <Route path="/courier" element={<Courier />} />
+        <Route path="/pay/:id" element={<PayReturn />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

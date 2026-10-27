@@ -85,7 +85,6 @@ test('other allergies: special box, label warning, and no preparation or handove
   assert.equal((await call('POST', `/bakery/days/personal/${id}/state`, { state: 'Ready', qc: QC }, {}, B)).body.error, 'safety_hold');
   db.prepare('UPDATE order_days SET safety_hold = 0 WHERE id = ?').run(id);
   assert.equal((await call('POST', `/bakery/days/personal/${id}/state`, { state: 'Ready', qc: QC }, {}, B)).status, 200);
-  await ok('POST', `/days/personal/${id}/route`, { routeId: 'R1' });
   assert.equal((await ops('POST', `/days/personal/${id}/handover`, { boxes: 1, specialBoxes: 0 })).body.error, 'handover_mismatch', 'the allergy box must be counted as special');
   await ok('POST', `/days/personal/${id}/handover`, { boxes: 1, specialBoxes: 1 });
 
@@ -118,16 +117,13 @@ test('a delivery is only marked failed after it went out; re-attempt still works
   await ops('POST', '/allocate', { date });
   await ok('POST', `/days/personal/${id}/bakery-state`, { state: 'Ready', qc: QC });
   assert.equal((await ops('POST', `/days/personal/${id}/failed`, { reason: 'Contact unreachable' })).body.error, 'not_out');
-  await ok('POST', `/days/personal/${id}/route`, { routeId: 'R2' });
   await ok('POST', `/days/personal/${id}/handover`, { boxes: 1, specialBoxes: 0 });
-  assert.equal((await ops('POST', `/days/personal/${id}/failed`, { reason: 'Contact unreachable' })).body.error, 'not_out');
-  await ok('POST', `/days/personal/${id}/out`);
   await ok('POST', `/days/personal/${id}/failed`, { reason: 'Contact unreachable' });
   await ok('POST', `/days/personal/${id}/out`);
   await ok('POST', `/days/personal/${id}/delivered`, { deliveryPoint: 'Reception' });
 });
 
-test('bakery handover is not a courier pickup; pickup is confirmed separately; delays attributed correctly', async () => {
+test('the bakery dispatch takes it out for delivery; late deliveries are the bakery’s Pickup or Delivery Delay', async () => {
   const date = dates[3];
   const { id } = await order('509300005', date);
   await ops('POST', '/allocate', { date });
@@ -135,34 +131,27 @@ test('bakery handover is not a courier pickup; pickup is confirmed separately; d
   const B = { 'x-bakery-code': code };
   await call('POST', '/bakery/plan/confirm', { date }, {}, B);
   await call('POST', `/bakery/days/personal/${id}/state`, { state: 'Ready', qc: QC }, {}, B);
-  await ok('POST', `/days/personal/${id}/route`, { routeId: 'R3' });
   assert.equal((await call('POST', `/bakery/days/personal/${id}/handover`, { boxes: 1, specialBoxes: 0 }, {}, B)).status, 200);
-  let raw = db.prepare('SELECT delivery_state, picked_up_at FROM order_days WHERE id = ?').get(id);
-  assert.equal(raw.delivery_state, null); assert.equal(raw.picked_up_at, null);
-  assert.equal((await ops('POST', `/days/personal/${id}/out`)).body.error, 'not_picked_up');
-  await ok('POST', `/days/personal/${id}/pickup`);
-  raw = db.prepare('SELECT delivery_state, picked_up_at FROM order_days WHERE id = ?').get(id);
-  assert.equal(raw.delivery_state, 'Picked Up'); assert.ok(raw.picked_up_at);
-  assert.equal((await ops('POST', `/days/personal/${id}/pickup`)).body.error, 'already_picked_up');
-  await ok('POST', `/days/personal/${id}/out`);
+  const raw = db.prepare('SELECT delivery_state, picked_up_at, stage FROM order_days WHERE id = ?').get(id);
+  assert.equal(raw.delivery_state, 'Out for Delivery'); assert.ok(raw.picked_up_at); assert.equal(raw.stage, 2);
+  assert.equal((await ops('POST', `/days/personal/${id}/pickup`)).status, 404, 'no separate courier pickup');
   /* Delivered after the window: the bakery was Ready after ready-by → a bakery delay. */
   db.prepare('UPDATE order_days SET date = ? WHERE id = ?').run(yesterday, id);
   await ok('POST', `/days/personal/${id}/delivered`, { deliveryPoint: 'Reception' });
   const late = db.prepare('SELECT kind, category FROM exceptions WHERE ref = ?').get(`personal:${id}`);
   assert.equal(late.kind, 'Pickup Delay'); assert.equal(late.category, 'Bakery');
 
-  /* …and Ready on time → the courier's delay. */
+  /* …and Ready on time → a Delivery Delay, still the bakery's. */
   const { id: id2 } = await order('509300006', date);
   await ops('POST', '/allocate', { date });
   await ok('POST', `/days/personal/${id2}/bakery-state`, { state: 'Ready', qc: QC });
-  await ok('POST', `/days/personal/${id2}/route`, { routeId: 'R3' });
   await ok('POST', `/days/personal/${id2}/handover`, { boxes: 1, specialBoxes: 0 });
-  await ok('POST', `/days/personal/${id2}/out`);
   const states = JSON.parse(db.prepare('SELECT part_states FROM order_days WHERE id = ?').get(id2).part_states);
   for (const k of Object.keys(states)) states[k].readyAt = new Date(`${yesterday}T06:00:00`).toISOString();
   db.prepare('UPDATE order_days SET date = ?, part_states = ? WHERE id = ?').run(yesterday, JSON.stringify(states), id2);
   await ok('POST', `/days/personal/${id2}/delivered`, { deliveryPoint: 'Reception' });
-  assert.equal(db.prepare('SELECT kind FROM exceptions WHERE ref = ?').get(`personal:${id2}`).kind, 'Courier Delay');
+  const late2 = db.prepare('SELECT kind, category FROM exceptions WHERE ref = ?').get(`personal:${id2}`);
+  assert.equal(late2.kind, 'Delivery Delay'); assert.equal(late2.category, 'Bakery');
 });
 
 test('at risk: Pickup Delay only when the bakery was not Ready by ready-by', async () => {
@@ -172,7 +161,7 @@ test('at risk: Pickup Delay only when the bakery was not Ready by ready-by', asy
   await ops('POST', '/allocate', { date });
   await ok('POST', `/days/personal/${ready}/bakery-state`, { state: 'Ready', qc: QC });
   assert.equal(flagAtRisk(new Date(`${date}T09:20:00`)), 2);
-  assert.equal(db.prepare('SELECT kind FROM exceptions WHERE ref = ?').get(`personal:${ready}`).kind, 'Courier Delay');
+  assert.equal(db.prepare('SELECT kind FROM exceptions WHERE ref = ?').get(`personal:${ready}`).kind, 'Delivery Delay');
   assert.equal(db.prepare('SELECT kind FROM exceptions WHERE ref = ?').get(`personal:${notReady}`).kind, 'Pickup Delay');
 });
 

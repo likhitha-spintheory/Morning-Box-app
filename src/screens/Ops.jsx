@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Screen, TopBar, Icon } from '../components/ui.jsx';
 import { addDaysIso, dubaiTodayIso } from '../domain/standards.js';
 import { Live, Prep, Labels } from './OpsLive.jsx';
-import { Bakeries, Pricing, Company, Products, Couriers } from './OpsAdmin.jsx';
+import { Bakeries, Pricing, Company, Products } from './OpsAdmin.jsx';
 import { MenuRules } from './OpsMenu.jsx';
 import { Dashboard } from './OpsDashboard.jsx';
 
@@ -17,7 +17,7 @@ const GROUPS = [
   ['Today', [['days', 'Live', 'clock'], ['prep', 'Production', 'bread'], ['labels', 'Labels', 'doc']]],
   ['Service', [['exceptions', 'Exceptions', 'alert'], ['support', 'Support', 'help'], ['feedback', 'Feedback', 'heart']]],
   ['Insights', [['report', 'Reports', 'bookmark'], ['closed', 'Closed days', 'cal']]],
-  ['Admin', [['bakeries', 'Bakeries', 'building'], ['menu', 'Menu rules', 'bowl'], ['couriers', 'Couriers', 'truck'], ['products', 'Products & allergens', 'shieldAlert'], ['pricing', 'Prices', 'card'], ['company', 'Company', 'brief']]]
+  ['Admin', [['bakeries', 'Bakeries', 'building'], ['menu', 'Menu rules', 'bowl'], ['products', 'Products & allergens', 'shieldAlert'], ['pricing', 'Prices', 'card'], ['company', 'Company', 'brief']]]
 ];
 const TABS = GROUPS.flatMap(([group, items]) => items.map(([id, label, icon]) => ({ id, label, icon, group })));
 
@@ -47,7 +47,7 @@ export default function Ops() {
     if (!key) return;
     setError(''); setData(null);
     const path = { home: `/dashboard?date=${date}`, days: `/dashboard?date=${date}`, prep: `/prep?date=${date}`, labels: `/labels?date=${date}`, support: '/support', feedback: '/feedback', exceptions: '/exceptions', closed: '/closed-dates',
-      report: `/report?from=${range.from}&to=${range.to}`, bakeries: '/admin/bakeries', menu: '/admin/menu', couriers: '/admin/couriers', products: '/admin/products', pricing: '/admin/pricing', company: '/admin/company' }[tab];
+      report: `/report?from=${range.from}&to=${range.to}`, bakeries: '/admin/bakeries', menu: '/admin/menu', products: '/admin/products', pricing: '/admin/pricing', company: '/admin/company' }[tab];
     try { const value = await call('GET', path); setData({ key: `${tab}|${date}|${range.from}|${range.to}`, value }); } catch (e) { setError(e.message); if (e.status === 401) save(''); }
   }, [key, tab, date, range, call]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
@@ -126,7 +126,6 @@ export default function Ops() {
         {view && tab === 'report' && <Report data={view} />}
         {view && tab === 'bakeries' && <Bakeries items={view} call={call} act={act} busy={busy} />}
         {view && tab === 'menu' && <MenuRules data={view} act={act} busy={busy} call={call} />}
-        {view && tab === 'couriers' && <Couriers call={call} />}
         {view && tab === 'products' && <Products data={view} />}
         {view && tab === 'pricing' && <Pricing data={view} act={act} busy={busy} />}
         {view && tab === 'company' && <Company data={view} act={act} busy={busy} call={call} />}
@@ -181,7 +180,7 @@ function Feedback({ data }) {
   );
 }
 
-const CATEGORY_CLASS = { Safety: 'off', Bakery: 'prep', Courier: 'prep', Payment: 'prep', 'Customer/Location': 'done' };
+const CATEGORY_CLASS = { Safety: 'off', Bakery: 'prep', Courier: 'prep' /* older exceptions */, Payment: 'prep', 'Customer/Location': 'done' };
 /* MB-OPS-001 §8: Safety first; every exception has an Owner, Action and Resolution. */
 function Exceptions({ items, busy, act, call }) {
   const [kinds, setKinds] = useState([]);
@@ -281,7 +280,7 @@ function Closed({ items, busy, act }) {
 const CSV_COLUMNS = [['date', 'Date'], ['boxes', 'Boxes'], ['personalMornings', 'Personal mornings'], ['businessOrders', 'Business orders'], ['businessBoxes', 'Business boxes'],
   ['personalRevenue', 'Personal revenue AED'], ['businessRevenue', 'Business revenue AED'], ['businessDiscounts', 'Business discounts AED'], ['revenue', 'Revenue AED (incl. VAT)'],
   ['cancelled', 'Cancelled'], ['refundedOrders', 'Refunded orders'], ['refunds', 'Refunds AED'], ['credits', 'Credits AED'], ['delivered', 'Delivered'], ['onTime', 'On time'], ['late', 'Late'], ['failed', 'Failed'],
-  ['exceptions', 'Exceptions'], ['safety', 'Safety'], ['bakeryIssues', 'Bakery issues'], ['courierIssues', 'Courier issues'], ['customerIssues', 'Customer/location issues'],
+  ['exceptions', 'Exceptions'], ['safety', 'Safety'], ['bakeryIssues', 'Bakery issues'], ['customerIssues', 'Customer/location issues'],
   ['loved', 'Loved it'], ['notForMe', 'Not for me']];
 
 /* Daily operational snapshot (MB-OPS-001 §9, §11), partner performance and KPIs (Master Plan §15). */
@@ -320,7 +319,7 @@ function Report({ data }) {
         <tbody>{data.days.map(d => (
           <tr key={d.date} className={d.failed || d.safety ? 'warn' : ''}><td>{d.date}</td><td>{d.boxes}{d.businessBoxes ? <small> ({d.businessBoxes} business)</small> : null}</td><td>{d.revenue}</td>
             <td>{d.delivered}</td><td>{d.onTime}</td><td>{d.late}</td><td>{d.failed}</td><td>{d.refunds}{d.refundedOrders ? <small> ({d.refundedOrders} order{d.refundedOrders > 1 ? 's' : ''})</small> : null}{d.credits ? <small> + {d.credits} credit</small> : null}</td>
-            <td>{d.exceptions ? <small>{d.exceptions}: {[['Safety', d.safety], ['Bakery', d.bakeryIssues], ['Courier', d.courierIssues], ['Customer', d.customerIssues]].filter(x => x[1]).map(x => `${x[0]} ${x[1]}`).join(', ')}</small> : 0}</td>
+            <td>{d.exceptions ? <small>{d.exceptions}: {[['Safety', d.safety], ['Bakery', d.bakeryIssues], ['Customer', d.customerIssues]].filter(x => x[1]).map(x => `${x[0]} ${x[1]}`).join(', ')}</small> : 0}</td>
             <td>{d.loved || d.notForMe ? `${d.loved} / ${d.notForMe}` : '—'}</td></tr>
         ))}</tbody>
       </table>
@@ -339,13 +338,6 @@ function Report({ data }) {
         <thead><tr><th>Bakery</th><th>Mornings / boxes</th><th>Delivered</th><th>Ready on time</th><th>Delayed</th><th>Not fulfilled</th><th>Plans confirmed</th><th>Accuracy / quality issues</th><th>Loved it / Not for me</th></tr></thead>
         <tbody>{data.partners.map(p => <tr key={p.id} className={p.unable || p.accuracyIssues ? 'warn' : ''}><td>{p.name}</td><td>{p.mornings} / {p.boxes}</td><td>{p.delivered}</td><td>{p.readyOnTime != null ? `${p.readyOnTime}%` : '—'}</td><td>{p.delayed}</td><td>{p.unable}</td><td>{p.planConfirmation != null ? `${p.planConfirmation}% of ${p.plans}` : '—'}</td><td>{p.accuracyIssues} / {p.qualityIssues}</td><td>{p.loved} / {p.notForMe}</td></tr>)}</tbody>
       </table>
-      <h2 className="h3">Couriers / routes</h2>
-      {data.routes.length ? (
-        <table className="ops-table">
-          <thead><tr><th>Route</th><th>Deliveries</th><th>Late pickup</th><th>Delivered</th><th>Late</th><th>Failed</th><th>Complaints</th></tr></thead>
-          <tbody>{data.routes.map(r => <tr key={r.route} className={r.failed || r.complaints ? 'warn' : ''}><td>{r.route}</td><td>{r.deliveries}</td><td>{r.pickupLate}</td><td>{r.delivered}</td><td>{r.late}</td><td>{r.failed}</td><td>{r.complaints}</td></tr>)}</tbody>
-        </table>
-      ) : <p className="help" style={{ margin: 0 }}>No routes recorded in this period.</p>}
       <h2 className="h3">Reconciliation</h2>
       {data.reconciliation.length ? (
         <table className="ops-table"><thead><tr><th>Order</th><th>Mismatch</th></tr></thead>

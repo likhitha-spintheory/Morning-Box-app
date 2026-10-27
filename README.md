@@ -30,6 +30,26 @@ Data is stored in `data/morningbox.db` (override with `DB_FILE`). Other settings
 disabled until a real key is set), `NODE_ENV=production` (hides the development OTP code and the demo status
 endpoint, marks the session cookie Secure, sends HSTS), `TRUST_PROXY` (set behind a load balancer, e.g. `1`, so
 sign-in rate limits see the real client IP).
+Settings can also go in a `.env` file beside `package.json` (git-ignored; the API reads it at start-up).
+
+**Sign-in codes.** Customers sign in with a mobile number (code on WhatsApp) or an email (code by email);
+`POST /api/auth/otp` and `/verify` take `{ mobile }` or `{ email }`.
+- WhatsApp (Meta WhatsApp Cloud API, `server/whatsapp.js`): `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
+  `WHATSAPP_TEMPLATE` (an approved *Authentication* template with a copy-code button, default `morningbox_login`),
+  `WHATSAPP_TEMPLATE_LANG` (default `en`).
+- Email (Resend, `server/mail.js`): `RESEND_API_KEY`, `EMAIL_FROM` (e.g. `Morning Box <login@send.morningbox.ae>`, on a
+  domain verified in Resend). Also sends order confirmations when the order has an email.
+- Without a provider, development shows the code on screen; production answers `whatsapp_unavailable` /
+  `email_unavailable` instead of pretending a code was sent.
+
+**Payments** (`server/payments.js`). Pay first, then create: the order (or a change that costs more) is kept as a
+pending checkout, the customer pays on Stripe Checkout (card, Apple Pay, Google Pay), and the order is created when
+the payment is confirmed — by the webhook or when the app returns to `#/pay/<id>`. If the order can no longer be
+made by then (cutoff, capacity, price), the payment is refunded in full automatically. Cancellations, cheaper
+changes and operations refunds are queued in `refunds` and sent to Stripe (retried every 10 minutes on failure).
+Settings: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (webhook endpoint `<APP_URL>/api/payments/webhook`, events
+`checkout.session.completed` and `checkout.session.expired`), `APP_URL`. Without a key, development pays instantly
+(`demo_…` references); production refuses to start unless `PAYMENTS_DEMO=1` is set for a demo server.
 
 Invoices: `MB_LEGAL_NAME`, `MB_TRN` (supplier TRN — the invoice is titled "Tax Invoice" only once this is set),
 `MB_ADDRESS`, `VAT_RATE` (default `0.05`; prices are VAT-inclusive). Personal orders get the same receipt.
@@ -41,9 +61,9 @@ them with hosted versions. Have the legal text reviewed before launch.
 Operations console: open `#/ops` and enter `OPS_KEY` — deliveries and status, bakery allocation, printable kitchen
 prep list and box labels, support inbox, Loved it / Not for me feedback, exceptions, and closed days (public holidays).
 Bakery View: open `#/bakery` with the bakery's own access code (issued in Admin) — its production plan, labels,
-Confirm / Report an issue, In Preparation → Ready, delays and temporary conditions; no customer contact details.
-Courier View: open `#/courier` with the courier's own access code — its route only, pickup counts, out for delivery,
-handover point with an optional proof-of-delivery photo (never of the customer), running late and failed delivery.
+Confirm / Report an issue, In Preparation → Ready, delays and temporary conditions. The bakery also delivers its own
+orders (there is no courier): it counts the boxes out for delivery, sees the drop-off point (never the customer's name
+or email), records the handover point, and reports running late or a failed delivery.
 Backups: `npm run backup` writes a consistent copy to `data/backups/` (keeps 14; `MB_BACKUP_DIR`, `MB_BACKUP_KEEP`).
 The full product review and roadmap is in `docs/IMPROVEMENTS.md`.
 
@@ -77,7 +97,7 @@ Release builds require an `https://` app URL and have web debugging switched off
 
 | Area | Endpoints |
 |---|---|
-| Auth (MB-FLW-001 §7) | `POST /api/auth/otp` · `POST /api/auth/verify` · `POST /api/auth/logout` · `POST /api/auth/logout-all` · `POST /api/auth/change-mobile` |
+| Auth (MB-FLW-001 §7) | `POST /api/auth/otp` · `POST /api/auth/verify` · `POST /api/auth/logout` · `POST /api/auth/logout-all` · `POST /api/auth/change-mobile` · `POST /api/auth/change-email` |
 | Me | `GET /api/me` · `PUT /api/me/profile` · `PUT /api/me/settings` · `GET /api/me/notifications` · `POST /api/me/notifications/read` · `DELETE /api/me` |
 | Planning | `GET /api/availability?dates=…` · `POST /api/recommendations` |
 | Personal orders | `GET/POST /api/orders` · `GET /api/orders/:id` · `PATCH /api/orders/:id/days/:date` · `POST …/cancel` · `POST …/feedback` · `POST …/issue` |
@@ -118,9 +138,8 @@ public/assets/     Approved logo and photography.
 
 ## Still to connect before launch
 
-- **SMS for OTP**: codes are generated, stored and verified (10 min expiry, 5 attempts); in development the code is shown on screen. Plug an SMS provider into `server/auth.js`.
-- **Payment gateway**: orders record a `demo_…` payment reference; authorise/charge and refund at the marked points in `server/personal.js` and `server/business.js`.
-- **Staff accounts**: the operations console, Bakery View and Courier View are built; ops still signs in with one shared `OPS_KEY` (bakeries and couriers have their own codes). In development, "Demo: advance delivery status" on an order steps it through the stages.
+- **Provider accounts**: payments (Stripe), WhatsApp codes (Meta) and email (Resend) are built; add their keys to `.env` (see above) and test with real accounts.
+- **Staff accounts**: the operations console and Bakery View are built; ops still signs in with one shared `OPS_KEY` (bakeries have their own codes). In development, "Demo: advance delivery status" on an order steps it through the stages.
 - **Photo storage**: complaint and proof-of-delivery photos are small data URLs kept in SQLite; move them to file/object storage before scaling.
 - **Prices**: indicative values from the MVP (`PRICE_LEVELS`, `SIZE_ADJUSTMENT`, `ADDON_PRICES`, `VOLUME_DISCOUNT` in `standards.js`). Final AED pricing is pending approval.
 - **Partner bakeries**: seeded as placeholders (Partner Bakery A/B/C) until agreements are signed.

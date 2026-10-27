@@ -7,7 +7,11 @@
     "url": "http://10.0.2.2:8787",
     "cleartext": true,
     "androidScheme": "https",
-    "errorPath": "offline.html"
+    "errorPath": "offline.html",
+    "allowNavigation": [
+      "checkout.stripe.com",
+      "*.stripe.com"
+    ]
   },
   "android": {
     "webContentsDebuggingEnabled": true,

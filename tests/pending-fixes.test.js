@@ -114,7 +114,7 @@ test('reconciliation: mismatches go to the exception queue; a delivered morning 
   assert.equal((await ops('POST', '/reconcile', { date: dates[5] })).body.error, 'date_not_over', 'only past mornings via the API');
 });
 
-test('dashboard: after the cutoff an order without a courier route needs attention (OPS §6)', async () => {
+test('dashboard: no courier route is needed — after the cutoff a confirmed, on-time order stays On Track', async () => {
   const { health } = await import('../server/days.js');
   const { cutoffFor } = await import('../src/domain/standards.js');
   const { id } = await order('509400007', dates[6]);
@@ -122,7 +122,8 @@ test('dashboard: after the cutoff an order without a courier route needs attenti
   const { dayRows } = await import('../server/days.js');
   const r = dayRows(dates[6]).find(x => x.kind === 'personal' && x.id === id);
   const afterCutoff = new Date(cutoffFor(dates[6]).getTime() + 60e3);
-  assert.equal(health({ ...r, routeId: null }, afterCutoff), 'Attention Required');
+  db.prepare("INSERT INTO bakery_plans (bakery_id, date, status) VALUES (?, ?, 'Confirmed') ON CONFLICT(bakery_id, date) DO UPDATE SET status = 'Confirmed'").run(r.bakeryId, dates[6]);
+  assert.equal(health({ ...r, routeId: null }, afterCutoff), 'On Track');
 });
 
 test('a new partner bakery can’t go Active until the onboarding gate is complete (Master Plan §6.1)', async () => {

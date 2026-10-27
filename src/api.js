@@ -50,6 +50,10 @@ export const get = p => api('GET', p);
 export const post = (p, b = {}) => api('POST', p, b);
 export const put = (p, b) => api('PUT', p, b);
 export const patch = (p, b) => api('PATCH', p, b);
+
+/** Payment: when the server answers { checkout }, open the payment page; the app comes back to #/pay/<id>.
+    Returns a promise that never settles, so the screen keeps showing "Processing…" while the page changes. */
+export const goToPayment = checkout => { window.location.assign(checkout.url); return new Promise(() => {}); };
 export const del = p => api('DELETE', p);
 /** Fire-and-forget product analytics for the MVP KPIs (funnel, no-match). Never blocks the screen. */
 export const track = (kind, data) => { api('POST', '/events', { kind, data }).catch(() => {}); };
@@ -93,10 +97,13 @@ export function resetPersonal(s) {
   s.orders = []; s.businessOrders = []; s.businessUser = null; s.savedPlans = [];
 }
 
+/** Who a signed-in account is, for noticing a switch of account on this device: its mobile, or its sign-in email when it has none. */
+export const ownerOf = user => user?.mobile || user?.loginEmail || '';
+
 /** Applies a /auth/verify or /me payload to the store draft.
     The session marker holds no secret: the cookie carries the session. */
 export function applySession(s, payload) {
-  if (payload.token) { s.session = { active: true }; setToken(null); s.owner = payload.user.mobile; }
+  if (payload.token) { s.session = { active: true }; setToken(null); s.owner = ownerOf(payload.user); }
   s.user = payload.user;
   if (payload.profile && !s.profileDone) { s.profile = { otherAllergies: '', ...payload.profile }; s.profileDone = true; }
   if (payload.settings) s.settings = { ...s.settings, ...payload.settings };

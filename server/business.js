@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { randomBytes } from 'node:crypto';
 import { db, json, parse, tx } from './db.js';
 import { requireUser, userPayload } from './auth.js';
 import * as rules from './rules.js';
 import { notify } from './notify.js';
 import { newOrderId } from './personal.js';
+import { startCheckout, registerCheckoutHandler, recordPayment, queueRefund, demoRef } from './payments.js';
+import { sendBusinessOrderEmail } from './mail.js';
 import { SUPPLIER, VAT_RATE } from './company.js';
 import { DELIVERY_WINDOWS } from '../src/domain/standards.js';
 import { recipeById, describe } from '../src/domain/recipes.js';
@@ -102,16 +103,11 @@ const needsOf = specials => ({
   allergies: [...new Set(specials.flatMap(s => s.allergies || []))]
 });
 
-/** MVP business orders are prepaid (MB-B2B-001 §8). Capacity is validated before payment (MB-DLV-001 §8). */
-businessRouter.post('/orders', (req, res) => {
-  const key = idemKey(req.body.idempotencyKey);
-  if (key) {
-    const existing = db.prepare('SELECT * FROM business_orders WHERE user_id = ? AND idempotency_key = ?').get(req.userId, key);
-    if (existing) return res.status(200).json(serialize(existing));
-  }
-  const acct = db.prepare('SELECT * FROM business_accounts WHERE user_id = ?').get(req.userId);
+/** Validates and prices a business order without saving anything. */
+function prepareBusinessOrder(userId, body) {
+  const acct = db.prepare('SELECT * FROM business_accounts WHERE user_id = ?').get(userId);
   if (!acct) throw bad('account_required', 'Add your company details first.');
-  const days = Array.isArray(req.body.days) ? req.body.days : [];
+  const days = Array.isArray(body.days) ? body.days : [];
   if (!days.length || days.length > 28) throw bad('days_invalid', 'Choose at least one date.');
   if (new Set(days.map(d => d?.date)).size !== days.length) throw bad('days_invalid', 'Each date can only appear once.');
   const built = days.map(d => {
@@ -119,70 +115,117 @@ businessRouter.post('/orders', (req, res) => {
     if (!windowOk(d.window)) throw bad('window_invalid', 'Choose a delivery window.');
     return { date: d.date, window: d.window, delivery: validateBusinessDelivery(d.delivery), ...buildBusinessDay(d) };
   });
-  const inv = req.body.invoice || {};
+  const inv = body.invoice || {};
   const trn = String(inv.trn || '').replace(/\D/g, '');
   if (trn && trn.length !== 15) throw bad('trn_invalid', 'A UAE TRN has 15 digits. Check it or leave it empty.');
   const invoice = {
     wanted: inv.wanted !== false, billingName: plain(inv.billingName, 120) || acct.company,
-    address: plain(inv.address, 200), trn, po: plain(inv.po, 40), mode: req.body.mode === 'choose' ? 'choose' : 'mix'
+    address: plain(inv.address, 200), trn, po: plain(inv.po, 40), mode: body.mode === 'choose' ? 'choose' : 'mix'
   };
   const total = built.reduce((t, b) => t + b.total, 0);
-  if (req.body.expectedTotal !== undefined && Number(req.body.expectedTotal) !== total) {
+  if (body.expectedTotal !== undefined && Number(body.expectedTotal) !== total) {
     throw new ApiError(409, 'price_changed', `Your total is now AED ${total}. Please check it and pay again.`, { total });
   }
-  const id = newOrderId('MB-B', 'business_orders');
-  const order = tx(() => {
+  const capacity = () => {
     built.forEach(b => assertCapacity(b.date, b.window, b.people));
     built.forEach(b => assertAllocatable(b.date, [{ kind: 'business', window: b.window, area: b.delivery.area, boxes: b.people, units: businessUnits(b.lines, b.specials) }]));
-    // Payment gateway integration point: charge `total` before persisting.
-    db.prepare('INSERT INTO business_orders (id, user_id, company, email, invoice, payment_ref, total, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, req.userId, acct.company, acct.email, json(invoice), `demo_${randomBytes(6).toString('hex')}`, total, key);
+  };
+  return { acct, built, invoice, total, capacity };
+}
+
+/** Saves a paid business order (`payment`: { provider, ref, amount }). */
+function createBusinessOrder(userId, body, payment, key = null) {
+  const { acct, built, invoice, total, capacity } = prepareBusinessOrder(userId, body);
+  if (Math.abs(total - payment.amount) > 0.001) throw new ApiError(409, 'price_changed', 'The price changed while you were paying. Your payment is being refunded — please order again.');
+  const id = newOrderId('MB-B', 'business_orders');
+  const order = tx(() => {
+    capacity();
+    db.prepare('INSERT INTO business_orders (id, user_id, company, email, invoice, payment_ref, total, idempotency_key, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, userId, acct.company, acct.email, json(invoice), payment.ref || demoRef(), total, key, payment.provider === 'stripe' ? 'captured' : 'captured_demo');
+    recordPayment('business', id, payment);
     const ins = db.prepare(`INSERT INTO business_days (order_id, date, window, people, lines, specials, delivery, gross, discount, total)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     built.forEach(b => ins.run(id, b.date, b.window, b.people, json(b.lines), json(b.specials), json(b.delivery), b.gross, b.discount, b.total));
     return db.prepare('SELECT * FROM business_orders WHERE id = ?').get(id);
   });
   reallocateProvisional(built.map(b => b.date));
-  notify(req.userId, id, 'confirmed', `Business order ${id} is confirmed: ${built.length} day${built.length > 1 ? 's' : ''}, AED ${total}.`);
-  res.status(201).json(serialize(order));
+  notify(userId, id, 'confirmed', `Business order ${id} is confirmed: ${built.length} day${built.length > 1 ? 's' : ''}, AED ${total}.`);
+  sendBusinessOrderEmail(order);
+  return id;
+}
+registerCheckoutHandler('business_order', (userId, p, payment) => createBusinessOrder(userId, p.body, payment, p.key));
+
+/** MVP business orders are prepaid (MB-B2B-001 §8). Capacity is validated before payment (MB-DLV-001 §8)
+    and again when the paid order is saved. 201 with the order (demo mode), or 202 { checkout } to pay first. */
+businessRouter.post('/orders', (req, res, next) => {
+  const key = idemKey(req.body.idempotencyKey);
+  if (key) {
+    const existing = db.prepare('SELECT * FROM business_orders WHERE user_id = ? AND idempotency_key = ?').get(req.userId, key);
+    if (existing) return res.status(200).json(serialize(existing));
+  }
+  const { acct, built, total, capacity } = prepareBusinessOrder(req.userId, req.body);
+  capacity();
+  startCheckout(req, {
+    kind: 'business_order', payload: { body: { ...req.body, idempotencyKey: undefined }, key }, amount: total, idempotencyKey: key,
+    email: acct.email, description: `Morning Box Business Breakfast · ${acct.company} · ${built.length} day${built.length > 1 ? 's' : ''}`
+  }).then(r => (r.checkout
+    ? res.status(202).json({ checkout: r.checkout })
+    : res.status(201).json(serialize(db.prepare('SELECT * FROM business_orders WHERE id = ?').get(r.done))))).catch(next);
 });
 
 /** Edit headcount, boxes, sizes, Special Breakfasts, window and delivery until cutoff.
-    Total Boxes must equal Total People (MB-B2B-001 §10). */
-businessRouter.patch('/orders/:id/days/:date', (req, res) => {
-  const o = own(req.userId, req.params.id);
-  const d = ownDay(o, req.params.date);
+    Total Boxes must equal Total People (MB-B2B-001 §10). A higher total is paid first:
+    without `payment` such an edit changes nothing and returns { due }. A lower total is refunded to the card. */
+function editBusinessDay(userId, orderId, date, body, payment = null) {
+  const o = own(userId, orderId);
+  const d = ownDay(o, date);
   if (d.cancelled) throw bad('cancelled', 'This day was cancelled.');
+  /* A refunded day is settled: changing it could pay back twice. */
+  if ((d.refund || 0) > 0 || d.delivery_state === 'Not Fulfilled') throw bad('refunded', 'This day has already been refunded, so it can’t be changed. Contact us if you need help.');
   assertEditable(d.date, d.stage);
-  const window = req.body.window ?? d.window;
+  const window = body.window ?? d.window;
   if (!windowOk(window)) throw bad('window_invalid', 'Choose a delivery window.');
-  const delivery = req.body.delivery ? validateBusinessDelivery({ ...parse(d.delivery), ...req.body.delivery }) : parse(d.delivery);
+  const delivery = body.delivery ? validateBusinessDelivery({ ...parse(d.delivery), ...body.delivery }) : parse(d.delivery);
   const b = buildBusinessDay({
-    people: req.body.people ?? d.people,
-    lines: req.body.lines ?? parse(d.lines),
-    specials: req.body.specials ?? parse(d.specials)
+    people: body.people ?? d.people,
+    lines: body.lines ?? parse(d.lines),
+    specials: body.specials ?? parse(d.specials)
   });
+  const diff = Math.round((b.total - d.total) * 100) / 100;
+  if (diff > 0 && !payment) return { due: diff, label: `Morning Box Business Breakfast · change to ${rules.prettyDate(d.date)}` };
+  if (diff > 0 && Math.abs(payment.amount - diff) > 0.001) throw new ApiError(409, 'price_changed', 'The price of this change moved while you were paying. Your payment is being refunded — please try again.');
   tx(() => {
     if (window !== d.window || b.people > d.people) assertCapacity(d.date, window, b.people, { excludeBusinessDay: d.id });
     /* Any change of boxes or Special Breakfasts must still be allocatable (DLV §8). */
     assertAllocatable(d.date, [{ kind: 'business', window, area: delivery.area, boxes: b.people, units: businessUnits(b.lines, b.specials) }], { exclude: [`business:${d.id}`] });
     db.prepare('UPDATE business_days SET window = ?, delivery = ?, people = ?, lines = ?, specials = ?, gross = ?, discount = ?, total = ? WHERE id = ?')
       .run(window, json(delivery), b.people, json(b.lines), json(b.specials), b.gross, b.discount, b.total, d.id);
-    /* Business Breakfast is prepaid: an edit that changes the total is settled.
-       Payment gateway integration point: charge (positive) or refund (negative) the difference. */
-    if (b.total !== d.total) db.prepare('INSERT INTO business_payment_adjustments (business_day_id, amount) VALUES (?, ?)').run(d.id, b.total - d.total);
+    /* Business Breakfast is prepaid: an edit that changes the total is settled — paid before this point, or refunded. */
+    if (diff !== 0) db.prepare('INSERT INTO business_payment_adjustments (business_day_id, amount) VALUES (?, ?)').run(d.id, diff);
+    if (diff > 0) recordPayment('business', o.id, payment);
+    if (diff < 0) queueRefund('business', o.id, -diff, `change to ${d.date}`);
   });
   reallocateProvisional([d.date]);
-  if (b.total !== d.total) {
-    const diff = Math.abs(b.total - d.total);
-    notify(req.userId, `${o.id}:${d.date}`, b.total > d.total ? 'changed' : 'refund',
-      `Business breakfast on ${rules.prettyDate(d.date)} updated. AED ${diff} will be ${b.total > d.total ? 'charged' : 'refunded'}.`);
+  if (diff !== 0) {
+    notify(userId, `${o.id}:${d.date}`, diff > 0 ? 'changed' : 'refund',
+      `Business breakfast on ${rules.prettyDate(d.date)} updated. AED ${Math.abs(diff)} ${diff > 0 ? 'was charged' : 'will be refunded to your original payment method'}.`);
   }
-  res.json(serialize(o));
+  return { order: o };
+}
+registerCheckoutHandler('business_change', (userId, p, payment) => { editBusinessDay(userId, p.orderId, p.date, p.body, payment); return p.orderId; });
+
+/** Response: the order, or 202 { checkout } when the change costs more and must be paid first. */
+businessRouter.patch('/orders/:id/days/:date', (req, res, next) => {
+  const r = editBusinessDay(req.userId, req.params.id, req.params.date, req.body);
+  if (r.order) return res.json(serialize(r.order));
+  const p = { orderId: req.params.id, date: req.params.date, body: req.body };
+  startCheckout(req, { kind: 'business_change', payload: p, amount: r.due, description: r.label,
+    email: db.prepare('SELECT email FROM business_accounts WHERE user_id = ?').get(req.userId)?.email })
+    .then(x => (x.checkout ? res.status(202).json({ checkout: x.checkout }) : res.json(serialize(own(req.userId, req.params.id))))).catch(next);
 });
 
 /** Report a problem with a business delivery (MB-OPS-001 §10) — same categories as personal orders. */
-const BUSINESS_ISSUES = { 'Not delivered': 'Delivery Failed', 'Arrived late': 'Courier Delay', 'Wrong or missing items': 'Order Accuracy', 'Allergy concern': 'Safety Incident', 'Quality issue': 'QC Failure', 'Packaging issue': 'Packaging Issue', 'Something else': 'Customer Issue' };
+const BUSINESS_ISSUES = { 'Not delivered': 'Delivery Failed', 'Arrived late': 'Delivery Delay', 'Wrong or missing items': 'Order Accuracy', 'Allergy concern': 'Safety Incident', 'Quality issue': 'QC Failure', 'Packaging issue': 'Packaging Issue', 'Something else': 'Customer Issue' };
 businessRouter.post('/orders/:id/days/:date/issue', (req, res) => {
   const o = own(req.userId, req.params.id);
   const d = ownDay(o, req.params.date);
@@ -190,11 +233,18 @@ businessRouter.post('/orders/:id/days/:date/issue', (req, res) => {
   if (!kind) throw bad('issue_invalid', 'Choose what went wrong.');
   if (d.cancelled) throw bad('cancelled', 'This day was cancelled.');
   if (d.date > dubaiTodayIso() && d.stage < 2) throw bad('issue_too_early', 'You can report a problem on the morning of delivery.');
+  /* Same limits as personal reports: 5 per delivery day, 20 per account per day (keeps the ops queue usable). */
+  if (db.prepare('SELECT COUNT(*) AS n FROM customer_issues WHERE order_id = ? AND date = ?').get(o.id, d.date).n >= 5) {
+    throw new ApiError(429, 'issue_limit', 'We already have your reports for this day. Our team will contact you — or message Support.');
+  }
+  if (db.prepare("SELECT COUNT(*) AS n FROM customer_issues WHERE user_id = ? AND created_at > datetime('now', '-1 day')").get(req.userId).n >= 20) {
+    throw new ApiError(429, 'issue_limit', 'Too many reports today. Please message Support.');
+  }
   const note = plain(req.body.note, 500);
   const photo = rules.cleanPhoto(req.body.photo);
   const names = (parse(d.allocation) || []).map(p => db.prepare('SELECT name FROM bakeries WHERE id = ?').get(p.bakeryId)?.name).filter(Boolean).join(' + ');
   const exceptionId = raiseException({ ref: `business:${d.id}`, kind, note: `${req.body.reason}${note ? `: ${note}` : ''} (${o.company})`, customerCategory: 'business', dedupe: false,
-    owner: 'Operations', responsibleParty: ['Not delivered', 'Arrived late'].includes(req.body.reason) ? (d.route_id ? `Route ${d.route_id}` : 'Delivery partner') : names || null, action: 'Contact the business contact; decide the remedy' });
+    owner: 'Operations', responsibleParty: names || null, action: 'Contact the business contact; decide the remedy' });
   db.prepare('INSERT INTO customer_issues (user_id, order_id, date, reason, note, exception_id, photo) VALUES (?, ?, ?, ?, ?, ?, ?)').run(req.userId, o.id, d.date, req.body.reason, note || null, exceptionId, photo);
   notify(req.userId, `${o.id}:${d.date}`, 'issue_update', 'Thanks for telling us. Our team has your report and will contact you shortly.');
   res.json(serialize(o));
@@ -203,13 +253,16 @@ businessRouter.post('/orders/:id/days/:date/issue', (req, res) => {
 /** Cancel one day: allowed only before its cutoff and before production starts; full refund for that day.
     Throws (via assertEditable) when the day can no longer be cancelled. */
 function cancelDay(userId, o, d) {
-  if (d.cancelled) return false;
+  if (d.cancelled) return null;
   assertEditable(d.date, d.stage);
-  // Payment gateway integration point: refund `d.total` against the order's payment_ref.
-  const sql = dayColumns().includes('refund') ? 'UPDATE business_days SET cancelled = 1, refund = total WHERE id = ?' : 'UPDATE business_days SET cancelled = 1 WHERE id = ?';
-  db.prepare(sql).run(d.id);
-  notify(userId, `${o.id}:${d.date}`, 'refund', `Business breakfast on ${rules.prettyDate(d.date)} is cancelled. AED ${d.total} will be refunded.`);
-  return true;
+  /* Only what has not been refunded already is paid back (e.g. after a pro-rata refund), to the card. */
+  const due = Math.max(0, Math.round((d.total - (d.refund || 0)) * 100) / 100);
+  tx(() => {
+    db.prepare('UPDATE business_days SET cancelled = 1, refund = ? WHERE id = ?').run((d.refund || 0) + due, d.id);
+    queueRefund('business', o.id, due, `cancelled ${d.date}`);
+  });
+  notify(userId, `${o.id}:${d.date}`, 'refund', `Business breakfast on ${rules.prettyDate(d.date)} is cancelled. ${due > 0 ? `AED ${due} will be refunded.` : 'It was already refunded.'}`);
+  return due;
 }
 
 /** Cancel one day before cutoff → full refund for that day; other days unaffected. */
@@ -230,7 +283,8 @@ businessRouter.post('/orders/:id/cancel', (req, res) => {
   tx(() => days.forEach(d => {
     if (d.cancelled) return;
     try {
-      if (cancelDay(req.userId, o, d)) { cancelled.push(d.date); refund += d.total; }
+      const due = cancelDay(req.userId, o, d);
+      if (due !== null) { cancelled.push(d.date); refund += due; }
     } catch (e) {
       if (!(e instanceof ApiError)) throw e;
       notCancelled.push({ date: d.date, reason: e.message });

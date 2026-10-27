@@ -21,7 +21,7 @@ import { addDaysIso, dubaiIsoOf, cutoffFor } from '../src/domain/standards.js';
 import { componentName, boxName, sizeLabel, windowLabel } from '../src/domain/app.js';
 import { recipeById, describe } from '../src/domain/recipes.js';
 
-const DEV = process.env.NODE_ENV !== 'production';
+import { DEV } from './env.js';
 /* In production the operations API stays closed until a real OPS_KEY is configured. */
 const OPS_KEY = process.env.OPS_KEY || (DEV ? 'dev-ops-key' : '');
 if (!DEV && (!OPS_KEY || OPS_KEY === 'dev-ops-key')) console.warn('[ops] OPS_KEY is not set — the operations API is disabled.');
@@ -134,13 +134,13 @@ opsRouter.get('/report', (req, res) => {
       personalRevenue: p.revenue || 0, businessRevenue: b.revenue || 0, businessDiscounts: b.discounts || 0,
       cancelled: (p.cancelled || 0) + (b.cancelled || 0), refunds: (p.refunds || 0) + (b.refunds || 0), refundedOrders: (p.refundedOrders || 0) + (b.refundedOrders || 0), credits: credits.find(c => c.date === date)?.n || 0,
       delivered: (p.delivered || 0) + (b.delivered || 0), onTime: (p.onTime || 0) + (b.onTime || 0), late: (p.late || 0) + (b.late || 0), failed: (p.failed || 0) + (b.failed || 0),
-      exceptions: ex(), safety: ex('Safety'), bakeryIssues: ex('Bakery'), courierIssues: ex('Courier'), customerIssues: ex('Customer/Location'),
+      exceptions: ex(), safety: ex('Safety'), bakeryIssues: ex('Bakery'), customerIssues: ex('Customer/Location'),
       loved: p.loved || 0, notForMe: p.notForMe || 0
     };
   });
   const sum = k => days.reduce((t, d) => t + d[k], 0);
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : null);
-  /* Every delivery in the range (personal and business), with its bakery parts — for partner, courier and finance figures. */
+  /* Every delivery in the range (personal and business), with its bakery parts — for partner and finance figures. */
   const all = [];
   for (const [kind, table, price] of [['personal', 'order_days', 'price'], ['business', 'business_days', 'total']]) {
     for (const d of db.prepare(`SELECT * FROM ${table} WHERE date BETWEEN ? AND ? AND cancelled = 0`).all(from, to)) {
@@ -172,13 +172,6 @@ opsRouter.get('/report', (req, res) => {
       qualityIssues: mine.filter(x => x.issues.some(i => ['Quality issue', 'Packaging issue'].includes(i))).length,
       loved: mine.filter(x => x.d.feedback === 'Loved it').length, notForMe: mine.filter(x => x.d.feedback === 'Not for me').length
     };
-  });
-  /* Delivery partner / courier performance (OPS §11): pickup, on time, failed, delivery complaints. */
-  const routes = [...new Set(all.map(x => x.d.route_id).filter(Boolean))].map(route => {
-    const mine = all.filter(x => x.d.route_id === route);
-    return { route, deliveries: mine.length, pickupLate: mine.filter(x => x.pickupLate).length, delivered: mine.filter(x => x.d.stage === 3).length,
-      late: mine.filter(x => x.d.late).length, failed: mine.filter(x => x.d.delivery_state === 'Failed').length,
-      complaints: mine.filter(x => x.issues.some(i => ['Not delivered', 'Arrived late'].includes(i))).length };
   });
   /* Finance per order (OPS §9): customer payment, refunds, bakery payable, delivery cost, Morning Box margin. */
   const deliveryCost = DELIVERY_COST.perDelivery;
@@ -239,7 +232,7 @@ opsRouter.get('/report', (req, res) => {
     }
   }
   res.json({
-    from, to, days, vatRate: VAT_RATE, partners, routes, finance, completed, kpis, reconciliation,
+    from, to, days, vatRate: VAT_RATE, partners, finance, completed, kpis, reconciliation,
     totals: { boxes: sum('boxes'), revenue: sum('revenue'), personalRevenue: sum('personalRevenue'), businessRevenue: sum('businessRevenue'), cancelled: sum('cancelled'), refunds: sum('refunds'), credits: sum('credits'),
       delivered: sum('delivered'), onTime: sum('onTime'), late: sum('late'), failed: sum('failed'), exceptions: sum('exceptions'), safety: sum('safety'),
       loved: sum('loved'), notForMe: sum('notForMe'), refundedOrders: sum('refundedOrders'), businessBoxes: sum('businessBoxes'), businessOrders: sum('businessOrders'),
@@ -298,7 +291,7 @@ opsRouter.get('/feedback', (_req, res) => {
 /* ---------- Customer support ---------- */
 opsRouter.get('/support', (_req, res) => {
   res.json(db.prepare(`SELECT s.*, u.first_name, u.mobile FROM support_requests s JOIN users u ON u.id = s.user_id ORDER BY s.status = 'open' DESC, s.id DESC LIMIT 200`).all()
-    .map(x => ({ id: x.id, customer: x.first_name, mobile: x.mobile, topic: x.topic, orderRef: x.order_ref, message: x.message, status: x.status, reply: x.reply, createdAt: x.created_at })));
+    .map(x => ({ id: x.id, customer: x.first_name, mobile: x.mobile.startsWith('+') ? x.mobile : '', topic: x.topic, orderRef: x.order_ref, message: x.message, status: x.status, reply: x.reply, createdAt: x.created_at })));
 });
 opsRouter.post('/support/:id/reply', (req, res) => {
   const reply = String(req.body.reply || '').trim().slice(0, 1000);

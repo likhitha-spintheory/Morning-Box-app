@@ -7,12 +7,19 @@
 // +971 50 000 01xx; running it again does nothing once they exist.
 process.env.TZ = process.env.TZ || 'Asia/Dubai';
 if (process.env.NODE_ENV === 'production') { console.error('[seed] Refusing to load test data in production.'); process.exit(1); }
+/* Test data is loaded through the development API (server/env.js: development is opt-in). */
+process.env.NODE_ENV ||= 'development';
 
 const { createApp } = await import('../server/app.js');
 const { db } = await import('../server/db.js');
 const { orderableDates, isoDate } = await import('../src/domain/standards.js');
 const { recommendDay } = await import('../src/domain/app.js');
 
+/* Never mix test data into a database that already has real customers (test mobiles are +971 50 000 01xx). */
+if (db.prepare("SELECT 1 FROM users WHERE mobile NOT LIKE '+97150000%'").get()) {
+  console.error('[seed] This database already has real customers. Refusing to load test data.');
+  process.exit(1);
+}
 if (db.prepare("SELECT 1 FROM users WHERE mobile = '+971500000101'").get()) {
   console.log('[seed] Test data is already loaded (customer +971 50 000 0101 exists). Nothing to do.');
   process.exit(0);
@@ -88,10 +95,7 @@ try {
 
   /* Operations: allocate the first morning, then walk Omar's breakfast through to delivered and Sara's into preparation. */
   await ops('POST', '/allocate', { date: d1 });
-  /* A courier for the DIFC route, planned the night before for the first two mornings; access codes for the Bakery and Courier Views. */
-  const driver = await ops('POST', '/admin/couriers', { name: 'Test Courier', phone: '50 000 0198', routeId: 'DIFC-1' });
-  const courierCode = (await ops('POST', `/admin/couriers/${driver.id}/access-code`)).code;
-  for (const date of [d1, d2]) await ops('POST', '/routes', { date, routeId: 'DIFC-1' });
+  /* Access codes for the Bakery View (each bakery also delivers its own orders). */
   const bakeryCodes = [];
   for (const b of (await ops('GET', '/admin/bakeries')).filter(b => b.status === 'Active')) bakeryCodes.push(`${b.name}: ${(await ops('POST', `/admin/bakeries/${b.id}/access-code`)).code}`);
   for (let i = 0; i < 3; i++) await call('POST', '/demo/advance', { orderId: omarOrder.id, date: d1 }, omar);
@@ -110,8 +114,7 @@ try {
     50 000 0103  Aisha  — peanut & tree nut allergy, "Kiwi" typed as other allergy · order ${aishaOrder.id} (held for an allergy check)
     50 000 0104  Layla  — business, Alder & Finch Consulting · orders ${team.id} (20 people, 3 special) and ${meeting.id} (2 days)
   Operations console: #/ops with key ${OPS['x-ops-key']} · first test morning ${d1}
-  Bakery View (#/bakery) access codes: ${bakeryCodes.join(' · ')}
-  Courier View (#/courier): Test Courier, route DIFC-1, access code ${courierCode}`);
+  Bakery View (#/bakery) access codes: ${bakeryCodes.join(' · ')}`);
 } catch (e) {
   console.error('[seed] Failed:', e.message);
   process.exitCode = 1;

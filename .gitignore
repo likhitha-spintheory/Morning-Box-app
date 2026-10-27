@@ -7,3 +7,9 @@ android/app/build
 android/build
 android/.gradle
 android/local.properties
+# Secrets and signing keys
+.env
+.env.*
+*.jks
+*.keystore
+*.p12

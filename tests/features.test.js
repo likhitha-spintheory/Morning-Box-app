@@ -44,7 +44,7 @@ async function opsDeliver(kind, id, date, point = 'Reception') {
   const ops = (m, p, b) => call(m, `/ops${p}`, b, {}, H);
   await ops('POST', '/allocate', { date });
   const row = (await ops('GET', `/dashboard?date=${date}`)).body.rows.find(r => r.kind === kind && r.id === id);
-  for (const [p, b] of [['bakery-state', { state: 'In Preparation' }], ['bakery-state', { state: 'Ready', qc: { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true } }], ['route', { routeId: 'R1' }]]) {
+  for (const [p, b] of [['bakery-state', { state: 'In Preparation' }], ['bakery-state', { state: 'Ready', qc: { order: true, components: true, size: true, addons: true, allergy: true, swaps: true, freshness: true, packaging: true, labels: true } }]]) {
     const r = await ops('POST', `/days/${kind}/${id}/${p}`, b); if (r.status !== 200) throw new Error(`${p}: ${JSON.stringify(r.body)}`);
   }
   const parts = kind === 'business' && row.allocation?.length > 1 ? row.allocation : [{ bakeryId: undefined, boxes: row.boxes }];
@@ -52,7 +52,7 @@ async function opsDeliver(kind, id, date, point = 'Reception') {
     const r = await ops('POST', `/days/${kind}/${id}/handover`, { bakeryId: part.bakeryId, boxes: part.boxes, specialBoxes: parts.length > 1 ? undefined : row.specialBoxes });
     if (r.status !== 200) throw new Error(`handover: ${JSON.stringify(r.body)}`);
   }
-  for (const [p, b] of [['out', {}], ['delivered', { deliveryPoint: point }]]) {
+  for (const [p, b] of [['delivered', { deliveryPoint: point }]]) {
     const r = await ops('POST', `/days/${kind}/${id}/${p}`, b); if (r.status !== 200) throw new Error(`${p}: ${JSON.stringify(r.body)}`);
   }
 }

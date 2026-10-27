@@ -2,18 +2,19 @@
    Fulfilment — MB-OPS-001 §1–10, MB-BKY-001 §7, MB-DLV-001 §4–11
    Night before:  final allocation → production plan → bakery confirms
    Morning:       In Preparation → Ready (QC'd, packed, labelled) →
-                  Handed Over / Picked Up (counts must match) →
-                  Out for Delivery → Delivered (point + recipient) | Failed
+                  Out for Delivery (the bakery counts its boxes and delivers
+                  them itself) → Delivered (point + recipient) | Failed
    Exceptions get an owner, action and resolution; remedies are recorded.
    ============================================================ */
 import { Router } from 'express';
 import { db, json, parse, tx, logEvent } from './db.js';
+import { queueRefund } from './payments.js';
 import { checkStaffCode } from './auth.js';
-import { ApiError, bad, prettyDate, raiseException, isIsoDate, bakeriesFor, bakeryCovers, bakeryMakes, danishFlavours, bakeryProducts, windowRoom, cleanRouteId, cleanPhoto } from './rules.js';
+import { ApiError, bad, prettyDate, raiseException, isIsoDate, bakeriesFor, bakeryCovers, bakeryMakes, danishFlavours, bakeryProducts, windowRoom, cleanPhoto } from './rules.js';
 export { setStage };
 import { notify } from './notify.js';
 import { dayRows, personalRow, businessRow, rowBakeries, health, readyBy, openSafetyCheck } from './days.js';
-import { bakeryByCode, courierByCode, addCondition } from './admin.js';
+import { bakeryByCode, addCondition } from './admin.js';
 import { personalUnits, businessUnits } from './allocation.js';
 import { componentName, sizeLabel, windowLabel } from '../src/domain/app.js';
 import { packingNote, COMPONENTS } from '../src/domain/library.js';
@@ -47,8 +48,8 @@ CREATE TABLE IF NOT EXISTS customer_credits (
 );
 `);
 
-const TABLE = { personal: 'order_days', business: 'business_days' };
-const OWNER_TABLE = { personal: 'orders', business: 'business_orders' };
+const TABLE = Object.assign(Object.create(null), { personal: 'order_days', business: 'business_days' });
+const OWNER_TABLE = Object.assign(Object.create(null), { personal: 'orders', business: 'business_orders' });
 export function loadDay(kind, id) {
   if (!TABLE[kind]) throw bad('kind_invalid', 'kind must be personal or business');
   const raw = db.prepare(`SELECT d.*, o.user_id FROM ${TABLE[kind]} d JOIN ${OWNER_TABLE[kind]} o ON o.id = d.order_id WHERE d.id = ?`).get(Number(id));
@@ -72,14 +73,16 @@ function setStage(kind, id, stage, point) {
   const { raw, row } = loadDay(kind, id);
   if (stage <= raw.stage) return;
   if (stage === 3 && !POINTS[kind].includes(point)) throw bad('point_required', `Choose where it was handed over: ${POINTS[kind].join(', ')}.`);
+  /* DLV §10: delivered to the customer, Reception, or the point the customer designated. */
+  if (stage === 3 && point === 'your door' && parse(raw.address)?.handover !== 'door') throw bad('point_invalid', 'This customer asked for Reception, not their door.');
   update(kind, raw.id, { stage });
   if (stage === 3) {
     /* MB-DLV-001 §10–11: handover is delivery; after the window it is a late delivery (service failure). */
     const late = new Date() > new Date(row.windowEnds) ? 1 : 0;
     db.prepare(`UPDATE ${TABLE[kind]} SET delivered_at = datetime('now'), delivery_point = ?, recipient_type = ?, delivery_state = 'Delivered', late = ?, late_note = NULL WHERE id = ?`).run(point, RECIPIENT[point], late, raw.id);
-    /* Late because the bakery was not Ready by ready-by → the bakery's delay; otherwise the courier's (MB-OPS-001 §6, §11). */
+    /* The bakery delivers its own orders: late because it was not Ready by ready-by → Pickup Delay; otherwise a Delivery Delay (MB-OPS-001 §6, §11). */
     const slow = lateBakeries(row);
-    if (late) raiseException({ ref: `${kind}:${raw.id}`, kind: slow.length ? 'Pickup Delay' : 'Courier Delay', category: slow.length ? 'Bakery' : 'Courier', responsibleParty: slow.join(', ') || null,
+    if (late) raiseException({ ref: `${kind}:${raw.id}`, kind: slow.length ? 'Pickup Delay' : 'Delivery Delay', category: 'Bakery', responsibleParty: (slow.length ? slow : bakeryNames(row)).join(', ') || null,
       note: `Delivered after the ${windowLabel(row.window)} window — late delivery (service failure)${slow.length ? `; ${slow.join(', ')} not Ready by ready-by` : ''}`, owner: 'Operations', action: 'Review the cause; apply service recovery if appropriate' });
   }
   event(row, 'stage', ['', 'Being prepared', 'Out for delivery', `Delivered to ${point}`][stage]);
@@ -88,12 +91,14 @@ function setStage(kind, id, stage, point) {
   if (stage === 3) tell(row, 'delivered', `Delivered to ${point} · ${dubaiTime()}. Enjoy your morning! Loved it or not for you? Tell us in the app.`);
 }
 
+const bakeryName = id => db.prepare('SELECT name FROM bakeries WHERE id = ?').get(id)?.name || `Bakery #${id}`;
+const bakeryNames = row => rowBakeries(row).map(bakeryName);
 /** Bakeries whose part was marked Ready after its ready-by time (or reported Delayed). */
 function lateBakeries(row) {
   return rowParts(row).filter(p => {
     const st = row.partStates[p.bakeryId] || {};
     return st.delay || (st.readyAt && new Date(st.readyAt) > readyBy(row.date, row.window, p.bakeryId));
-  }).map(p => db.prepare('SELECT name FROM bakeries WHERE id = ?').get(p.bakeryId)?.name || `Bakery #${p.bakeryId}`);
+  }).map(p => bakeryName(p.bakeryId));
 }
 
 /* ---------- Safety check before preparation and handover (MB-BKY-001 §3) ---------- */
@@ -307,72 +312,39 @@ function reallocateParts(id, failed) {
   return { placed, unplaced, kept };
 }
 
-/* ---------- Courier routes, planned the night before (MB-OPS-001 §1, §6) ---------- */
-export function assignRoute(kind, id, routeId) {
-  const { raw, row } = loadDay(kind, id);
-  const r = cleanRouteId(routeId);
-  if (!r) throw bad('route_required', 'Enter the courier or route.');
-  /* Route capacity (MB-OPS-001 §6): a courier's boxes per delivery window, when Admin set one. */
-  const cap = db.prepare('SELECT capacity FROM couriers WHERE route_id = ? AND active = 1').get(r)?.capacity;
-  if (cap) {
-    const onRoute = dayRows(row.date).filter(x => x.window === row.window && String(x.routeId || '').toLowerCase() === r.toLowerCase() && !(x.kind === kind && x.id === raw.id)).reduce((t, x) => t + x.boxes, 0);
-    if (onRoute + row.boxes > cap) throw bad('route_full', `Route ${r} carries up to ${cap} boxes per window; ${onRoute} are already on it for this window.`);
-  }
-  update(kind, raw.id, { route_id: r });
-}
-
-/* ---------- Handover: bakery hands over, courier picks up (MB-OPS-001 §6–7) ---------- */
+/* ---------- Dispatch: the bakery counts its boxes and delivers them itself (MB-OPS-001 §6–7) ---------- */
 /** Nothing leaves the bakery unless the physical count matches the digital order record. */
 function checkCount(kind, raw, part, boxes, specialBoxes) {
   if (Number(boxes) === part.boxes && Number(specialBoxes) === part.special) return;
   raiseException({ ref: `${kind}:${raw.id}`, kind: 'Handover Mismatch', note: `Counted ${boxes} boxes (${specialBoxes} special); expected ${part.boxes} (${part.special} special) from bakery #${part.bakeryId}. Not dispatched.`, owner: 'Operations', action: 'Resolve the count with the bakery before dispatch' });
   throw new ApiError(409, 'handover_mismatch', `Count doesn’t match: expected ${part.boxes} box${part.boxes > 1 ? 'es' : ''} (${part.special} special). Do not dispatch until resolved.`);
 }
-export function recordHandover(kind, id, { boxes, specialBoxes, routeId, bakeryId, by = 'courier' }) {
+/** The bakery counts its part and takes it out for delivery. When every bakery on the order has
+    dispatched its part, the order is Out for Delivery and the customer is told. */
+export function recordHandover(kind, id, { boxes, specialBoxes, bakeryId }) {
   const { raw, row } = loadDay(kind, id);
   const parts = rowParts(row);
   const part = bakeryId ? parts.find(p => p.bakeryId === Number(bakeryId)) : parts.length === 1 ? parts[0] : null;
-  if (!part) throw bad('part_required', parts.length > 1 ? 'This order comes from more than one bakery — record each bakery’s handover.' : 'This order has no bakery yet.');
+  if (!part) throw bad('part_required', parts.length > 1 ? 'This order comes from more than one bakery — record each bakery’s dispatch.' : 'This order has no bakery yet.');
   const states = partStates(raw);
   if (states[part.bakeryId]?.state !== 'Ready') throw bad('not_ready', 'The bakery has not marked this order Ready.');
   assertSafe(kind, raw);
-  const route = String(routeId || raw.route_id || '').trim();
-  if (!route) throw bad('route_required', 'Assign the courier or route before pickup.');
   checkCount(kind, raw, part, boxes, specialBoxes);
-  /* The bakery records its handover; the courier's pickup is a separate confirmation (MB-OPS-001 §6). */
-  const courier = by === 'courier';
+  let all = false;
   tx(() => {
     const at = new Date().toISOString();
-    db.prepare(`INSERT INTO handovers (day_kind, day_id, bakery_id, boxes, special_boxes, ready_by, route_id, picked_up_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(kind, raw.id, part.bakeryId, part.boxes, part.special, readyBy(row.date, row.window, part.bakeryId).toISOString(), route.slice(0, 40), courier ? at : null);
-    const { states: next } = savePart(kind, raw, row, part.bakeryId, { state: 'Handed Over', handedOverAt: at, ...(courier ? { pickedUpAt: at } : {}) });
-    update(kind, raw.id, { route_id: route.slice(0, 40), handed_over_at: at });
-    if (courier && parts.every(p => next[p.bakeryId]?.state === 'Handed Over' && next[p.bakeryId]?.pickedUpAt)) update(kind, raw.id, { delivery_state: 'Picked Up', picked_up_at: at });
+    db.prepare(`INSERT INTO handovers (day_kind, day_id, bakery_id, boxes, special_boxes, ready_by, picked_up_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(kind, raw.id, part.bakeryId, part.boxes, part.special, readyBy(row.date, row.window, part.bakeryId).toISOString(), at);
+    const { states: next } = savePart(kind, raw, row, part.bakeryId, { state: 'Handed Over', handedOverAt: at, pickedUpAt: at });
+    all = parts.every(p => next[p.bakeryId]?.state === 'Handed Over');
+    update(kind, raw.id, { handed_over_at: at, ...(all ? { delivery_state: 'Out for Delivery', picked_up_at: at } : {}) });
   });
+  if (all && raw.stage < 2) setStage(kind, raw.id, 2);
 }
-/** The courier confirms pickup once every bakery has handed its part over (MB-OPS-001 §6).
-    With `boxes`/`specialBoxes` (the Courier View) the courier's own count is checked, one bakery's part at a time. */
-export function confirmPickup(kind, id, { bakeryId, boxes, specialBoxes } = {}) {
-  const { raw, row } = loadDay(kind, id);
-  const parts = rowParts(row);
-  const states = partStates(raw);
-  const counted = boxes !== undefined || specialBoxes !== undefined;
-  const targets = bakeryId ? parts.filter(p => p.bakeryId === Number(bakeryId)) : parts;
-  if (counted && targets.length !== 1) throw bad('part_required', parts.length > 1 ? 'This order comes from more than one bakery — confirm each bakery’s pickup.' : 'This order has no bakery yet.');
-  if (!targets.length || (counted ? targets : parts).some(p => states[p.bakeryId]?.state !== 'Handed Over')) throw bad('not_handed_over', 'Every bakery must hand over its boxes before the courier confirms pickup.');
-  if (raw.delivery_state || targets.every(p => states[p.bakeryId].pickedUpAt && counted)) throw bad('already_picked_up', 'Pickup has already been confirmed.');
-  if (counted) checkCount(kind, raw, targets[0], boxes, specialBoxes);
-  const at = new Date().toISOString();
-  tx(() => {
-    for (const p of targets) states[p.bakeryId] = { ...states[p.bakeryId], pickedUpAt: states[p.bakeryId].pickedUpAt || at };
-    for (const p of targets) db.prepare('UPDATE handovers SET picked_up_at = ? WHERE day_kind = ? AND day_id = ? AND bakery_id = ? AND picked_up_at IS NULL').run(at, kind, raw.id, p.bakeryId);
-    const all = parts.every(p => states[p.bakeryId]?.state === 'Handed Over' && states[p.bakeryId]?.pickedUpAt);
-    update(kind, raw.id, { part_states: json(states), ...(all ? { delivery_state: 'Picked Up', picked_up_at: at } : {}) });
-  });
-}
+/** Re-attempt after a failed delivery. */
 export function outForDelivery(kind, id) {
   const { raw } = loadDay(kind, id);
-  if (!['Picked Up', 'Failed'].includes(raw.delivery_state)) throw bad('not_picked_up', 'Every part must be handed over and picked up first.');
+  if (!['Picked Up', 'Failed'].includes(raw.delivery_state)) throw bad('not_dispatched', 'Every bakery must count and dispatch its boxes first.');
   update(kind, raw.id, { delivery_state: 'Out for Delivery' });
   if (raw.stage < 2) setStage(kind, raw.id, 2);
 }
@@ -385,7 +357,7 @@ export function markDelivered(kind, id, point, photo) {
   if (pic) db.prepare(`UPDATE ${TABLE[kind]} SET delivery_photo = ? WHERE id = ?`).run(pic, raw.id);
 }
 
-/** Development only: walk one delivery through the real steps (plan, prepare, ready, handover, out, delivered). */
+/** Development only: walk one delivery through the real steps (plan, prepare, ready, dispatch, delivered). */
 export function demoStep(kind, id) {
   const { raw, row } = loadDay(kind, id);
   if (raw.stage === 0) {
@@ -393,16 +365,14 @@ export function demoStep(kind, id) {
     setBakeryState(kind, id, 'In Preparation', { byOps: true });
   } else if (raw.stage === 1) {
     if (loadDay(kind, id).raw.bakery_state !== 'Ready') setBakeryState(kind, id, 'Ready', { qcPassed: true, byOps: true });
-    for (const p of rowParts(row)) if (partStates(loadDay(kind, id).raw)[p.bakeryId]?.state !== 'Handed Over') recordHandover(kind, id, { bakeryId: p.bakeryId, boxes: p.boxes, specialBoxes: p.special, routeId: raw.route_id || 'DEMO' });
-    if (!loadDay(kind, id).raw.delivery_state) confirmPickup(kind, id);
-    outForDelivery(kind, id);
+    for (const p of rowParts(row)) if (partStates(loadDay(kind, id).raw)[p.bakeryId]?.state !== 'Handed Over') recordHandover(kind, id, { bakeryId: p.bakeryId, boxes: p.boxes, specialBoxes: p.special });
   } else if (raw.stage === 2) markDelivered(kind, id, 'Reception');
 }
 
 /* ---------- Running late (MB-DLV-001 §6, MB-OPS-001 §6) ----------
    Tell the customer the new time before the window ends; shown on their order until delivered.
-   A courier reporting it also records a Courier Delay, kept apart from bakery Pickup Delays. */
-export function reportLate(kind, id, eta, { by = 'ops', note = '', routeId = null } = {}) {
+   The bakery reporting it on the way also records a Delivery Delay, kept apart from Pickup Delays. */
+export function reportLate(kind, id, eta, { by = 'ops', note = '', bakery = null } = {}) {
   const { raw, row } = loadDay(kind, id);
   const when = String(eta || '').trim().slice(0, 40);
   if (!when) throw bad('eta_required', 'Enter the new time, e.g. 9:20 AM.');
@@ -410,7 +380,7 @@ export function reportLate(kind, id, eta, { by = 'ops', note = '', routeId = nul
   update(kind, raw.id, { late_note: when, at_risk: 1 });
   event(row, 'late', `Running late — now expected around ${when}`);
   tell(row, 'late', `Sorry — your breakfast for ${prettyDate(row.date)} is running late. It should arrive around ${when}.`);
-  if (by === 'courier') raiseException({ ref: `${kind}:${raw.id}`, kind: 'Courier Delay', category: 'Courier', note: `Courier reports arrival around ${when}${note ? ` — ${String(note).slice(0, 160)}` : ''}`, responsibleParty: routeId ? `Route ${routeId}` : 'Courier', owner: 'Operations', action: 'Customer told the new time; follow up if the window is missed' });
+  if (by === 'bakery') raiseException({ ref: `${kind}:${raw.id}`, kind: 'Delivery Delay', category: 'Bakery', note: `${bakery || 'The bakery'} reports arrival around ${when}${note ? ` — ${String(note).slice(0, 160)}` : ''}`, responsibleParty: bakery, owner: 'Operations', action: 'Customer told the new time; follow up if the window is missed' });
 }
 
 /* ---------- Failed delivery (MB-DLV-001 §6, §11) ---------- */
@@ -423,13 +393,36 @@ export function markFailed(kind, id, reason, note) {
   if (raw.delivery_state !== 'Out for Delivery') throw bad('not_out', 'Only an order out for delivery can be marked failed — record the delivery attempt first.');
   db.prepare('INSERT INTO delivery_attempts (day_kind, day_id, reason, note) VALUES (?, ?, ?, ?)').run(kind, raw.id, reason, String(note || '').slice(0, 200) || null);
   update(kind, raw.id, { delivery_state: 'Failed' });
-  raiseException({ ref: `${kind}:${raw.id}`, kind: 'Delivery Failed', category: reason === 'Wrong address' || reason === 'Receiving point unavailable' || reason === 'Contact unreachable' ? 'Customer/Location' : 'Courier', note: `${reason}${note ? ` — ${note}` : ''}`, owner: 'Operations', action: 'Contact the customer; re-attempt or apply the refund policy', dedupe: false });
+  raiseException({ ref: `${kind}:${raw.id}`, kind: 'Delivery Failed', category: reason === 'Wrong address' || reason === 'Receiving point unavailable' || reason === 'Contact unreachable' ? 'Customer/Location' : 'Bakery', responsibleParty: bakeryNames(row).join(', ') || null, note: `${reason}${note ? ` — ${note}` : ''}`, owner: 'Operations', action: 'Contact the customer; re-attempt or apply the refund policy', dedupe: false });
   event(row, 'failed', `Delivery attempt failed: ${reason}`);
   tell(row, 'late', `We couldn’t hand over your breakfast for ${prettyDate(row.date)} (${reason.toLowerCase()}). We’ll contact you shortly.`);
 }
 
 /* ---------- Service recovery (MB-OPS-001 §10, MB-DLV-001 §11) ---------- */
 export const REMEDIES = ['No Financial Action', 'Credit', 'Partial Refund', 'Full Refund'];
+export const money = n => Math.round(Number(n) * 100) / 100;
+
+/**
+ * Pays `amount` back on a personal order. The card gets back at most what it actually paid
+ * (order total − Morning Box credit used + later charges − card refunds so far); anything
+ * beyond that was paid with credit and goes back as credit. Returns { card, credit }.
+ * Payment gateway integration point: refund `card` against the order's payment_ref.
+ */
+export function payBack(orderId, userId, amount, reason) {
+  const o = db.prepare('SELECT total, credit_used, card_refunded FROM orders WHERE id = ?').get(orderId);
+  const charged = db.prepare('SELECT COALESCE(SUM(a.amount), 0) AS n FROM payment_adjustments a JOIN order_days d ON d.id = a.order_day_id WHERE d.order_id = ? AND a.amount > 0').get(orderId).n;
+  const cardLeft = Math.max(0, money(o.total - (o.credit_used || 0) + charged - (o.card_refunded || 0)));
+  const card = money(Math.min(money(amount), cardLeft));
+  const credit = money(money(amount) - card);
+  if (card > 0) { db.prepare('UPDATE orders SET card_refunded = card_refunded + ? WHERE id = ?').run(card, orderId); queueRefund('personal', orderId, card, reason); }
+  if (credit > 0) db.prepare('INSERT INTO customer_credits (user_id, amount, reason, ref) VALUES (?, ?, ?, ?)').run(userId, credit, `Returned: ${reason}`.slice(0, 200), orderId);
+  return { card, credit };
+}
+/** Customer wording for money paid back. */
+export const paidBackText = ({ card, credit }) => [
+  card > 0 ? `AED ${card} will be refunded to your original payment method` : '',
+  credit > 0 ? `AED ${credit} is back as Morning Box credit` : ''
+].filter(Boolean).join(' and ') || 'Nothing more is due — it was already refunded';
 export function applyRemedy(kind, id, { type, amount, reason }) {
   if (!TABLE[kind]) throw bad('kind_invalid', 'kind must be personal or business');
   const raw = db.prepare(`SELECT d.*, o.user_id FROM ${TABLE[kind]} d JOIN ${OWNER_TABLE[kind]} o ON o.id = d.order_id WHERE d.id = ?`).get(Number(id));
@@ -438,23 +431,35 @@ export function applyRemedy(kind, id, { type, amount, reason }) {
   const why = String(reason || '').trim().slice(0, 200);
   if (!why) throw bad('reason_required', 'Record the reason.');
   const price = kind === 'personal' ? raw.price : raw.total;
-  const already = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS n FROM service_recovery WHERE day_kind = ? AND day_id = ? AND type IN ('Partial Refund', 'Full Refund')`).get(kind, raw.id).n + (raw.cancelled ? price : 0);
+  /* Everything already paid back for this morning: remedies and a cancellation are both in `refund`. */
+  const already = Math.max(raw.refund || 0, db.prepare(`SELECT COALESCE(SUM(amount), 0) AS n FROM service_recovery WHERE day_kind = ? AND day_id = ? AND type IN ('Partial Refund', 'Full Refund')`).get(kind, raw.id).n);
+  const left = Math.max(0, money(price - already));
   let value = 0;
-  if (type === 'Full Refund') value = Math.max(0, price - already);
+  if (type === 'Full Refund') value = left;
   if (type === 'Partial Refund' || type === 'Credit') {
-    value = Number(amount);
+    value = money(amount);
     if (!Number.isFinite(value) || value <= 0) throw bad('amount_invalid', 'Enter the amount in AED.');
-    if (type === 'Partial Refund' && value > price - already) throw bad('amount_invalid', `At most AED ${price - already} can still be refunded.`);
+    if (type === 'Partial Refund' && value > left) throw bad('amount_invalid', `At most AED ${left} can still be refunded.`);
+    /* Goodwill credits and refunds together are limited to what the customer paid for the morning. */
+    const credited = db.prepare("SELECT COALESCE(SUM(amount), 0) AS n FROM service_recovery WHERE day_kind = ? AND day_id = ? AND type = 'Credit'").get(kind, raw.id).n;
+    const room = Math.max(0, money(price - already - credited));
+    if (type === 'Credit' && value > room) throw bad('amount_invalid', room > 0 ? `At most AED ${room} more can be given for this morning.` : 'This morning has already been credited or refunded in full.');
   }
   if (type === 'Full Refund' && value === 0) throw bad('already_refunded', 'This morning has already been refunded in full.');
   const r = { orderId: raw.order_id, date: raw.date, userId: raw.user_id, kind };
+  let back = { card: value, credit: 0 };
   tx(() => {
     db.prepare('INSERT INTO service_recovery (day_kind, day_id, type, amount, reason) VALUES (?, ?, ?, ?, ?)').run(kind, raw.id, type, value, why);
-    // Payment gateway integration point: refund `value` against the order's payment_ref.
-    if (type.endsWith('Refund')) update(kind, raw.id, { refund: Math.round((raw.refund || 0) + value), refund_reason: why });
+    if (type.endsWith('Refund')) {
+      update(kind, raw.id, { refund: money(already + value), refund_reason: why });
+      /* Personal orders may have been paid partly with credit: that part goes back as credit.
+         Business orders are paid by card only. */
+      if (kind === 'personal') back = payBack(raw.order_id, raw.user_id, value, why);
+      else queueRefund('business', raw.order_id, value, why);
+    }
     if (type === 'Credit') db.prepare('INSERT INTO customer_credits (user_id, amount, reason, ref) VALUES (?, ?, ?, ?)').run(raw.user_id, value, why, ref(r));
   });
-  if (type === 'Full Refund' || type === 'Partial Refund') { event(r, 'refund', `${type}: AED ${value} — ${why}`); tell(r, 'refund', `${type} of AED ${value} for ${prettyDate(raw.date)}: ${why}. It will reach your original payment method.`); }
+  if (type === 'Full Refund' || type === 'Partial Refund') { event(r, 'refund', `${type}: AED ${value} — ${why}`); tell(r, 'refund', `${type} of AED ${value} for ${prettyDate(raw.date)}: ${why}. ${paidBackText(back)}.`); }
   if (type === 'Credit') { event(r, 'credit', `Credit AED ${value} — ${why}`); tell(r, 'refund', `AED ${value} Morning Box credit added: ${why}. It’s used automatically on your next order.`); }
   return { type, amount: value };
 }
@@ -473,10 +478,10 @@ export function flagAtRisk(now = new Date()) {
     if (!delayedReady && !closeToEnd) continue;
     /* At risk is a warning; "late" is only recorded when it is actually delivered after the window. */
     update(r.kind, r.id, { at_risk: 1, late_note: r.lateNote || 'a little after your window' });
-    /* Pickup Delay only when the bakery was not Ready by ready-by; otherwise it is the courier's (MB-OPS-001 §6). */
+    /* Pickup Delay when the bakery was not Ready by ready-by; otherwise a Delivery Delay (MB-OPS-001 §6). */
     const rb = readyBy(r.date, r.window, rowBakeries(r)[0]);
     const bakeryLate = r.bakeryState === 'Delayed' || (r.readyAt ? new Date(r.readyAt) > rb : now > rb);
-    raiseException({ ref: `${r.kind}:${r.id}`, kind: bakeryLate ? 'Pickup Delay' : 'Courier Delay', note: `At risk of missing the ${windowLabel(r.window)} window`, owner: 'Operations', action: 'Expedite; confirm the new time with the customer' });
+    raiseException({ ref: `${r.kind}:${r.id}`, kind: bakeryLate ? 'Pickup Delay' : 'Delivery Delay', note: `At risk of missing the ${windowLabel(r.window)} window`, owner: 'Operations', action: 'Expedite; confirm the new time with the customer' });
     event(r, 'late', 'Running a little late');
     tell(r, 'late', `Sorry — your breakfast for ${prettyDate(r.date)} may arrive a little after your ${windowLabel(r.window)} window. We’re on it.`);
     flagged++;
@@ -484,9 +489,18 @@ export function flagAtRisk(now = new Date()) {
   return flagged;
 }
 
+/** Where the bakery delivers: building, office/unit, handover and, for a business, the contact. No customer email or phone. */
+function dropOff(r) {
+  const a = r.address || {};
+  const business = r.kind === 'business';
+  return { company: business ? a.company || '' : null, building: a.building || '', place: business ? a.office || '' : a.unit || '', notes: a.notes || '',
+    handover: business ? 'Reception or the contact person' : a.handover === 'door' ? 'Door' : 'Reception',
+    contact: business ? { name: a.contact || '', mobile: a.mobile || '' } : null };
+}
+
 /* ---------- Production plan & packing (MB-OPS-001 §3, MB-BKY-001 §5) ---------- */
 const flavourText = a => (a.flavour ? ` — ${a.flavour}` : '');
-/* forBakery: only what the bakery needs for production, safety and handover — no names or addresses (OPS §3, DLV §4). */
+/* forBakery: only what the bakery needs for production, safety and delivery — no customer names (OPS §3, DLV §4). */
 export function productionPlan(date, onlyBakery = null, { forBakery = false } = {}) {
   const names = Object.fromEntries(db.prepare('SELECT id, name FROM bakeries').all().map(b => [b.id, b.name]));
   const users = Object.fromEntries(db.prepare('SELECT id, first_name FROM users').all().map(u => [u.id, u.first_name]));
@@ -515,8 +529,9 @@ export function productionPlan(date, onlyBakery = null, { forBakery = false } = 
       }
       p.packing.push({
         ref: r.orderId, kind: r.kind, id: r.id, name: forBakery ? null : r.kind === 'personal' ? users[r.userId] || '' : r.address.company,
-        window: windowLabel(r.window), readyBy: ready, routeId: r.routeId, bakeryId: bid, boxes: share ?? r.boxes, specialBoxes: part ? specialShare : r.specialBoxes, shared: share !== null && share !== undefined ? `${share} of ${r.boxes} boxes` : null,
-        state: (bid && r.partStates[bid]?.state) || r.bakeryState, safetyHold: r.safetyHold, safetyCheck: r.safetyCheck, otherAllergies: r.otherAllergies || '',
+        window: windowLabel(r.window), readyBy: ready, bakeryId: bid, boxes: share ?? r.boxes, specialBoxes: part ? specialShare : r.specialBoxes, shared: share !== null && share !== undefined ? `${share} of ${r.boxes} boxes` : null,
+        state: (bid && r.partStates[bid]?.state) || r.bakeryState, deliveryState: r.deliveryState, stage: r.stage, lateNote: r.lateNote || null,
+        delivered: r.stage >= 3 ? { at: r.deliveredAt, point: r.deliveryPoint, late: r.late } : null, dropOff: dropOff(r), safetyHold: r.safetyHold, safetyCheck: r.safetyCheck, otherAllergies: r.otherAllergies || '',
         lines: production.map(l => ({
           qty: l.qty, size: sizeLabel(l.size), box: l.box, components: l.components, special: l.special || [],
           addons: (l.addons || []).map(a => `${a.qty}× ${componentName(a.item)}${a.unit ? ` (${a.unit} loaf)` : ''}${flavourText(a)}`),
@@ -537,15 +552,15 @@ export function productionPlan(date, onlyBakery = null, { forBakery = false } = 
 }
 
 /** One label per box (MB-BKY-001 §5): Morning Box, Order ID, breakfast, size and dietary/allergy indicators.
-    The bakery's labels carry nothing else; the ops (courier) version adds name and drop-off point. */
+    The bakery delivers, so its labels add the drop-off point; the ops version also adds the customer's name. */
 export function labelsFor(date, onlyBakery = null, { forBakery = false } = {}) {
   const labels = [];
   const rows = dayRows(date);
   for (const p of productionPlan(date, onlyBakery, { forBakery })) {
     for (const o of p.packing) {
       const row = rows.find(r => r.kind === o.kind && r.id === o.id);
-      const place = forBakery ? null : row.kind === 'personal' ? `${row.address.building}, ${row.address.unit}` : `${row.address.building}, ${row.address.office}`;
-      const handover = forBakery ? null : row.kind === 'personal' ? (row.address.handover === 'door' ? 'Door' : 'Reception') : `Reception · ${row.address.contact}`;
+      const place = row.kind === 'personal' ? `${row.address.building}, ${row.address.unit}` : `${row.address.building}, ${row.address.office}`;
+      const handover = row.kind === 'personal' ? (row.address.handover === 'door' ? 'Door' : 'Reception') : `Reception · ${row.address.contact}`;
       for (const l of o.lines) for (let i = 0; i < l.qty; i++) {
         /* The customer's free-text allergies are a warning on every label (MB-BKY-001 §5). */
         const avoid = o.otherAllergies && !l.special.some(w => w.startsWith('Also avoid')) ? [`Also avoid: ${o.otherAllergies}`] : [];
@@ -571,32 +586,15 @@ export function registerFulfilmentRoutes(router) {
     const read = k => parse(db.prepare('SELECT value FROM settings WHERE key = ?').get(k)?.value ?? null);
     const fin = read(`final:${date}`), prov = read(`provisional:${date}`);
     const allocated = fin ? { ...fin, final: true } : prov ? { ...prov, final: false } : null;
-    /* Active couriers' routes, offered when ops assigns a route (free text still allowed). */
-    const couriers = db.prepare('SELECT name, route_id FROM couriers WHERE active = 1 ORDER BY route_id').all().map(c => ({ name: c.name, routeId: c.route_id }));
-    res.json({ date, rows, counts, plans, allocated, couriers });
+    res.json({ date, rows, counts, plans, allocated });
   });
   /* The final check is ticked item by item (MB-BKY-001 §4); a blanket qcPassed is not accepted over the API. */
   router.post('/days/:kind/:id/bakery-state', (req, res) => { const [k, i] = kindId(req); const { qcPassed, ...body } = req.body; setBakeryState(k, i, body.state, { ...body, bakeryId: req.body.bakeryId ? Number(req.body.bakeryId) : undefined, byOps: true }); res.json({ ok: true }); });
-  router.post('/days/:kind/:id/route', (req, res) => { const [k, i] = kindId(req); assignRoute(k, i, req.body.routeId); res.json({ ok: true }); });
-  /* Assign one courier/route to every delivery in a window the night before. */
-  router.post('/routes', (req, res) => {
-    const date = String(req.body.date || '');
-    if (!isIsoDate(date)) throw bad('date_invalid', 'Pass a date as YYYY-MM-DD');
-    const rows = dayRows(date).filter(r => !req.body.window || r.window === req.body.window).filter(r => r.stage < 2);
-    /* Assign in ready-by order until the route is full; the rest are listed for another route. */
-    const skipped = [];
-    let assigned = 0;
-    for (const r of [...rows].sort((a, b) => String(a.readyBy).localeCompare(String(b.readyBy)))) {
-      try { assignRoute(r.kind, r.id, req.body.routeId); assigned++; } catch (e) { if (e.code !== 'route_full') throw e; skipped.push(r.orderId); }
-    }
-    res.json({ ok: true, assigned, skipped });
-  });
   router.post('/days/:kind/:id/reallocate', (req, res) => { const [k, i] = kindId(req); const b = reallocate(k, i); res.json({ ok: true, bakery: b.name }); });
   router.post('/days/:kind/:id/handover', (req, res) => { const [k, i] = kindId(req); recordHandover(k, i, req.body); res.json({ ok: true }); });
-  router.post('/days/:kind/:id/pickup', (req, res) => { const [k, i] = kindId(req); confirmPickup(k, i); res.json({ ok: true }); });
   router.post('/days/:kind/:id/out', (req, res) => { const [k, i] = kindId(req); outForDelivery(k, i); res.json({ ok: true }); });
   router.post('/days/:kind/:id/delivered', (req, res) => { const [k, i] = kindId(req); markDelivered(k, i, req.body.deliveryPoint, req.body.photo); res.json({ ok: true }); });
-  /* The courier's proof-of-delivery photo, loaded on request (DLV §10). */
+  /* The proof-of-delivery photo, loaded on request (DLV §10). */
   router.get('/days/:kind/:id/delivery-photo', (req, res) => {
     const [k, i] = kindId(req);
     if (!TABLE[k]) throw bad('kind_invalid', 'Unknown order type.');
@@ -636,7 +634,7 @@ const bakeryDate = req => { const d = String(req.query.date || req.body?.date ||
 bakeryRouter.get('/me', (req, res) => {
   const approved = bakeryProducts(req.bakery);
   const items = Object.values(COMPONENTS).filter(c => !approved || approved.includes(c.id)).map(c => ({ id: c.id, name: c.name }));
-  res.json({ id: req.bakery.id, name: req.bakery.name, status: req.bakery.status, danishFlavours: danishFlavours(req.bakery), planIssues: PLAN_ISSUES, qcChecks: QC_CHECKS, items });
+  res.json({ id: req.bakery.id, name: req.bakery.name, status: req.bakery.status, danishFlavours: danishFlavours(req.bakery), planIssues: PLAN_ISSUES, qcChecks: QC_CHECKS, items, failureReasons: FAILURE_REASONS, points: POINTS });
 });
 bakeryRouter.get('/plan', (req, res) => {
   const date = bakeryDate(req);
@@ -660,87 +658,27 @@ bakeryRouter.post('/plan/start', (req, res) => {
   }
   res.json({ ok: true, started: n, held });
 });
-/** The bakery hands its part over to the courier: counts must match (MB-OPS-001 §6–7). */
+/** The bakery counts its part and takes it out for delivery: counts must match (MB-OPS-001 §6–7). */
 bakeryRouter.post('/days/:kind/:id/handover', (req, res) => {
-  recordHandover(req.params.kind, Number(req.params.id), { ...req.body, bakeryId: req.bakery.id, by: 'bakery' });
+  const { boxes, specialBoxes } = req.body || {};
+  recordHandover(req.params.kind, Number(req.params.id), { boxes, specialBoxes, bakeryId: req.bakery.id });
   res.json({ ok: true });
 });
+/** Delivery steps, only on an order allocated to this bakery (MB-DLV-001 §6, §10). */
+function ownDelivery(req) {
+  const kind = req.params.kind, id = Number(req.params.id);
+  if (!rowBakeries(loadDay(kind, id).row).includes(req.bakery.id)) throw new ApiError(403, 'not_yours', 'This order is not allocated to your bakery.');
+  return [kind, id];
+}
+bakeryRouter.post('/days/:kind/:id/out', (req, res) => { const [k, i] = ownDelivery(req); outForDelivery(k, i); res.json({ ok: true }); });
+bakeryRouter.post('/days/:kind/:id/delivered', (req, res) => { const [k, i] = ownDelivery(req); markDelivered(k, i, req.body.deliveryPoint, req.body.photo); res.json({ ok: true }); });
+bakeryRouter.post('/days/:kind/:id/late', (req, res) => { const [k, i] = ownDelivery(req); reportLate(k, i, req.body.eta, { by: 'bakery', note: req.body.note, bakery: req.bakery.name }); res.json({ ok: true }); });
+bakeryRouter.post('/days/:kind/:id/failed', (req, res) => { const [k, i] = ownDelivery(req); markFailed(k, i, req.body.reason, req.body.note); res.json({ ok: true }); });
 bakeryRouter.post('/days/:kind/:id/state', (req, res) => {
-  const { qcPassed, ...body } = req.body;
-  setBakeryState(req.params.kind, Number(req.params.id), body.state, { ...body, bakeryId: req.bakery.id });
+  /* Only the fields a bakery may send: `byOps` (skip plan confirmation) and `qcPassed` are operations-only. */
+  const { state, delayMinutes, reason, note, qc } = req.body || {};
+  setBakeryState(req.params.kind, Number(req.params.id), state, { delayMinutes, reason, note, qc, bakeryId: req.bakery.id });
   res.json({ ok: true });
 });
 bakeryRouter.post('/conditions', (req, res) => res.status(201).json(addCondition(req.bakery.id, req.body).conditions));
 
-/* ============================================================
-   Courier View — each courier signs in with its own access code and sees
-   only the deliveries on its route, with only what the pickup and handover
-   need (MB-OPS-001 §6–7; MB-DLV-001 §4: unnecessary customer information is not shared).
-   ============================================================ */
-export const courierRouter = Router();
-courierRouter.use((req, _res, next) => {
-  const c = courierByCode(req.get('x-courier-code'));
-  try { checkStaffCode(req, 'courier', !!c); } catch (e) { return next(e); }
-  if (!c) return next(new ApiError(401, 'unauthorised', 'Enter your courier access code.'));
-  req.courier = c; next();
-});
-const onRoute = (c, routeId) => !!routeId && String(routeId).toLowerCase() === String(c.route_id).toLowerCase();
-const POINT_LABEL = { Reception: 'Reception', 'your door': 'Door', 'you in person': 'In person', 'the contact person': 'Contact person' };
-const hhmm = d => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-/** One delivery as the courier sees it: no prices, no allergen detail beyond "special box", no customer email or name. */
-function courierRow(r, bakeries) {
-  const a = r.address || {};
-  const business = r.kind === 'business';
-  return {
-    kind: r.kind, id: r.id, ref: r.orderId, window: r.window, windowLabel: windowLabel(r.window), readyBy: r.readyBy,
-    boxes: r.boxes, specialBoxes: r.specialBoxes, lateNote: r.lateNote || null,
-    pickups: rowParts(r).map(p => {
-      const st = r.partStates[p.bakeryId] || {};
-      return { bakeryId: p.bakeryId, bakery: bakeries[p.bakeryId]?.name || `Bakery #${p.bakeryId}`, pickupPoint: bakeries[p.bakeryId]?.area || '',
-        readyBy: hhmm(readyBy(r.date, r.window, p.bakeryId)), boxes: p.boxes, specialBoxes: p.special, state: st.state || null, pickedUp: !!st.pickedUpAt };
-    }),
-    dropOff: { company: business ? a.company || '' : null, building: a.building || '', place: business ? a.office || '' : a.unit || '', notes: a.notes || '' },
-    handover: business ? 'Reception or the contact person' : a.handover === 'door' ? 'Door' : 'Reception',
-    contact: business ? { name: a.contact || '', mobile: a.mobile || '' } : null,
-    hold: !!(r.safetyHold || r.safetyCheck),
-    bakeryState: r.bakeryState, deliveryState: r.deliveryState, stage: r.stage,
-    delivered: r.stage >= 3 ? { at: r.deliveredAt, point: r.deliveryPoint, recipientType: r.recipientType, late: r.late, photo: r.hasDeliveryPhoto } : null,
-    attempts: (r.attempts || []).map(x => ({ reason: x.reason, at: x.created_at }))
-  };
-}
-/** The delivery, only when it is on this courier's route. */
-function ownDelivery(req) {
-  const kind = req.params.kind, id = Number(req.params.id);
-  const { raw, row } = loadDay(kind, id);
-  if (!onRoute(req.courier, raw.route_id)) throw new ApiError(403, 'not_yours', 'This delivery is not on your route.');
-  return { kind, id, raw, row };
-}
-courierRouter.get('/me', (req, res) => res.json({
-  name: req.courier.name, routeId: req.courier.route_id, failureReasons: FAILURE_REASONS,
-  points: Object.fromEntries(Object.entries(POINTS).map(([k, list]) => [k, list.map(p => ({ point: p, label: POINT_LABEL[p], recipientType: RECIPIENT[p] }))]))
-}));
-courierRouter.get('/deliveries', (req, res) => {
-  const date = String(req.query.date || '');
-  if (!isIsoDate(date)) throw bad('date_invalid', 'Choose a date.');
-  const bakeries = Object.fromEntries(db.prepare('SELECT id, name, area FROM bakeries').all().map(b => [b.id, b]));
-  const rows = dayRows(date).filter(r => onRoute(req.courier, r.routeId))
-    .sort((x, y) => x.window.localeCompare(y.window) || x.readyBy.localeCompare(y.readyBy) || String(x.orderId).localeCompare(String(y.orderId)));
-  res.json({ date, routeId: req.courier.route_id, deliveries: rows.map(r => courierRow(r, bakeries)) });
-});
-/** Pickup at the bakery, with the courier's own box and special-box count (MB-OPS-001 §6–7).
-    If the bakery has not recorded its handover yet, this records it; otherwise it confirms the pickup. */
-courierRouter.post('/days/:kind/:id/pickup', (req, res) => {
-  const { kind, id, raw, row } = ownDelivery(req);
-  const parts = rowParts(row);
-  const part = req.body.bakeryId ? parts.find(p => p.bakeryId === Number(req.body.bakeryId)) : parts.length === 1 ? parts[0] : null;
-  if (!part) throw bad('part_required', parts.length > 1 ? 'This order comes from more than one bakery — confirm each pickup.' : 'This order has no bakery yet.');
-  const counts = { bakeryId: part.bakeryId, boxes: req.body.boxes, specialBoxes: req.body.specialBoxes };
-  if (counts.boxes === undefined || counts.boxes === '' || counts.specialBoxes === undefined || counts.specialBoxes === '') throw bad('count_required', 'Count the boxes and the special boxes.');
-  if (partStates(raw)[part.bakeryId]?.state === 'Handed Over') confirmPickup(kind, id, counts);
-  else recordHandover(kind, id, { ...counts, by: 'courier' });
-  res.json({ ok: true });
-});
-courierRouter.post('/days/:kind/:id/out', (req, res) => { const { kind, id } = ownDelivery(req); outForDelivery(kind, id); res.json({ ok: true }); });
-courierRouter.post('/days/:kind/:id/delivered', (req, res) => { const { kind, id } = ownDelivery(req); markDelivered(kind, id, req.body.deliveryPoint, req.body.photo); res.json({ ok: true }); });
-courierRouter.post('/days/:kind/:id/late', (req, res) => { const { kind, id } = ownDelivery(req); reportLate(kind, id, req.body.eta, { by: 'courier', note: req.body.note, routeId: req.courier.route_id }); res.json({ ok: true }); });
-courierRouter.post('/days/:kind/:id/failed', (req, res) => { const { kind, id } = ownDelivery(req); markFailed(kind, id, req.body.reason, req.body.note); res.json({ ok: true }); });
