@@ -4,8 +4,8 @@
   "webDir": "dist",
   "backgroundColor": "#FBF7EF",
   "server": {
-    "url": "http://10.0.2.2:8787",
-    "cleartext": true,
+    "url": "https://morningbox.ae",
+    "cleartext": false,
     "androidScheme": "https",
     "errorPath": "offline.html",
     "allowNavigation": [
