@@ -23,7 +23,7 @@ if (release && cleartext && process.env.MB_ALLOW_CLEARTEXT_RELEASE !== '1') { co
 if (release && !['MB_KEYSTORE', 'MB_KEYSTORE_PASSWORD', 'MB_KEY_ALIAS', 'MB_KEY_PASSWORD'].every(k => process.env[k])) {
   console.error('[apk] A release build needs MB_KEYSTORE, MB_KEYSTORE_PASSWORD, MB_KEY_ALIAS and MB_KEY_PASSWORD.'); process.exit(1);
 }
-const sdk = process.env.ANDROID_HOME || join(homedir(), 'Library', 'Android', 'sdk');
+const sdk = process.env.ANDROID_HOME || (process.platform === 'win32' ? join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk') : join(homedir(), 'Library', 'Android', 'sdk'));
 const run = (cmd, opts = {}) => execSync(cmd, { stdio: 'inherit', ...opts });
 
 const config = {
@@ -31,7 +31,8 @@ const config = {
   appName: 'Morning Box',
   webDir: 'dist',
   backgroundColor: '#FBF7EF',
-  server: { url, cleartext, androidScheme: 'https', errorPath: 'offline.html' },
+  /* Card payments (Stripe Checkout) open inside the app and come back to it. */
+  server: { url, cleartext, androidScheme: 'https', errorPath: 'offline.html', allowNavigation: ['checkout.stripe.com', '*.stripe.com'] },
   android: { webContentsDebuggingEnabled: !release, allowMixedContent: false },
   plugins: { SystemBars: { insetsHandling: 'css', style: 'LIGHT' } }
 };

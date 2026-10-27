@@ -98,6 +98,10 @@ export function resetPersonal(s) {
 }
 
 /** Who a signed-in account is, for noticing a switch of account on this device: its mobile, or its sign-in email when it has none. */
+/** Sign-in methods the server can deliver codes for (from /api/config). Email is the default. */
+export const signIn = { email: true, mobile: true };
+export const applySignIn = m => { if (m && typeof m === 'object') Object.assign(signIn, { email: m.email !== false, mobile: m.mobile !== false }); };
+
 export const ownerOf = user => user?.mobile || user?.loginEmail || '';
 
 /** Applies a /auth/verify or /me payload to the store draft.

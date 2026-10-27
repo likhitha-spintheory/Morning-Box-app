@@ -10,7 +10,9 @@ import {
 } from './rules.js';
 import { creditBalance, payBack, paidBackText, money as roundAed } from './fulfilment.js';
 import { startCheckout, registerCheckoutHandler, recordPayment } from './payments.js';
-import { sendOrderEmail } from './mail.js';
+import { sendOrderEmail, mailConfigured } from './mail.js';
+import { whatsappConfigured } from './whatsapp.js';
+import { DEV } from './env.js';
 import { assertAllocatable, personalUnits, reallocateProvisional, isFinal } from './allocation.js';
 import { activeBakeries, danishFlavours, cleanPhoto } from './rules.js';
 import { pricingSnapshot } from '../src/domain/standards.js';
@@ -88,7 +90,9 @@ personalRouter.get('/availability', (req, res) => {
 personalRouter.get('/config', (_req, res) => {
   /* Prices set in Admin, and the Fruit Danish variants partner bakeries can make (MB-PRO-001 §14.2). */
   const flavours = [...new Set(activeBakeries().flatMap(danishFlavours))];
-  res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: SUPPLIER, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples }, menu: menuSnapshot(), areas: [...ACTIVE_AREAS] });
+  res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: SUPPLIER, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples }, menu: menuSnapshot(), areas: [...ACTIVE_AREAS],
+    /* Which sign-in codes can be delivered, so the app only offers those (development shows codes in the server log). */
+    signIn: { email: DEV || mailConfigured(), mobile: DEV || whatsappConfigured() } });
 });
 
 /** Product analytics (Master Plan §15): the app reports funnel steps and no-match results. */

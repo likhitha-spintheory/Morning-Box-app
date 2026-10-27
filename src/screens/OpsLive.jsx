@@ -242,7 +242,7 @@ export function LabelGrid({ labels }) {
   return (
     <div className="labels">
       {labels.map((l, i) => (
-        <div key={i} className={`label${l.warnings?.length ? ' allergen' : ''}`}>
+        <div key={i} className={`box-label${l.warnings?.length ? ' allergen' : ''}`}>
           <span className="eyebrow" style={{ fontSize: 11 }}>Morning Box</span>
           <b style={{ fontSize: 18 }}>{l.name || l.ref}</b>
           {l.place && <span>{l.place}</span>}

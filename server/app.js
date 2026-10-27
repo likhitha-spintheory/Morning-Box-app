@@ -54,8 +54,12 @@ export function createApp() {
   /* Serve the built web app in production (npm run build && npm start). */
   const dist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
   if (existsSync(dist)) {
-    app.use(express.static(dist));
-    app.get('*', (_req, res) => res.sendFile(join(dist, 'index.html')));
+    /* Built files have content hashes in their names, so they can be cached for good; index.html is always
+       re-checked so phones pick up a new release straight away. */
+    const fresh = res => res.setHeader('Cache-Control', 'no-cache');
+    app.use('/assets', express.static(join(dist, 'assets'), { immutable: true, maxAge: '1y' }), (_req, res) => res.status(404).end());
+    app.use(express.static(dist, { setHeaders: (res, file) => { if (file.endsWith('.html')) fresh(res); } }));
+    app.get('*', (_req, res) => { fresh(res); res.sendFile(join(dist, 'index.html')); });
   }
 
   // eslint-disable-next-line no-unused-vars

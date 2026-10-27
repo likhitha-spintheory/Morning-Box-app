@@ -4,7 +4,7 @@ import {
   Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch, InfoTip, AreaField, PhotoPicker
 } from '../../components/ui.jsx';
 import { useStore, emptyBusiness } from '../../state/store.jsx';
-import { get, post, patch, del, download, applySession, ownerOf, setToken, resetPersonal, newIdempotencyKey, track, goToPayment } from '../../api.js';
+import { get, post, patch, del, download, applySession, ownerOf, setToken, resetPersonal, newIdempotencyKey, track, goToPayment, signIn } from '../../api.js';
 import { pastedCode, enteredDigits, Agreement } from '../personal/Checkout.jsx';
 import { useConfig, closedOn } from '../../state/config.js';
 
@@ -798,7 +798,8 @@ export function BizDelivery() {
   const [avail, setAvail] = useState({});
   const key = (b.dates || []).join(',');
   useEffect(() => { if (key) get(`/availability?dates=${key}`).then(setAvail).catch(() => {}); }, [key]);
-  if (!b.dates?.length) return <Navigate to="/business/dates" replace />;
+  /* Back after paying: the draft is spent, so go to the business orders rather than an empty step. */
+  if (!b.dates?.length) return <Navigate to={state.businessOrders.length ? '/business' : '/business/dates'} replace />;
   const fullOn = (iso, w) => { const r = avail[iso]?.[w]?.remaining; return typeof r === 'number' && r < dayPeople(b, iso); };
   const dl = b.delivery;
   const same = b.deliverySameForAll !== false || b.dates.length < 2;
@@ -922,6 +923,8 @@ export function BizAccount() {
   const [mobile, setMobile] = useState(b.delivery.mobile || '');
   const [company, setCompany] = useState(state.businessUser?.company || b.delivery.company || '');
   const [email, setEmail] = useState(state.businessUser?.email || state.user?.email || '');
+  /* Sign in by email first (code by email), or by mobile (code on WhatsApp). */
+  const [byEmail, setByEmail] = useState(signIn.email || !signIn.mobile);
   const [sent, setSent] = useState(false);
   const [needName, setNeedName] = useState(false);
   const [code, setCode] = useState(['', '', '', '', '', '']);
@@ -936,7 +939,7 @@ export function BizAccount() {
     return () => clearTimeout(t);
   }, [wait]);
   if (signedIn && state.businessUser) return <Navigate to="/business/review" replace />;
-  if (!b.dates?.length) return <Navigate to="/business/dates" replace />;
+  if (!b.dates?.length) return <Navigate to={state.businessOrders.length ? '/business' : '/business/dates'} replace />;
 
   const digits = mobileDigits(mobile);
   const nameOk = name.trim().length > 0;
@@ -967,11 +970,12 @@ export function BizAccount() {
     });
     nav('/business/review', { replace: true });
   };
+  const target = byEmail ? { email: email.trim() } : { mobile: digits };
   const sendCode = () => {
     setTouched(true);
-    if (!mobileOk) return;
+    if (byEmail ? !mailOk : !mobileOk) return;
     run(async () => {
-      await post('/auth/otp', { mobile: digits });
+      await post('/auth/otp', target);
       setSent(true); setWait(30); setCode(['', '', '', '', '', '']);
       setTimeout(() => refs.current[0]?.focus(), 50);
     });
@@ -982,7 +986,7 @@ export function BizAccount() {
     setBusy(true); setError('');
     (async () => {
       try {
-        const res = await post('/auth/verify', { mobile: digits, code: code.join(''), firstName: nameOk ? name.trim() : undefined });
+        const res = await post('/auth/verify', { ...target, code: code.join(''), firstName: nameOk ? name.trim() : undefined });
         setToken(null);
         /* A different customer signing in on this device: drop the previous customer's data (the business draft stays). */
         set(s => { if (s.owner && s.owner !== ownerOf(res.user)) resetPersonal(s); applySession(s, res); });
@@ -1020,20 +1024,34 @@ export function BizAccount() {
           </section>
         ) : (
           <>
-            <div className="field">
-              <label htmlFor="ba-mb">Mobile number</label>
-              <div className="input-prefix">
-                <span className="input pre">+971</span>
-                <input id="ba-mb" className={`input${touched && !sent && !mobileOk ? ' invalid' : ''}`} inputMode="tel" autoComplete="tel-national"
-                  placeholder="50 123 4567" value={mobile} disabled={sent} onChange={e => setMobile(e.target.value)} />
+            {byEmail ? (
+              <div className="field">
+                <label htmlFor="ba-em">Business email</label>
+                <input id="ba-em" type="email" inputMode="email" className={`input${touched && !mailOk ? ' invalid' : ''}`} value={email} autoComplete="email"
+                  placeholder="name@company.com" disabled={sent} onChange={e => setEmail(e.target.value)} />
+                {touched && !mailOk && <Err>Enter a valid email, e.g. name@company.com</Err>}
               </div>
-              {touched && !sent && !mobileOk && <Err>Enter a UAE mobile number, e.g. 50 123 4567</Err>}
-            </div>
+            ) : (
+              <div className="field">
+                <label htmlFor="ba-mb">Mobile number</label>
+                <div className="input-prefix">
+                  <span className="input pre">+971</span>
+                  <input id="ba-mb" className={`input${touched && !sent && !mobileOk ? ' invalid' : ''}`} inputMode="tel" autoComplete="tel-national"
+                    placeholder="50 123 4567" value={mobile} disabled={sent} onChange={e => setMobile(e.target.value)} />
+                </div>
+                {touched && !sent && !mobileOk && <Err>Enter a UAE mobile number, e.g. 50 123 4567</Err>}
+              </div>
+            )}
+            {!sent && signIn.email && signIn.mobile && (
+              <button type="button" className="link" style={{ alignSelf: 'flex-start', padding: '10px 0', margin: '-10px 0' }} onClick={() => { setByEmail(v => !v); setTouched(false); setError(''); }}>
+                {byEmail ? 'Use my mobile number instead' : 'Use my email instead'}
+              </button>
+            )}
             {sent && (
               <div className="stack gap-10">
                 <div className="row">
                   <span className="label">Enter the 6-digit code</span>
-                  <button type="button" className="link" disabled={busy} onClick={() => { setSent(false); setError(''); setTouched(false); setCode(['', '', '', '', '', '']); }}>Change number</button>
+                  <button type="button" className="link" disabled={busy} onClick={() => { setSent(false); setError(''); setTouched(false); setCode(['', '', '', '', '', '']); }}>{byEmail ? 'Change email' : 'Change number'}</button>
                 </div>
                 <div className="otp">
                   {code.map((c, i) => (
@@ -1042,6 +1060,7 @@ export function BizAccount() {
                       onKeyDown={e => { if (e.key === 'Backspace' && !c && i > 0) refs.current[i - 1]?.focus(); }} />
                   ))}
                 </div>
+                {byEmail && <p className="help" style={{ fontSize: 15 }}>Sent to {email.trim()}. Can’t find it? Check your spam or junk folder.</p>}
                 <div className="row">
                   <span className="help" style={{ fontSize: 15 }}>Didn’t get it?</span>
                   {wait > 0
@@ -1066,11 +1085,13 @@ export function BizAccount() {
               <input id="ba-co" className={`input${touched && !companyOk ? ' invalid' : ''}`} value={company} autoComplete="organization" onChange={e => setCompany(e.target.value)} />
               {touched && !companyOk && <Err>Enter the company name</Err>}
             </div>
-            <div className="field">
-              <label htmlFor="ba-em">Business email</label>
-              <input id="ba-em" type="email" className={`input${touched && !mailOk ? ' invalid' : ''}`} value={email} autoComplete="email" placeholder="name@company.com" onChange={e => setEmail(e.target.value)} />
-              {touched && !mailOk && <Err>Enter a valid email, e.g. name@company.com</Err>}
-            </div>
+            {(signedIn || !byEmail) && (
+              <div className="field">
+                <label htmlFor="ba-em2">Business email</label>
+                <input id="ba-em2" type="email" className={`input${touched && !mailOk ? ' invalid' : ''}`} value={email} autoComplete="email" placeholder="name@company.com" onChange={e => setEmail(e.target.value)} />
+                {touched && !mailOk && <Err>Enter a valid email, e.g. name@company.com</Err>}
+              </div>
+            )}
           </>
         )}
         <ApiErr error={error} />
@@ -1098,7 +1119,7 @@ export function BizReview() {
   const [idemKey] = useState(newIdempotencyKey);
   const [serverTotal, setServerTotal] = useState(null);
   if (!state.session || !state.businessUser) return <Navigate to="/business/account" replace />;
-  if (!b.dates?.length) return <Navigate to="/business/dates" replace />;
+  if (!b.dates?.length) return <Navigate to={state.businessOrders.length ? '/business' : '/business/dates'} replace />;
 
   const user = state.businessUser;
   const dl = b.delivery;
@@ -1370,7 +1391,7 @@ function Tracking({ day }) {
   const time = day.deliveredAt ? new Date(`${day.deliveredAt.replace(' ', 'T')}Z`).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' }) : '';
   return (
     <section className="card stack gap-10" aria-label="Delivery status">
-      <div className="row" style={{ gap: 6 }}>
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
         {TRACK.map((t, i) => <span key={t} className={`status ${i <= st ? (i === 3 ? 'ok' : 'prep') : 'done'}`} style={{ opacity: i <= st ? 1 : 0.55, fontSize: 12 }}>{t}</span>)}
       </div>
       {st === 3 && <span className="strong">Delivered to {day.deliveryPoint || 'Reception'}{time ? ` · ${time}` : ''}</span>}

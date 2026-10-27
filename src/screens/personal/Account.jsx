@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { get, post, put, patch, del, setToken, goToPayment } from '../../api.js';
+import { get, post, put, patch, del, setToken, goToPayment, signIn } from '../../api.js';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Screen, TopBar, Footer, Icon, Logo, TabBar, Switch, Qty, Money, Chip, PhoneField, InfoTip, PhotoPicker, AreaField, Ring } from '../../components/ui.jsx';
 import { download, shareText, ownerOf } from '../../api.js';
@@ -898,12 +898,12 @@ export function Me() {
         <div className="row" style={{ justifyContent: 'flex-start', gap: 16 }}>
           <span style={{ width: 60, height: 60, borderRadius: 999, background: 'var(--gold-soft)', color: 'var(--espresso)', display: 'flex', alignItems: 'center', justifyContent: 'center', font: '400 28px/1 var(--serif)' }}>{state.user.firstName.charAt(0).toUpperCase()}</span>
           <span className="stack" style={{ flex: 1 }}><button type="button" className="serif" aria-label="Edit name" onClick={() => { setEditName(true); setName(state.user.firstName); setError(''); }} style={{ fontSize: 32, lineHeight: 1.1, background: 'none', border: 0, padding: 0, textAlign: 'left', color: 'inherit', cursor: 'pointer' }}>{state.user.firstName} <Icon name="edit" size={18} stroke={1.6} color="var(--text-3)" /></button>{state.user.mobile && <span className="help" style={{ fontSize: 15 }}>{state.user.mobile}</span>}</span>
-          {!mobileStep && <button type="button" className="link" onClick={() => startChange('mobile')}>{state.user.mobile ? 'Change number' : 'Add number'}</button>}
+          {!mobileStep && signIn.mobile && <button type="button" className="link" onClick={() => startChange('mobile')}>{state.user.mobile ? 'Change number' : 'Add number'}</button>}
         </div>
         {!mobileStep && (
           <div className="row" style={{ justifyContent: 'flex-start', gap: 8 }}>
-            <span className="help" style={{ fontSize: 15 }}>Sign-in email: {state.user.loginEmail || 'none'}</span>
-            <button type="button" className="link" style={{ padding: 0 }} onClick={() => startChange('email')}>{state.user.loginEmail ? 'Change' : 'Add'}</button>
+            <span className="help" style={{ fontSize: 15, minWidth: 0, overflowWrap: 'anywhere' }}>Sign-in email: {state.user.loginEmail || 'none'}</span>
+            {signIn.email && <button type="button" className="link" style={{ padding: '10px 0', margin: '-10px 0', flex: 'none' }} onClick={() => startChange('email')}>{state.user.loginEmail ? 'Change' : 'Add'}</button>}
           </div>
         )}
         {editName && (
@@ -971,8 +971,9 @@ export function Me() {
                   <button type="button" className="btn" disabled={busy} onClick={saveEmail}>{busy ? 'Saving…' : 'Save'}</button></div>
               </div>
             ) : (
-              <div className="list-row"><Icon name="mail" size={20} /><span className="strong" style={{ flex: 1 }}>Email</span><span className="help" style={{ fontSize: 15 }}>{state.user.email || 'Not added'}</span>
-                <button type="button" className="link" style={{ marginLeft: 12 }} onClick={() => setEditEmail(true)}>{state.user.email ? 'Change' : 'Add'}</button></div>
+              <div className="list-row"><Icon name="mail" size={20} /><span className="strong" style={{ flex: '1 0 auto' }}>Receipt email</span>
+                <span className="help" style={{ fontSize: 15, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{state.user.email || 'Not added'}</span>
+                <button type="button" className="link" style={{ marginLeft: 12, flex: 'none' }} onClick={() => setEditEmail(true)}>{state.user.email ? 'Change' : 'Add'}</button></div>
             )}
             <Link to="/notifications" className="list-row"><Icon name="bell" size={20} /><span className="strong" style={{ flex: 1 }}>Notifications</span><Icon name="chevron" size={18} stroke={1.8} /></Link>
             <div className="list-row"><Icon name="coffee" size={20} /><span className="strong" style={{ flex: 1 }}>Reminder the night before</span>

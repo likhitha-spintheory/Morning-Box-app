@@ -1,11 +1,25 @@
 import { Component, useEffect, useState } from 'react';
 import { Icon } from './ui.jsx';
 
+/** Reload once (not in a loop) when the app was updated while it was open. */
+export function reloadForUpdate() {
+  try {
+    const last = Number(sessionStorage.getItem('mb-update-reload') || 0);
+    if (Date.now() - last < 30000) return;
+    sessionStorage.setItem('mb-update-reload', String(Date.now()));
+  } catch { /* storage blocked: still reload */ }
+  location.reload();
+}
+
 /** If a screen crashes, show a calm recovery screen instead of a blank page. */
 export class ErrorBoundary extends Component {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(error) { console.error('[app]', error); }
+  componentDidCatch(error) {
+    console.error('[app]', error);
+    /* After an update the old screen files are gone: reload this screen once to pick up the new version. */
+    if (/dynamically imported module|Importing a module script failed|error loading dynamically/i.test(String(error?.message))) reloadForUpdate();
+  }
   render() {
     if (!this.state.failed) return this.props.children;
     return (

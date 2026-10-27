@@ -93,6 +93,19 @@ Release signing comes from the environment only (no key in the project): `MB_KEY
 Release builds require an `https://` app URL and have web debugging switched off. App ID: `ae.morningbox.app`
 (change it in `scripts/apk.mjs` before the first Play upload).
 
+### Test release: a link and an APK for testers
+
+1. Deploy (`npm ci && npm run build && npm start`) behind HTTPS, e.g. `https://app.morningbox.ae`, with:
+   `NODE_ENV=production`, `APP_URL=<that URL>`, `OPS_KEY=<random, 24+ chars>`, `TRUST_PROXY=1` (behind a proxy),
+   `RESEND_API_KEY` + `EMAIL_FROM` (email codes), `PAYMENTS_DEMO=1` until Stripe is connected (no real charges),
+   `DB_FILE` on a persistent disk. Sign-in offers only what is configured: email now, mobile once
+   `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID` are set.
+2. Build the APK against the same URL: `MB_APP_URL=https://app.morningbox.ae npm run apk` →
+   `apk/morning-box-debug.apk`. Testers install it by allowing "Install unknown apps" for their browser or files app.
+3. Share the link and the APK. After a new deploy, open apps pick up the new version on their own (index.html is never
+   cached; a screen that fails to load after an update reloads once). The APK only needs rebuilding when the
+   URL, app icon or native settings change.
+
 ## Backend API
 
 | Area | Endpoints |

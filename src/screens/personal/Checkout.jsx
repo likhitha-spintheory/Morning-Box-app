@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { get, post, put, applySession, ownerOf, setToken, resetPersonal, newIdempotencyKey, download, track, goToPayment } from '../../api.js';
+import { get, post, put, applySession, ownerOf, setToken, resetPersonal, newIdempotencyKey, download, track, goToPayment, signIn } from '../../api.js';
 import { Screen, TopBar, Footer, Icon, Chip, Switch, Option, Logo, PhoneField, Go, IconButton, InfoTip, AreaField } from '../../components/ui.jsx';
 import { useStore } from '../../state/store.jsx';
 import {
@@ -41,7 +41,8 @@ export function SignIn() {
   const next = /^\/(?![/\\])[^\s\\]*$/.test(asked) ? asked : '/today';
   const [name, setName] = useState(state.user?.firstName || '');
   const [mobile, setMobile] = useState(state.user?.mobile?.replace(/^\+971\s?/, '') || '');
-  const [byEmail, setByEmail] = useState(!state.user?.mobile && !!state.user?.loginEmail);
+  /* Email first; a returning customer who only has a mobile sees the mobile. Only methods the server can deliver are offered. */
+  const [byEmail, setByEmail] = useState(!signIn.mobile || (signIn.email && (!state.user?.mobile || !!state.user?.loginEmail)));
   const [email, setEmail] = useState(state.user?.loginEmail || '');
   const [sent, setSent] = useState(false);
   const [code, setCode] = useState(['', '', '', '', '', '']);
@@ -203,9 +204,11 @@ export function SignIn() {
               : null}
           </div>
         )}
-        <button type="button" className="link" style={{ alignSelf: 'flex-start', padding: 0 }} onClick={() => { setByEmail(v => !v); setTouched(false); setError(''); }}>
-          {byEmail ? 'Use my mobile number instead' : 'Use my email instead'}
-        </button>
+        {signIn.email && signIn.mobile && (
+          <button type="button" className="link" style={{ alignSelf: 'flex-start', padding: '10px 0', margin: '-10px 0' }} onClick={() => { setByEmail(v => !v); setTouched(false); setError(''); }}>
+            {byEmail ? 'Use my mobile number instead' : 'Use my email instead'}
+          </button>
+        )}
         {planned.length > 0 && (
           <div className="panel row" style={{ flexDirection: 'row', padding: '16px 20px', borderRadius: 999 }}>
             <span style={{ fontSize: 16 }}><b>Your plan:</b> {planned.length} morning{planned.length > 1 ? 's' : ''} · AED {total}</span>
@@ -237,7 +240,8 @@ export function Delivery() {
   const key = dates.join(',');
   useEffect(() => { if (key) get(`/availability?dates=${key}`).then(setAvail).catch(() => {}); }, [key]);
   if (!state.session) return <Navigate to="/sign-in?next=/checkout/delivery" replace />;
-  if (!dates.length) return <Navigate to="/plan/dates" replace />;
+  /* Back after paying: the plan is spent, so go to the customer's mornings rather than an empty planner. */
+  if (!dates.length) return <Navigate to={state.orders.length ? '/today' : '/plan/dates'} replace />;
 
   const isFull = (iso, w) => (avail[iso]?.[w] ? !avail[iso][w].available : false);
   const dl = state.delivery;
@@ -405,7 +409,7 @@ export function ReviewPay() {
   const plan = state.plan;
   const dates = plan.dates.filter(d => plan.days[d]?.saved);
   if (!state.session) return <Navigate to="/sign-in?next=/checkout/review" replace />;
-  if (!dates.length) return <Navigate to="/plan/dates" replace />;
+  if (!dates.length) return <Navigate to={state.orders.length ? '/today' : '/plan/dates'} replace />;
   const dl = state.delivery;
   /* The same-delivery question (FLW §8) must be answered for these dates before review. */
   if (dates.length > 1 && (typeof dl.sameForAll !== 'boolean' || dl.sameAnswerFor !== dates.join(','))) return <Navigate to="/checkout/delivery" replace />;

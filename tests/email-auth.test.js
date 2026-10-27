@@ -109,6 +109,11 @@ test('an email Resend refuses is a 502 and can be retried straight away', async 
   });
 });
 
+test('the app is told which sign-in methods can deliver codes', async () => {
+  const { body } = await call('GET', '/config');
+  assert.deepEqual(body.signIn, { email: true, mobile: true });   // development: codes go to the server log
+});
+
 /** Runs fn with WhatsApp configured and Meta's API replaced by `reply`. */
 async function withWhatsApp(reply, fn) {
   const real = globalThis.fetch;

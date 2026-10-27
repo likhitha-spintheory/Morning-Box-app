@@ -88,11 +88,14 @@ export function Logo({ width = 122, to = '/' }) {
   );
 }
 
+/** Back to the previous screen; on a screen opened from a link (nothing earlier in the app) go home instead. */
+export const goBack = nav => (window.history.state?.idx > 0 ? nav(-1) : nav('/', { replace: true }));
+
 export function IconButton({ icon, label, to, onClick }) {
   const nav = useNavigate();
   return (
     <button type="button" className="icon-btn" aria-label={label}
-      onClick={onClick || (() => (to === -1 ? nav(-1) : nav(to)))}>
+      onClick={onClick || (() => (to === -1 ? goBack(nav) : nav(to)))}>
       <Icon name={icon} size={icon === 'close' ? 18 : 20} stroke={1.8} />
     </button>
   );

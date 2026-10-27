@@ -583,7 +583,7 @@ export function WeeklySummary() {
       });
     });
   }, [unsafeSaved.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!plan.dates.length) return <Navigate to="/plan/dates" replace />;
+  if (!plan.dates.length) return <Navigate to={state.orders.length ? '/today' : '/plan/dates'} replace />;
   const unsaved = plan.dates.find(d => !plan.days[d]?.saved);
   const prices = rows.map(d => dayPrice(plan.days[d].cfg, state.profile));
   const total = prices.reduce((t, p) => t + p.total, 0);
