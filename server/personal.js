@@ -50,7 +50,7 @@ const upcomingDays = userId => db.prepare(`SELECT d.* FROM order_days d JOIN ord
 function flagOtherAllergies(userId, profile, days) {
   if (!profile.otherAllergies) return;
   for (const d of days) {
-    raiseException({ ref: `personal:${d.id}`, kind: 'Dietary/Allergy Issue', note: `Customer allergy note: "${profile.otherAllergies}" — confirm with the bakery before production.`, customerCategory: 'personal' });
+    raiseException({ ref: `personal:${d.id}`, kind: 'Dietary/Allergy Issue', note: `Customer allergy note: "${profile.otherAllergies}". Confirm with the bakery before production.`, customerCategory: 'personal' });
   }
 }
 
@@ -184,7 +184,7 @@ personalRouter.post('/support', requireUser, (req, res) => {
   const message = plain(req.body.message, 1000);
   if (message.length < 5) throw bad('message_required', 'Tell us a little more so we can help.');
   if (db.prepare(`SELECT COUNT(*) AS n FROM support_requests WHERE user_id = ? AND created_at > datetime('now', '-1 day')`).get(req.userId).n >= 10) {
-    throw new ApiError(429, 'support_limit', 'We already have your messages — our team will reply soon.');
+    throw new ApiError(429, 'support_limit', 'We already have your messages. Our team will reply soon.');
   }
   const orderRef = typeof req.body.orderRef === 'string' && /^MB(-B)?-[0-9A-F]{8}$/.test(req.body.orderRef) ? req.body.orderRef : null;
   const r = db.prepare('INSERT INTO support_requests (user_id, topic, order_ref, message) VALUES (?, ?, ?, ?)').run(req.userId, topic, orderRef, message);
@@ -313,7 +313,7 @@ function createPersonalOrder(userId, body, payment, key = null) {
     capacity();
     /* Morning Box credit (service recovery) is used first; the card pays the rest. */
     const credit = roundAed(total - payment.amount);
-    if (credit < 0 || credit > creditBalance(userId) + 0.001) throw new ApiError(409, 'credit_changed', 'Your Morning Box credit changed while you were paying. Your payment is being refunded — please order again.');
+    if (credit < 0 || credit > creditBalance(userId) + 0.001) throw new ApiError(409, 'credit_changed', 'Your Morning Box credit changed while you were paying. Your payment is being refunded. Please order again.');
     db.prepare('INSERT INTO orders (id, user_id, email, payment_method, payment_ref, total, idempotency_key, credit_used, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, userId, email || null, method, payment.ref || 'credit', total, key, credit, payment.provider === 'stripe' ? 'captured' : 'captured_demo');
     recordPayment('personal', id, payment);
@@ -414,7 +414,7 @@ function editPersonalDay(userId, orderId, date, body, payment = null) {
   }
   const due = b ? roundAed(b.price - day.price) : 0;
   if (due > 0 && !payment) return { due, label: `Morning Box · change to ${prettyDate(day.date)}` };
-  if (due > 0 && roundAed(payment.amount) !== due) throw new ApiError(409, 'price_changed', 'The price of this change moved while you were paying. Your payment is being refunded — please try again.');
+  if (due > 0 && roundAed(payment.amount) !== due) throw new ApiError(409, 'price_changed', 'The price of this change moved while you were paying. Your payment is being refunded. Please try again.');
   tx(() => {
     if (window !== day.window) assertCapacity(day.date, window, 1, { excludeOrderDay: day.id });
     /* The changed breakfast must still be makeable by a bakery with capacity (DLV §8). */
@@ -508,7 +508,7 @@ personalRouter.post('/orders/:id/days/:date/issue', requireUser, (req, res) => {
   if (day.cancelled) throw bad('cancelled', 'This morning was cancelled.');
   if (day.date > dubaiTodayIso() && day.stage < 2) throw bad('issue_too_early', 'You can report a problem on the morning of delivery.');
   if (db.prepare('SELECT COUNT(*) AS n FROM customer_issues WHERE order_id = ? AND date = ?').get(order.id, day.date).n >= 5) {
-    throw bad('issue_limit', 'We already have your reports for this morning — our team will be in touch.');
+    throw bad('issue_limit', 'We already have your reports for this morning. Our team will be in touch.');
   }
   const note = plain(req.body.note, 500);
   const photo = cleanPhoto(req.body.photo);
@@ -533,10 +533,10 @@ personalRouter.get('/orders/:id/receipt', requireUser, (req, res) => {
   const u = db.prepare('SELECT first_name FROM users WHERE id = ?').get(req.userId);
   const vat = o.total - o.total / (1 + VAT_RATE);
   const refunded = o.days.filter(d => d.cancelled).reduce((t, d) => t + (d.refund || d.price), 0);
-  const rows = o.days.map(d => `<tr><td>${esc(d.date)}</td><td>${esc(boxName(d.cfg))} · ${esc(sizeLabel(d.cfg.size))}${d.cfg.addons.length ? `<br><small>+ ${esc(extrasText(d.cfg.addons))}</small>` : ''}${d.cancelled ? '<br><small>Cancelled — refunded</small>' : ''}</td><td>${esc(windowLabel(d.window))}</td><td style="text-align:right">${d.cancelled ? '0.00' : money(d.price)}</td></tr>`).join('');
+  const rows = o.days.map(d => `<tr><td>${esc(d.date)}</td><td>${esc(boxName(d.cfg))} · ${esc(sizeLabel(d.cfg.size))}${d.cfg.addons.length ? `<br><small>+ ${esc(extrasText(d.cfg.addons))}</small>` : ''}${d.cancelled ? '<br><small>Cancelled and refunded</small>' : ''}</td><td>${esc(windowLabel(d.window))}</td><td style="text-align:right">${d.cancelled ? '0.00' : money(d.price)}</td></tr>`).join('');
   res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Receipt ${esc(o.id)}</title>
 <style>body{font-family:Inter,Arial,sans-serif;color:#3B2D22;max-width:720px;margin:32px auto;padding:0 20px}h1{font-family:Georgia,serif;font-weight:400}table{width:100%;border-collapse:collapse;font-size:14px}td,th{border-bottom:1px solid #EADCC1;padding:8px;text-align:left;vertical-align:top}.r{text-align:right}</style>
-<h1>${esc(SUPPLIER.name)} — ${SUPPLIER.trn ? 'Tax Invoice' : 'Receipt'}</h1>
+<h1>${esc(SUPPLIER.name)} ${SUPPLIER.trn ? 'Tax Invoice' : 'Receipt'}</h1>
 <p>${SUPPLIER.trn ? 'Invoice' : 'Receipt'} ${esc(o.id)} · ${esc(o.createdAt)} UTC</p>
 <p><b>From:</b> ${esc(SUPPLIER.name)}<br>${esc(SUPPLIER.address)}${SUPPLIER.trn ? `<br>TRN ${esc(SUPPLIER.trn)}` : ''}</p>
 <p><b>Customer:</b> ${esc(u?.first_name)}${o.email ? `<br>${esc(o.email)}` : ''}</p>

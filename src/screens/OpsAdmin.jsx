@@ -51,16 +51,16 @@ function Bakery({ b, catalog, call, act, busy }) {
         </span>
       </div>
       {b.statusNote && <span className="help">{b.statusNote}</span>}
-      {b.openSafety > 0 && <div className="banner-warn" role="status"><span><b>{b.openSafety} open safety incident{b.openSafety > 1 ? 's' : ''}</b> linked to this bakery — consider Under Review (MB-BKY-001 §10).</span></div>}
-      <span className="xs">Licence {b.licenceNo || '— not recorded'}{b.licenceExpiry ? ` (expires ${b.licenceExpiry})` : ''} · {b.bakesOwnBread ? 'bakes its own bread in-house' : 'own bread NOT confirmed'} · ready {b.readyLeadMinutes} min before each window</span>
+      {b.openSafety > 0 && <div className="banner-warn" role="status"><span><b>{b.openSafety} open safety incident{b.openSafety > 1 ? 's' : ''}</b> linked to this bakery. Consider Under Review (MB-BKY-001 §10).</span></div>}
+      <span className="xs">Licence {b.licenceNo || 'not recorded'}{b.licenceExpiry ? ` (expires ${b.licenceExpiry})` : ''} · {b.bakesOwnBread ? 'bakes its own bread in-house' : 'own bread NOT confirmed'} · ready {b.readyLeadMinutes} min before each window</span>
       <span className="xs">{b.area} · {b.distanceKm} km · capacity {b.effectiveCapacity ?? b.dailyCapacity}{b.effectiveCapacity != null ? ` (stated ${b.dailyCapacity})` : ''} boxes/day{windowCaps(b.windowCapacity)} · {b.upcomingBoxes} upcoming · {approved}{b.danishFlavours.length ? ` · Danish: ${b.danishFlavours.join(', ')}` : ''}</span>
       <span className="xs">Can handle: {Object.entries(b.capabilities).filter(([, v]) => v).map(([k]) => CAP_LABEL[k]).join(', ') || 'no special requirements'}{b.glutenFreeCertified ? ' · gluten-free certified' : ''}</span>
       {(b.contactName || b.contactPhone) && <span className="xs">Contact: {b.contactName} {b.contactPhone}</span>}
       <span className="xs">So far: {perf.mornings} mornings · {perf.onTime} on time · {perf.late} late · {perf.unableToFulfil} not fulfilled · Loved it {perf.loved} / Not for me {perf.notForMe}</span>
-      {code && <div className="note"><span>Bakery View access code for {b.name}: <b style={{ fontSize: 18, letterSpacing: '.1em' }}>{code}</b> — share it with the bakery now; it isn’t shown again. They sign in at <b>#/bakery</b>.</span></div>}
+      {code && <div className="note"><span>Bakery View access code for {b.name}: <b style={{ fontSize: 18, letterSpacing: '.1em' }}>{code}</b>. Share it with the bakery now; it isn’t shown again. They sign in at <b>#/bakery</b>.</span></div>}
       {b.conditions.length > 0 && (
         <table className="ops-table"><tbody>{b.conditions.map(c => (
-          <tr key={c.id} className="warn"><td>{c.date}</td><td>{c.kind}{c.itemName ? ` — ${c.itemName}` : ''}{c.capacity != null ? ` — ${c.capacity} boxes` : ''}{c.need ? ` — ${CAP_LABEL[c.need]}` : ''}{c.note ? ` · ${c.note}` : ''}</td>
+          <tr key={c.id} className="warn"><td>{c.date}</td><td>{c.kind}{c.itemName ? `: ${c.itemName}` : ''}{c.capacity != null ? `, ${c.capacity} boxes` : ''}{c.need ? `, ${CAP_LABEL[c.need]}` : ''}{c.note ? ` · ${c.note}` : ''}</td>
             <td><button type="button" className="btn-text" disabled={busy} onClick={() => act('DELETE', `/admin/conditions/${c.id}`)}>Clear</button></td></tr>
         ))}</tbody></table>
       )}
@@ -71,7 +71,7 @@ function Bakery({ b, catalog, call, act, busy }) {
             {catalog.statuses.map(s => <button key={s} type="button" className={`status ${status.status === s ? STATUS_CLASS[s] : 'done'}`} style={{ border: 0, cursor: 'pointer' }} onClick={() => setStatus(x => ({ ...x, status: s }))}>{s}</button>)}
           </div>
           <input className="input" placeholder={status.status === 'Active' ? 'Note (optional)' : 'Issue and corrective action (required)'} value={status.note} onChange={e => setStatus(x => ({ ...x, note: e.target.value }))} />
-          {status.status === 'Active' && b.status !== 'Active' && <input className="input" placeholder="Verification — how the corrective action was checked" value={status.verification} onChange={e => setStatus(x => ({ ...x, verification: e.target.value }))} />}
+          {status.status === 'Active' && b.status !== 'Active' && <input className="input" placeholder="Verification: how the corrective action was checked" value={status.verification} onChange={e => setStatus(x => ({ ...x, verification: e.target.value }))} />}
           <button type="button" className="btn-secondary" style={{ ...small, alignSelf: 'flex-start' }} disabled={busy} onClick={() => act('POST', `/admin/bakeries/${b.id}/status`, status).then(ok => ok && setMode(null))}>Save status</button>
           <span className="xs">Suspended or Under Review bakeries stop receiving new allocations. Re-run allocation for dates already allocated to them.</span>
         </div>
@@ -85,7 +85,7 @@ function Bakery({ b, catalog, call, act, busy }) {
             <input className="input" style={{ width: 240 }} placeholder="Notes" aria-label="Notes" value={sample.note} onChange={e => setSample(x => ({ ...x, note: e.target.value }))} />
             <button type="button" className="btn-secondary" style={small} disabled={busy || !sample.product} onClick={() => act('POST', `/admin/bakeries/${b.id}/samples`, sample).then(ok => ok && setSample(x => ({ ...x, product: '', note: '' })))}>Record</button>
           </div>
-          {b.samples.map(x => <span key={x.id} className="xs">{x.created_at.slice(0, 10)} · {x.productName}: <b>{x.result}</b>{x.note ? ` — ${x.note}` : ''}</span>)}
+          {b.samples.map(x => <span key={x.id} className="xs">{x.created_at.slice(0, 10)} · {x.productName}: <b>{x.result}</b>{x.note ? ` (${x.note})` : ''}</span>)}
         </div>
       )}
       {mode === 'condition' && (
@@ -142,7 +142,7 @@ function BakeryForm({ b, catalog, busy, onSave }) {
         <Field label="Bakery payout (% of breakfast price)"><input className="input" inputMode="decimal" value={v.payoutPct} onChange={set('payoutPct')} /></Field>
       </div>
       <label className="row" style={{ gap: 8, justifyContent: 'flex-start' }}><input type="checkbox" checked={v.bakesOwnBread} onChange={e => setV(x => ({ ...x, bakesOwnBread: e.target.checked }))} /> Bakes its own bread in-house (required, MB-BKY-001 §1)</label>
-      <span className="label">Onboarding gate (Master Plan §6.1) — all required before the first Active</span>
+      <span className="label">Onboarding gate (Master Plan §6.1): all required before the first Active</span>
       {Object.entries(ONBOARDING_LABEL).map(([k, label]) => (
         <label key={k} className="row" style={{ gap: 8, justifyContent: 'flex-start' }}><input type="checkbox" checked={!!v.onboarding[k]} onChange={e => setV(x => ({ ...x, onboarding: { ...x.onboarding, [k]: e.target.checked } }))} /> {label}</label>
       ))}
@@ -185,7 +185,7 @@ export function Products({ data }) {
             <td>{i.category}</td>
             <td>{i.allergens.length ? <b>{list(i.allergens)}</b> : 'None of the 7 listed allergens'}</td>
             <td>{list(i.diet) || '—'}</td>
-            <td>{i.variants.length ? i.variants.map(v => <div key={v.id}><small>{v.label}{v.sample ? ' (sample)' : ''} — contains {v.allergens.length ? list(v.allergens) : 'none listed'} · suits {list(v.diet) || '—'}</small></div>) : '—'}</td>
+            <td>{i.variants.length ? i.variants.map(v => <div key={v.id}><small>{v.label}{v.sample ? ' (sample)' : ''}: contains {v.allergens.length ? list(v.allergens) : 'none listed'} · suits {list(v.diet) || '—'}</small></div>) : '—'}</td>
           </tr>
         ))}</tbody>
       </table>
@@ -207,7 +207,7 @@ export function Pricing({ data, act, busy }) {
     <section className="stack gap-16">
       <div className="card stack gap-12" style={{ padding: 18 }}>
         <h2 className="h3">Breakfast price levels (Regular size, AED incl. VAT)</h2>
-        <span className="xs">Customers only see one price per breakfast — these levels are internal (MB-BOX-001 §8). Swaps never change the price.</span>
+        <span className="xs">Customers only see one price per breakfast. These levels are internal (MB-BOX-001 §8). Swaps never change the price.</span>
         <div className="grid-2">{Object.keys(p.priceLevels).map(k => (
           <div key={k} className="stack gap-6">{box(['priceLevels', k], p.priceLevels[k], `Level ${k.slice(1)}`)}
             <details><summary className="xs" style={{ cursor: 'pointer' }}>{data.levels[k]?.length || 0} breakfasts</summary><span className="xs">{(data.levels[k] || []).join(' · ')}</span></details></div>

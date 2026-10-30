@@ -161,6 +161,12 @@ img { max-width: 100%; display: block; }
 .chip { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 17px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--white); font-size: 16px; font-weight: 500; cursor: pointer; color: var(--espresso); }
 .chip.on { background: var(--gold-chip); border: 2px solid var(--gold); padding: 0 16.5px; }
 .chip.dashed { border-style: dashed; }
+.chips.sm { gap: 6px; margin-top: 8px; }
+.chips.sm .chip { gap: 6px; padding: 0 13px; font-size: 14.5px; white-space: nowrap; }
+.loaf-qty { display: flex; margin-top: 10px; }
+.chips.sm .chip.on { padding: 0 12.5px; }
+.chip .price { font-weight: 400; color: var(--text-3); }
+.chip.on .price { color: var(--espresso); }
 .seg { display: grid; gap: 4px; padding: 5px; border-radius: 999px; background: var(--sand-soft); }
 .seg button { min-height: 44px; border-radius: 999px; border: 0; background: transparent; font-size: 15px; font-weight: 600; color: var(--text-2); cursor: pointer; }
 .seg button.on { background: var(--white); color: var(--espresso); box-shadow: 0 1px 4px rgba(59, 45, 34, .12); }

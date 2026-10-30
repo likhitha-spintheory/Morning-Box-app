@@ -196,7 +196,7 @@ adminRouter.post('/bakeries/:id/status', (req, res) => {
     if (b.status !== 'Active' && wasActive && !clean(req.body.verification, 300)) throw bad('verification_required', 'Record the corrective action and how it was verified before returning to Active.');
   }
   db.prepare("UPDATE bakeries SET status = ?, status_note = ?, active = ?, updated_at = datetime('now') WHERE id = ?").run(status, note || null, status === 'Active' ? 1 : 0, b.id);
-  log(b.id, `${b.status} → ${status}${note ? ` — ${note}` : ''}${req.body.verification ? ` · Verified: ${clean(req.body.verification, 300)}` : ''}`);
+  log(b.id, `${b.status} → ${status}${note ? ` (${note})` : ''}${req.body.verification ? ` · Verified: ${clean(req.body.verification, 300)}` : ''}`);
   /* Orders this bakery hasn't started move to the next eligible bakery (MB-BKY-001 §10); started ones stay to be finished. */
   const today = new Date().toLocaleDateString('en-CA');
   const dates = [...new Set([
@@ -221,7 +221,7 @@ adminRouter.post('/bakeries/:id/samples', (req, res) => {
   const products = bakeryProducts(b);
   if (products && req.body.result === 'Approved' && !products.includes(req.body.product)) db.prepare('UPDATE bakeries SET products = ? WHERE id = ?').run(json([...products, req.body.product]), b.id);
   if (req.body.result === 'Not Approved' && (!products || products.includes(req.body.product))) db.prepare('UPDATE bakeries SET products = ? WHERE id = ?').run(json((products || Object.keys(COMPONENTS)).filter(p => p !== req.body.product)), b.id);
-  log(b.id, `Sample: ${COMPONENTS[req.body.product].name} — ${req.body.result}${req.body.note ? ` (${clean(req.body.note, 120)})` : ''}`);
+  log(b.id, `Sample: ${COMPONENTS[req.body.product].name}: ${req.body.result}${req.body.note ? ` (${clean(req.body.note, 120)})` : ''}`);
   res.status(201).json(bakeryOut(bakeryById(b.id)));
 });
 
@@ -239,7 +239,7 @@ export function addCondition(bakeryId, body) {
   if (body.kind === 'Special Requirement Unavailable' && !CAPABILITIES.includes(need)) throw bad('need_invalid', 'Choose the requirement it cannot handle.');
   db.prepare('INSERT INTO bakery_conditions (bakery_id, date, kind, item, capacity, need, note) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(b.id, body.date, body.kind, item, capacity, need, clean(body.note, 200) || null);
-  log(b.id, `${body.date}: ${body.kind}${item ? ` — ${COMPONENTS[item].name}` : ''}${capacity !== null ? ` — ${capacity} boxes` : ''}${need ? ` — ${need}` : ''}`);
+  log(b.id, `${body.date}: ${body.kind}${item ? `: ${COMPONENTS[item].name}` : ''}${capacity !== null ? `, ${capacity} boxes` : ''}${need ? `, ${need}` : ''}`);
   /* MB-BKY-001 §6: affected orders move to another eligible bakery straight away (orders already started stay);
      any that can't be placed go to the exception queue. */
   try { allocate(body.date); } catch (e) { console.error('[allocation]', e); }

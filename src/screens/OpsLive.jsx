@@ -31,7 +31,7 @@ export function Live({ data, meta, busy, act, call }) {
           <tbody>{data.plans.map(p => (
             <tr key={p.bakeryId} className={p.booked && p.plan?.status !== 'Confirmed' ? 'warn' : ''}>
               <td>{p.bakery}</td><td>{p.booked} / {p.capacity}{p.windowCapacity ? <><br /><small>{Object.entries(p.windowCapacity).map(([w, n]) => `${windowLabel(w)}: ${p.bookedByWindow?.[w] ?? 0} / ${n}`).join(' · ')}</small></> : null}</td>
-              <td>{p.plan ? `${p.plan.status}${p.plan.reason ? ` — ${p.plan.reason}` : ''}` : p.booked ? 'Waiting for the bakery to confirm' : '—'}</td>
+              <td>{p.plan ? `${p.plan.status}${p.plan.reason ? ` (${p.plan.reason})` : ''}` : p.booked ? 'Waiting for the bakery to confirm' : '—'}</td>
               <td>{p.booked > 0 && p.plan?.status !== 'Confirmed' && <small>Only the bakery can confirm (Bakery View). Chase the bakery or reallocate.</small>}</td>
             </tr>
           ))}</tbody>
@@ -103,7 +103,7 @@ function Actions({ r, meta, busy, act, call, names = {} }) {
     <div className="stack gap-12" style={{ padding: '6px 0' }}>
       {r.attempts?.length > 0 && <span className="xs">Attempts: {r.attempts.map(a => `${a.reason} (${a.created_at})`).join('; ')}</span>}
       {done && r.hasDeliveryPhoto && call && <DeliveryPhoto r={r} call={call} />}
-      {blocked && <div className="banner-warn" role="status"><span><b>{r.safetyHold ? 'Safety hold' : 'Open allergy / dietary check'}</b> — resolve it in Exceptions before the bakery prepares or hands this over (MB-BKY-001 §3).</span></div>}
+      {blocked && <div className="banner-warn" role="status"><span><b>{r.safetyHold ? 'Safety hold' : 'Open allergy / dietary check'}</b>: resolve it in Exceptions before the bakery prepares or hands this over (MB-BKY-001 §3).</span></div>}
       {r.handover && <span className="xs">Dispatched by the bakery: {r.handover.boxes} boxes ({r.handover.special_boxes} special){r.handover.picked_up_at ? ` · ${r.handover.picked_up_at}` : ''}</span>}
       {!leftBakery && !done && (
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
@@ -137,7 +137,7 @@ function Actions({ r, meta, busy, act, call, names = {} }) {
         const setC = (field, v) => setF(x => ({ ...x, counts: { ...x.counts, [k]: { ...x.counts[k], [field]: v } } }));
         return (
           <div key={k} className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
-            <b style={{ fontSize: 14 }}>Out for delivery{p.bakeryId ? ` from bakery #${p.bakeryId}` : ''} — count the boxes:</b>
+            <b style={{ fontSize: 14 }}>Out for delivery{p.bakeryId ? ` from bakery #${p.bakeryId}` : ''}. Count the boxes:</b>
             <input className="input" style={{ ...input, width: 80 }} inputMode="numeric" aria-label="Boxes counted" value={c.boxes} onChange={e => setC('boxes', e.target.value)} />
             <span className="xs">boxes, of which special</span>
             <input className="input" style={{ ...input, width: 80 }} inputMode="numeric" aria-label="Special boxes counted" value={c.special} onChange={e => setC('special', e.target.value)} />
@@ -159,7 +159,7 @@ function Actions({ r, meta, busy, act, call, names = {} }) {
       )}
       {!done && (
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
-          <b style={{ fontSize: 14 }}>Running late — new time:</b>
+          <b style={{ fontSize: 14 }}>Running late. New time:</b>
           <input className="input" style={{ ...input, width: 110 }} placeholder="9:20 AM" aria-label="New time" value={f.eta} onChange={set('eta')} />
           <button type="button" className="btn-text" disabled={busy || !f.eta.trim()} onClick={() => act('POST', `${path}/late`, { eta: f.eta.trim() })}>Tell the customer</button>
         </div>
@@ -214,12 +214,12 @@ export function ProductionPlan({ plan, date, children }) {
         <span className="eyebrow grey">Add-ons (packed separately)</span>
         <table className="ops-table"><tbody>{plan.addons.map(a => <tr key={a.item}><td style={{ width: 60 }}><b>{a.qty}×</b></td><td>{a.item}</td></tr>)}</tbody></table>
       </>}
-      <span className="eyebrow grey">Packing — per order</span>
+      <span className="eyebrow grey">Packing per order</span>
       <table className="ops-table">
         <thead><tr><th>Order</th><th>Ready by</th><th>Box</th><th>Pack</th></tr></thead>
         <tbody>{plan.packing.map(o => (
           <tr key={`${o.kind}${o.id}`} className={o.safetyHold || o.safetyCheck || o.lines.some(l => l.special.length) ? 'warn' : ''}>
-            <td>{o.ref}<br /><small>{[o.name, o.window, o.shared].filter(Boolean).join(' · ')}</small>{o.safetyHold ? <><br /><b>SAFETY HOLD — do not prepare</b></> : o.safetyCheck ? <><br /><b>ALLERGY CHECK OPEN — do not prepare</b></> : null}</td>
+            <td>{o.ref}<br /><small>{[o.name, o.window, o.shared].filter(Boolean).join(' · ')}</small>{o.safetyHold ? <><br /><b>SAFETY HOLD: do not prepare</b></> : o.safetyCheck ? <><br /><b>ALLERGY CHECK OPEN: do not prepare</b></> : null}</td>
             <td>{o.readyBy}</td>
             <td>{o.lines.map((l, i) => <div key={i}>{l.qty}× {l.box} · {l.size}{l.special.length ? <b> · {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? <><br /><small>+ {l.addons.join(', ')}</small></> : null}</div>)}{o.otherAllergies && !o.lines.some(l => l.special.some(w => w.startsWith('Also avoid'))) ? <b>Also avoid: {o.otherAllergies}</b> : null}</td>
             <td><small>{[...new Set(o.lines.flatMap(l => l.packing))].join(' ')}</small></td>

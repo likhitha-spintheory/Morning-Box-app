@@ -356,6 +356,6 @@ export function raiseException({ ref, kind, note = '', category, owner = null, a
 export function cleanPhoto(v) {
   if (v === undefined || v === null || v === '') return null;
   if (typeof v !== 'string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(v)) throw bad('photo_invalid', 'Add the photo as a JPEG, PNG or WebP image.');
-  if (v.length > 180_000) throw bad('photo_too_large', 'That photo is too large — try a smaller one.');
+  if (v.length > 180_000) throw bad('photo_too_large', 'That photo is too large. Please try a smaller one.');
   return v;
 }

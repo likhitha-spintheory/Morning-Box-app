@@ -83,7 +83,7 @@ function setStage(kind, id, stage, point) {
     /* The bakery delivers its own orders: late because it was not Ready by ready-by → Pickup Delay; otherwise a Delivery Delay (MB-OPS-001 §6, §11). */
     const slow = lateBakeries(row);
     if (late) raiseException({ ref: `${kind}:${raw.id}`, kind: slow.length ? 'Pickup Delay' : 'Delivery Delay', category: 'Bakery', responsibleParty: (slow.length ? slow : bakeryNames(row)).join(', ') || null,
-      note: `Delivered after the ${windowLabel(row.window)} window — late delivery (service failure)${slow.length ? `; ${slow.join(', ')} not Ready by ready-by` : ''}`, owner: 'Operations', action: 'Review the cause; apply service recovery if appropriate' });
+      note: `Delivered after the ${windowLabel(row.window)} window: late delivery (service failure)${slow.length ? `; ${slow.join(', ')} not Ready by ready-by` : ''}`, owner: 'Operations', action: 'Review the cause; apply service recovery if appropriate' });
   }
   event(row, 'stage', ['', 'Being prepared', 'Out for delivery', `Delivered to ${point}`][stage]);
   if (stage === 2) tell(row, 'on_the_way', `Your breakfast for ${prettyDate(row.date)} is on its way.`);
@@ -103,8 +103,8 @@ function lateBakeries(row) {
 
 /* ---------- Safety check before preparation and handover (MB-BKY-001 §3) ---------- */
 function assertSafe(kind, raw) {
-  if (raw.safety_hold) throw new ApiError(409, 'safety_hold', 'This order is on a safety hold. Resolve the safety check first — do not prepare or hand it over.');
-  if (openSafetyCheck(kind, raw.id)) throw new ApiError(409, 'safety_check', 'This order has an open allergy / dietary check. Resolve the safety check first (Operations → Exceptions) — do not prepare or hand it over.');
+  if (raw.safety_hold) throw new ApiError(409, 'safety_hold', 'This order is on a safety hold. Resolve the safety check first. Do not prepare or hand it over.');
+  if (openSafetyCheck(kind, raw.id)) throw new ApiError(409, 'safety_check', 'This order has an open allergy / dietary check. Resolve the safety check first (Operations → Exceptions). Do not prepare or hand it over.');
 }
 
 /* Partner reliability log (MB-BKY-001 §9): kept even when the order then moves to another bakery. */
@@ -195,15 +195,15 @@ export function setBakeryState(kind, id, state, { delayMinutes, reason, note, qc
   } else if (state === 'Delayed') {
     const mins = Number(delayMinutes);
     if (!Number.isInteger(mins) || mins < 5 || mins > 180) throw bad('delay_invalid', 'Enter the expected delay in minutes (5–180).');
-    for (const t of targets) { partnerEvent(t, row, 'Delayed', `${mins} min${note ? ` — ${note}` : ''}`); savePart(kind, loadDay(kind, id).raw, row, t, { state: 'Delayed', delay: mins }); }
+    for (const t of targets) { partnerEvent(t, row, 'Delayed', `${mins} min${note ? ` (${note})` : ''}`); savePart(kind, loadDay(kind, id).raw, row, t, { state: 'Delayed', delay: mins }); }
     update(kind, raw.id, { delay_minutes: mins });
-    raiseException({ ref: `${kind}:${raw.id}`, kind: 'Pickup Delay', note: `${bakeryName}: ready about ${mins} min late${note ? ` — ${note}` : ''}`, responsibleParty: bakeryName, owner: 'Operations', action: 'Adjust pickup; warn the customer if the window will be missed' });
+    raiseException({ ref: `${kind}:${raw.id}`, kind: 'Pickup Delay', note: `${bakeryName}: ready about ${mins} min late${note ? ` (${note})` : ''}`, responsibleParty: bakeryName, owner: 'Operations', action: 'Adjust pickup; warn the customer if the window will be missed' });
   } else {
     if (!PLAN_ISSUES.includes(reason)) throw bad('reason_required', `Choose why: ${PLAN_ISSUES.join(', ')}.`);
     /* Logged before reallocation resets the row, so the original bakery keeps the record. */
     for (const t of targets) { partnerEvent(t, row, 'Unable to Fulfil', reason); savePart(kind, loadDay(kind, id).raw, row, t, { state: 'Unable to Fulfil' }); }
     update(kind, raw.id, { issue_reason: reason });
-    const exId = raiseException({ ref: `${kind}:${raw.id}`, kind: reason, category: reason === 'Dietary/Allergy Issue' ? 'Safety' : 'Bakery', note: `${bakeryName} cannot fulfil: ${reason}${note ? ` — ${note}` : ''}`, responsibleParty: bakeryName, owner: 'Operations', action: 'Reallocate to the next eligible bakery, otherwise full refund', dedupe: false });
+    const exId = raiseException({ ref: `${kind}:${raw.id}`, kind: reason, category: reason === 'Dietary/Allergy Issue' ? 'Safety' : 'Bakery', note: `${bakeryName} cannot fulfil: ${reason}${note ? ` (${note})` : ''}`, responsibleParty: bakeryName, owner: 'Operations', action: 'Reallocate to the next eligible bakery, otherwise full refund', dedupe: false });
     /* A business order: only the failed bakery's part moves; what can't be placed is refunded pro-rata (MB-OPS-001 §4, MB-DLV-001 §11). */
     if (kind === 'business') {
       const moved = reallocateParts(raw.id, targets);
@@ -214,11 +214,11 @@ export function setBakeryState(kind, id, state, { delayMinutes, reason, note, qc
         const left = fresh.total - db.prepare(`SELECT COALESCE(SUM(amount), 0) AS n FROM service_recovery WHERE day_kind = ? AND day_id = ? AND type IN ('Partial Refund', 'Full Refund')`).get(kind, raw.id).n;
         const amount = Math.min(left, Math.round(fresh.total * moved.unplaced / fresh.people * 100) / 100);
         if (amount > 0) applyRemedy(kind, raw.id, { type: 'Partial Refund', amount, reason: `We couldn’t prepare ${moved.unplaced} of your ${fresh.people} breakfasts this morning` });
-        db.prepare('UPDATE exceptions SET action = ? WHERE id = ?').run(`${moved.unplaced} box${moved.unplaced > 1 ? 'es' : ''} could not be placed — partial refund AED ${amount} issued; customer told; the rest proceeds${moved.placed.length ? ` (moved to ${moved.placed.map(b => b.name).join(', ')})` : ''}`, exId);
+        db.prepare('UPDATE exceptions SET action = ? WHERE id = ?').run(`${moved.unplaced} box${moved.unplaced > 1 ? 'es' : ''} could not be placed. Partial refund AED ${amount} issued; customer told; the rest proceeds${moved.placed.length ? ` (moved to ${moved.placed.map(b => b.name).join(', ')})` : ''}`, exId);
       } else {
         applyRemedy(kind, raw.id, { type: 'Full Refund', reason: 'We couldn’t prepare your breakfast this morning' });
         update(kind, raw.id, { delivery_state: 'Not Fulfilled' });
-        db.prepare('UPDATE exceptions SET action = ? WHERE id = ?').run('No other bakery could take it — full refund issued; customer told', exId);
+        db.prepare('UPDATE exceptions SET action = ? WHERE id = ?').run('No other bakery could take it. Full refund issued; customer told', exId);
       }
       return;
     }
@@ -229,7 +229,7 @@ export function setBakeryState(kind, id, state, { delayMinutes, reason, note, qc
     } catch {
       applyRemedy(kind, raw.id, { type: 'Full Refund', reason: 'We couldn’t prepare your breakfast this morning' });
       update(kind, raw.id, { delivery_state: 'Not Fulfilled' });
-      db.prepare('UPDATE exceptions SET action = ? WHERE id = ?').run('No other bakery could take it — full refund issued; customer told', exId);
+      db.prepare('UPDATE exceptions SET action = ? WHERE id = ?').run('No other bakery could take it. Full refund issued; customer told', exId);
     }
   }
 }
@@ -251,7 +251,7 @@ export function reallocate(kind, id, { exclude = [] } = {}) {
   const reset = { bakery_state: null, part_states: null, issue_reason: null, delay_minutes: null, qc_passed: 0, ready_at: null };
   if (kind === 'personal') update(kind, raw.id, { bakery_id: next.id, ...reset });
   else update(kind, raw.id, { allocation: json([{ bakeryId: next.id, boxes: row.boxes, items: units.map(u => ({ entry: u.entry, qty: u.qty })) }]), ...reset });
-  db.prepare(`UPDATE bakery_plans SET status = 'Changed — confirm again', updated_at = datetime('now') WHERE bakery_id = ? AND date = ? AND status = 'Confirmed'`).run(next.id, row.date);
+  db.prepare(`UPDATE bakery_plans SET status = 'Changed, confirm again', updated_at = datetime('now') WHERE bakery_id = ? AND date = ? AND status = 'Confirmed'`).run(next.id, row.date);
   return next;
 }
 
@@ -308,7 +308,7 @@ function reallocateParts(id, failed) {
   const agg = aggregate(allocation.map(p => ({ bakeryId: p.bakeryId })), states);
   update('business', raw.id, { allocation: json(allocation), part_states: Object.keys(states).length ? json(states) : null, bakery_state: agg,
     ...(unplaced ? {} : { issue_reason: null }), ...(healthy.some(p => states[p.bakeryId]?.delay) ? {} : { delay_minutes: null }) });
-  for (const p of added) db.prepare(`UPDATE bakery_plans SET status = 'Changed — confirm again', updated_at = datetime('now') WHERE bakery_id = ? AND date = ? AND status = 'Confirmed'`).run(p.bakeryId, row.date);
+  for (const p of added) db.prepare(`UPDATE bakery_plans SET status = 'Changed, confirm again', updated_at = datetime('now') WHERE bakery_id = ? AND date = ? AND status = 'Confirmed'`).run(p.bakeryId, row.date);
   return { placed, unplaced, kept };
 }
 
@@ -325,7 +325,7 @@ export function recordHandover(kind, id, { boxes, specialBoxes, bakeryId }) {
   const { raw, row } = loadDay(kind, id);
   const parts = rowParts(row);
   const part = bakeryId ? parts.find(p => p.bakeryId === Number(bakeryId)) : parts.length === 1 ? parts[0] : null;
-  if (!part) throw bad('part_required', parts.length > 1 ? 'This order comes from more than one bakery — record each bakery’s dispatch.' : 'This order has no bakery yet.');
+  if (!part) throw bad('part_required', parts.length > 1 ? 'This order comes from more than one bakery. Record each bakery’s dispatch.' : 'This order has no bakery yet.');
   const states = partStates(raw);
   if (states[part.bakeryId]?.state !== 'Ready') throw bad('not_ready', 'The bakery has not marked this order Ready.');
   assertSafe(kind, raw);
@@ -378,9 +378,9 @@ export function reportLate(kind, id, eta, { by = 'ops', note = '', bakery = null
   if (!when) throw bad('eta_required', 'Enter the new time, e.g. 9:20 AM.');
   if (raw.stage >= 3) throw bad('not_open', 'This delivery is already closed.');
   update(kind, raw.id, { late_note: when, at_risk: 1 });
-  event(row, 'late', `Running late — now expected around ${when}`);
-  tell(row, 'late', `Sorry — your breakfast for ${prettyDate(row.date)} is running late. It should arrive around ${when}.`);
-  if (by === 'bakery') raiseException({ ref: `${kind}:${raw.id}`, kind: 'Delivery Delay', category: 'Bakery', note: `${bakery || 'The bakery'} reports arrival around ${when}${note ? ` — ${String(note).slice(0, 160)}` : ''}`, responsibleParty: bakery, owner: 'Operations', action: 'Customer told the new time; follow up if the window is missed' });
+  event(row, 'late', `Running late, now expected around ${when}`);
+  tell(row, 'late', `Sorry, your breakfast for ${prettyDate(row.date)} is running late. It should arrive around ${when}.`);
+  if (by === 'bakery') raiseException({ ref: `${kind}:${raw.id}`, kind: 'Delivery Delay', category: 'Bakery', note: `${bakery || 'The bakery'} reports arrival around ${when}${note ? ` (${String(note).slice(0, 160)})` : ''}`, responsibleParty: bakery, owner: 'Operations', action: 'Customer told the new time; follow up if the window is missed' });
 }
 
 /* ---------- Failed delivery (MB-DLV-001 §6, §11) ---------- */
@@ -390,10 +390,10 @@ export function markFailed(kind, id, reason, note) {
   if (!FAILURE_REASONS.includes(reason)) throw bad('reason_invalid', `Reason must be one of: ${FAILURE_REASONS.join(', ')}.`);
   if (raw.stage >= 3) throw bad('delivered', 'This order was already delivered.');
   /* A delivery attempt must be made before the order is marked failed (MB-DLV-001 §6). */
-  if (raw.delivery_state !== 'Out for Delivery') throw bad('not_out', 'Only an order out for delivery can be marked failed — record the delivery attempt first.');
+  if (raw.delivery_state !== 'Out for Delivery') throw bad('not_out', 'Only an order out for delivery can be marked failed. Record the delivery attempt first.');
   db.prepare('INSERT INTO delivery_attempts (day_kind, day_id, reason, note) VALUES (?, ?, ?, ?)').run(kind, raw.id, reason, String(note || '').slice(0, 200) || null);
   update(kind, raw.id, { delivery_state: 'Failed' });
-  raiseException({ ref: `${kind}:${raw.id}`, kind: 'Delivery Failed', category: reason === 'Wrong address' || reason === 'Receiving point unavailable' || reason === 'Contact unreachable' ? 'Customer/Location' : 'Bakery', responsibleParty: bakeryNames(row).join(', ') || null, note: `${reason}${note ? ` — ${note}` : ''}`, owner: 'Operations', action: 'Contact the customer; re-attempt or apply the refund policy', dedupe: false });
+  raiseException({ ref: `${kind}:${raw.id}`, kind: 'Delivery Failed', category: reason === 'Wrong address' || reason === 'Receiving point unavailable' || reason === 'Contact unreachable' ? 'Customer/Location' : 'Bakery', responsibleParty: bakeryNames(row).join(', ') || null, note: `${reason}${note ? ` (${note})` : ''}`, owner: 'Operations', action: 'Contact the customer; re-attempt or apply the refund policy', dedupe: false });
   event(row, 'failed', `Delivery attempt failed: ${reason}`);
   tell(row, 'late', `We couldn’t hand over your breakfast for ${prettyDate(row.date)} (${reason.toLowerCase()}). We’ll contact you shortly.`);
 }
@@ -422,7 +422,7 @@ export function payBack(orderId, userId, amount, reason) {
 export const paidBackText = ({ card, credit }) => [
   card > 0 ? `AED ${card} will be refunded to your original payment method` : '',
   credit > 0 ? `AED ${credit} is back as Morning Box credit` : ''
-].filter(Boolean).join(' and ') || 'Nothing more is due — it was already refunded';
+].filter(Boolean).join(' and ') || 'Nothing more is due. It was already refunded';
 export function applyRemedy(kind, id, { type, amount, reason }) {
   if (!TABLE[kind]) throw bad('kind_invalid', 'kind must be personal or business');
   const raw = db.prepare(`SELECT d.*, o.user_id FROM ${TABLE[kind]} d JOIN ${OWNER_TABLE[kind]} o ON o.id = d.order_id WHERE d.id = ?`).get(Number(id));
@@ -459,8 +459,8 @@ export function applyRemedy(kind, id, { type, amount, reason }) {
     }
     if (type === 'Credit') db.prepare('INSERT INTO customer_credits (user_id, amount, reason, ref) VALUES (?, ?, ?, ?)').run(raw.user_id, value, why, ref(r));
   });
-  if (type === 'Full Refund' || type === 'Partial Refund') { event(r, 'refund', `${type}: AED ${value} — ${why}`); tell(r, 'refund', `${type} of AED ${value} for ${prettyDate(raw.date)}: ${why}. ${paidBackText(back)}.`); }
-  if (type === 'Credit') { event(r, 'credit', `Credit AED ${value} — ${why}`); tell(r, 'refund', `AED ${value} Morning Box credit added: ${why}. It’s used automatically on your next order.`); }
+  if (type === 'Full Refund' || type === 'Partial Refund') { event(r, 'refund', `${type}: AED ${value} (${why})`); tell(r, 'refund', `${type} of AED ${value} for ${prettyDate(raw.date)}: ${why}. ${paidBackText(back)}.`); }
+  if (type === 'Credit') { event(r, 'credit', `Credit AED ${value} (${why})`); tell(r, 'refund', `AED ${value} Morning Box credit added: ${why}. It’s used automatically on your next order.`); }
   return { type, amount: value };
 }
 export const creditBalance = userId => Math.max(0, db.prepare('SELECT COALESCE(SUM(amount), 0) AS n FROM customer_credits WHERE user_id = ?').get(userId).n);
@@ -483,7 +483,7 @@ export function flagAtRisk(now = new Date()) {
     const bakeryLate = r.bakeryState === 'Delayed' || (r.readyAt ? new Date(r.readyAt) > rb : now > rb);
     raiseException({ ref: `${r.kind}:${r.id}`, kind: bakeryLate ? 'Pickup Delay' : 'Delivery Delay', note: `At risk of missing the ${windowLabel(r.window)} window`, owner: 'Operations', action: 'Expedite; confirm the new time with the customer' });
     event(r, 'late', 'Running a little late');
-    tell(r, 'late', `Sorry — your breakfast for ${prettyDate(r.date)} may arrive a little after your ${windowLabel(r.window)} window. We’re on it.`);
+    tell(r, 'late', `Sorry, your breakfast for ${prettyDate(r.date)} may arrive a little after your ${windowLabel(r.window)} window. We’re on it.`);
     flagged++;
   }
   return flagged;
@@ -499,7 +499,7 @@ function dropOff(r) {
 }
 
 /* ---------- Production plan & packing (MB-OPS-001 §3, MB-BKY-001 §5) ---------- */
-const flavourText = a => (a.flavour ? ` — ${a.flavour}` : '');
+const flavourText = a => (a.flavour ? ` (${a.flavour})` : '');
 /* forBakery: only what the bakery needs for production, safety and delivery — no customer names (OPS §3, DLV §4). */
 export function productionPlan(date, onlyBakery = null, { forBakery = false } = {}) {
   const names = Object.fromEntries(db.prepare('SELECT id, name FROM bakeries').all().map(b => [b.id, b.name]));

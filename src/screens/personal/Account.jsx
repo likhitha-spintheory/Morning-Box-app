@@ -13,7 +13,7 @@ import {
   isBeforeCutoff, cutoffLabel, timeLeft, dayPrice, sizePrice, canChooseSize, recommendDay, addonPrice, shortPlace, serverDateIso,
   whatsappLink, containsAllergens, planningWeeks, tomorrowIso
 } from '../../domain/app.js';
-import { BoxEditor, FlavourPicker, offeredPastries } from '../../components/BoxEditor.jsx';
+import { BoxEditor, FlavourPicker, LoafPicker, offeredPastries } from '../../components/BoxEditor.jsx';
 import { addonGroups } from '../../domain/engine.js';
 import { FEEDBACK, addDaysIso as addDays, areasText, cutoffFor } from '../../domain/standards.js';
 import { useOrder, Loading } from '../../state/orders.jsx';
@@ -410,7 +410,7 @@ export function OrderDay() {
         {day.problem && (
           <div className="banner-warn" role="alert">
             <Icon name="alert" size={18} stroke={2} color="var(--warn)" style={{ flex: 'none' }} />
-            <span>{day.problem === 'Not Fulfilled' ? 'We’re sorry — we couldn’t prepare this breakfast.' : 'We couldn’t hand over your breakfast. Our team will contact you.'}{day.recoveryRefund ? ` AED ${day.recoveryRefund} is being refunded to your original payment method.` : ''}</span>
+            <span>{day.problem === 'Not Fulfilled' ? 'We’re sorry, we couldn’t prepare this breakfast.' : 'We couldn’t hand over your breakfast. Our team will contact you.'}{day.recoveryRefund ? ` AED ${day.recoveryRefund} is being refunded to your original payment method.` : ''}</span>
           </div>
         )}
         {!day.problem && day.recoveryRefund > 0 && <div className="note"><Icon name="card" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>AED {day.recoveryRefund} refunded to your original payment method.</span></div>}
@@ -448,7 +448,7 @@ export function OrderDay() {
         {editable && <Link to={`/orders/${id}/${date}/edit`} className={day.safetyReview ? 'btn' : 'btn-secondary'}>{day.safetyReview ? 'Review this morning' : 'Edit or cancel this morning'}</Link>}
         {!editable && st >= 0 && st < 3 && (
           <div className="note"><Icon name="clock" size={20} stroke={1.6} style={{ flex: 'none' }} />
-            <span>{st > 0 ? 'Being prepared — changes are closed.' : 'Changes for this morning are closed.'}{nextEditable ? ` ${dateInfo(nextEditable.date).label} can still be edited.` : ''}</span></div>
+            <span>{st > 0 ? 'Being prepared. Changes are closed.' : 'Changes for this morning are closed.'}{nextEditable ? ` ${dateInfo(nextEditable.date).label} can still be edited.` : ''}</span></div>
         )}
         {st === 3 && !day.feedback && <Link to={`/orders/${id}/${date}/feedback`} className="btn">How was your morning?</Link>}
         {day.issues?.length > 0 && (
@@ -662,17 +662,10 @@ export function EditMorning() {
                   <div key={item} className="list-row">
                     <span className="ci"><Icon name="bread" size={22} stroke={1.5} /></span>
                     <span className="stack" style={{ flex: 1 }}><span style={{ fontSize: 17, fontWeight: 500 }}>{componentName(item)}</span>
-                      <span className="sm">
-                        {['half', 'whole'].map((u, k) => (
-                          <span key={u}>{k ? ' · ' : ''}
-                            <button type="button" disabled={!l} onClick={() => setLoaf(item, u, l.qty)} aria-pressed={l?.unit === u}
-                              style={{ background: 'none', border: 0, padding: '12px 2px', minHeight: 44, font: 'inherit', color: 'inherit', cursor: l ? 'pointer' : 'default', textDecoration: l?.unit === u ? 'underline' : 'none', textUnderlineOffset: 3 }}>
-                              {u === 'half' ? 'Half loaf' : 'Whole loaf'} · AED {addonPrice({ group: 'bread', item, unit: u, qty: 1 })}
-                            </button>
-                          </span>
-                        ))}
-                      </span></span>
-                    <Qty value={l?.qty || 0} max={9} label={componentName(item)} onChange={q => setLoaf(item, l?.unit || 'half', q)} />
+                      <LoafPicker name={componentName(item)} unit={l?.unit}
+                        prices={{ half: addonPrice({ group: 'bread', item, unit: 'half', qty: 1 }), whole: addonPrice({ group: 'bread', item, unit: 'whole', qty: 1 }) }}
+                        onPick={u => setLoaf(item, u, l?.qty || 1)} />
+                      {l && <span className="loaf-qty"><Qty value={l.qty} max={9} label={componentName(item)} onChange={q => setLoaf(item, l.unit, q)} /></span>}</span>
                   </div>
                 );
               })}
@@ -810,7 +803,7 @@ export function Feedback() {
           </section>
         )}
         <ErrorBanner>{error}</ErrorBanner>
-        {sent && <div className="banner-ok" role="status"><Icon name="check" size={20} stroke={2} /><span>Thanks, {state.user?.firstName} — noted for next time.</span></div>}
+        {sent && <div className="banner-ok" role="status"><Icon name="check" size={20} stroke={2} /><span>Thanks, {state.user?.firstName}. Noted for next time.</span></div>}
         {sent && <button type="button" className="btn-text" style={{ alignSelf: 'center', fontSize: 14, color: 'var(--text-3)' }} onClick={() => setEditing(true)}>Change my feedback</button>}
       </main>
       <Footer>
@@ -862,7 +855,7 @@ export function Me() {
     put('/me/settings', { offers: v }).catch(e => { set(s => { s.settings.offers = !v; }); setError(e.message); });
   };
   const saveEmail = () => {
-    if (email.trim() && !emailValid(email)) { setError('Enter a valid email, e.g. name@company.com — or leave it empty.'); return; }
+    if (email.trim() && !emailValid(email)) { setError('Enter a valid email, e.g. name@company.com, or leave it empty.'); return; }
     run(async () => { const r = await put('/me/settings', { email: email.trim() }); set(s => { s.user = r.user; }); setEditEmail(false); });
   };
   const startChange = kind => { setChanging(kind); setMobileStep('number'); setError(''); };

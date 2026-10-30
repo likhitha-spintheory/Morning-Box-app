@@ -24,7 +24,7 @@ import { recipeById, describe } from '../src/domain/recipes.js';
 import { DEV } from './env.js';
 /* In production the operations API stays closed until a real OPS_KEY is configured. */
 const OPS_KEY = process.env.OPS_KEY || (DEV ? 'dev-ops-key' : '');
-if (!DEV && (!OPS_KEY || OPS_KEY === 'dev-ops-key')) console.warn('[ops] OPS_KEY is not set — the operations API is disabled.');
+if (!DEV && (!OPS_KEY || OPS_KEY === 'dev-ops-key')) console.warn('[ops] OPS_KEY is not set: the operations API is disabled.');
 const digest = s => createHash('sha256').update(String(s)).digest();
 
 /* ---------- Operations & bakery API (MB-OPS-001, MB-BKY-001) ---------- */

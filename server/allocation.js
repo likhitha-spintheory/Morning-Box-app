@@ -173,7 +173,7 @@ export function allocate(date, { final = cutoffFor(date) <= new Date() } = {}) {
       const was = before.find(b => b.ref === r.row.ref).bakeries;
       if (now !== was) [...now.split(','), ...was.split(',')].filter(Boolean).forEach(id => changed.add(Number(id)));
     }
-    for (const id of changed) db.prepare(`UPDATE bakery_plans SET status = 'Changed — confirm again', updated_at = datetime('now') WHERE bakery_id = ? AND date = ? AND status = 'Confirmed'`).run(id, date);
+    for (const id of changed) db.prepare(`UPDATE bakery_plans SET status = 'Changed, confirm again', updated_at = datetime('now') WHERE bakery_id = ? AND date = ? AND status = 'Confirmed'`).run(id, date);
     /* MB-PRD-001 §11: once the bakery is final, the customer sees "Prepared by [Partner Bakery]" — once per morning. */
     if (final) {
       const names = Object.fromEntries(db.prepare('SELECT id, name FROM bakeries').all().map(b => [b.id, b.name]));

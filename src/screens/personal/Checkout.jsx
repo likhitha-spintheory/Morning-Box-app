@@ -493,7 +493,7 @@ export function ReviewPay() {
         <div className="field"><label htmlFor="em">Email for confirmation <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
           <input id="em" className={`input${emailTouched && emailBad ? ' invalid' : ''}`} type="email" autoComplete="email" placeholder="you@company.com" value={email}
             aria-invalid={emailTouched && emailBad} onBlur={() => setEmailTouched(true)} onChange={e => setEmail(e.target.value)} />
-          {emailTouched && emailBad && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Enter a valid email, e.g. name@company.com — or leave it empty</span>}</div>
+          {emailTouched && emailBad && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Enter a valid email, e.g. name@company.com, or leave it empty</span>}</div>
         <div className="grid-2" role="radiogroup" aria-label="Payment method">
           {[['apple', 'apple', 'Apple Pay'], ['card', 'card', 'Card']].map(([id, icon, label]) => (
             <button key={id} type="button" className={`win${method === id ? ' on' : ''}`} role="radio" aria-checked={method === id} onClick={() => setMethod(id)} style={{ padding: '0 16px', minHeight: 60, gap: 10 }}>

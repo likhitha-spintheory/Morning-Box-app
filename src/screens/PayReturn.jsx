@@ -71,10 +71,10 @@ export default function PayReturn() {
     expired: 'The payment page timed out', failed: 'We couldn’t complete your order', error: 'We couldn’t check your payment'
   }[s] || 'Confirming your payment…';
   const text = {
-    checking: 'One moment — please don’t close this page.',
+    checking: 'One moment, please don’t close this page.',
     pending: 'This can take a minute. Nothing more is needed from you; check again shortly. You won’t be charged twice.',
-    cancelled: 'Nothing was charged. Your mornings are still in your plan — you can pay when you’re ready.',
-    expired: 'Nothing was charged. Your mornings are still in your plan — please try again.',
+    cancelled: 'Nothing was charged. Your mornings are still in your plan. You can pay when you’re ready.',
+    expired: 'Nothing was charged. Your mornings are still in your plan. Please try again.',
     failed: `${state.error || 'Your order could not be confirmed.'} Your payment is being refunded in full to your original payment method.`,
     error: state.message
   }[s];

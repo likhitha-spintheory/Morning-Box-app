@@ -45,7 +45,7 @@ function sendQuietly(to, subject, lines, linkPath) {
 /** Order confirmation (MB-FLW-001 §9: email for the confirmation is optional at checkout). */
 export function sendOrderEmail(order) {
   sendQuietly(order.email, `Your Morning Box order ${order.id} is confirmed`, [
-    `Thank you — order ${order.id} is confirmed and paid (AED ${order.total}).`,
+    `Thank you! Order ${order.id} is confirmed and paid (AED ${order.total}).`,
     'You can change or cancel each morning in the app until 9:00 PM the evening before.'
   ], `/orders`);
 }
@@ -53,7 +53,7 @@ export function sendOrderEmail(order) {
 /** Business Breakfast confirmation (MB-B2B-001 §8: Order → Pay Online → Confirmation + Invoice). */
 export function sendBusinessOrderEmail(order) {
   sendQuietly(order.email, `Business Breakfast order ${order.id} is confirmed`, [
-    `Thank you — Business Breakfast order ${order.id} for ${order.company} is confirmed and paid (AED ${order.total}).`,
+    `Thank you! Business Breakfast order ${order.id} for ${order.company} is confirmed and paid (AED ${order.total}).`,
     'Your invoice is available on the order in the app. You can change headcount, boxes or cancel each day until 9:00 PM the evening before.'
   ], `/business/orders/${order.id}`);
 }

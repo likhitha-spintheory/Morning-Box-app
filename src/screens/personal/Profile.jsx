@@ -149,7 +149,7 @@ export function Dietary() {
   return (
     <Frame step={3} back="/profile/preferences" editing={editing}
       footer={<button className="btn" disabled={busy} onClick={finish}>{editing ? (busy ? 'Saving…' : 'Save') : <Go>Save my profile</Go>}</button>}>
-      <Heading q="Do you have any dietary requirements or allergies?" help="Safety always comes first — anything you mark here is never recommended to you." tip="We never recommend anything you mark here — in breakfasts, swaps or extras. If you add an allergy later, mornings you’ve already ordered are checked again." />
+      <Heading q="Do you have any dietary requirements or allergies?" help="Safety always comes first. Anything you mark here is never recommended to you." tip="We never recommend anything you mark here, in breakfasts, swaps or extras. If you add an allergy later, mornings you’ve already ordered are checked again." />
       <section className="card stack gap-16" style={{ padding: 20 }} aria-labelledby="dr">
         <h2 id="dr" className="h3 row" style={{ justifyContent: 'flex-start', gap: 12, fontSize: 18 }}><Icon name="leafy" size={20} stroke={1.6} />Dietary requirements</h2>
         <div className="chips">

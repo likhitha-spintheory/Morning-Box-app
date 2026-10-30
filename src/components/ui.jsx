@@ -374,7 +374,7 @@ export function PhotoPicker({ value, onChange }) {
     const f = e.target.files?.[0]; e.target.value = '';
     if (!f) return;
     setErr('');
-    try { onChange(await shrinkPhoto(f)); } catch { setErr('We couldn’t use that photo — try another one.'); }
+    try { onChange(await shrinkPhoto(f)); } catch { setErr('We couldn’t use that photo. Please try another one.'); }
   };
   return (
     <div className="stack gap-8">

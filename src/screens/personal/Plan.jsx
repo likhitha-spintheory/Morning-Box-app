@@ -12,7 +12,7 @@ import {
   dietLabel, allergyLabel, sizeLabel, addonPrice, tomorrowIso as dubaiTomorrowIso, unsafeComponents, dubaiNote, boxPhoto, containsAllergens
 } from '../../domain/app.js';
 import { usePruneExpired } from '../../state/orders.jsx';
-import { BoxEditor, FlavourPicker, offeredPastries } from '../../components/BoxEditor.jsx';
+import { BoxEditor, FlavourPicker, LoafPicker, offeredPastries } from '../../components/BoxEditor.jsx';
 import { addonGroups, applyUserSwaps } from '../../domain/engine.js';
 import { PRICING, cutoffFor } from '../../domain/standards.js';
 
@@ -169,7 +169,7 @@ export function ChooseDates() {
             <Ring fraction={Math.min(1, hoursLeft / 24)} label={`${Math.floor(hoursLeft)}h`} size={42} />
             <span className="stack" style={{ lineHeight: 1.35 }}>
               <span className="strong" style={{ fontSize: 16 }}>{isTomorrow ? `Tomorrow (${dayComma(first.iso)})` : dayComma(first.iso)} closes at 9:00 PM{isTomorrow ? '' : ` the evening before`}{dubaiNote()}</span>
-              <span className="help" style={{ fontSize: 15 }}>Same-day orders aren’t available — we bake for the morning ahead.</span>
+              <span className="help" style={{ fontSize: 15 }}>Same-day orders aren’t available. We bake for the morning ahead.</span>
             </span>
           </div>
         )}
@@ -426,7 +426,7 @@ export function Extras() {
         {plan.dates.length > 1 && <MorningPills dates={plan.dates.map(dateInfo)} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />}
         <div className="stack gap-8" style={{ gap: 8 }}>
           <h1 className="q">Choose your size</h1>
-          <p className="help">Size changes the quantity — never what’s in your box.</p>
+          <p className="help">Size changes the quantity, never what’s in your box.</p>
         </div>
         {canChooseSize(cfg) ? (
           <div className="seg tall" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }} role="radiogroup" aria-label="Size">
@@ -479,19 +479,11 @@ export function Extras() {
                     <span className="ci"><Icon name="bread" size={22} stroke={1.5} /></span>
                     <span className="stack" style={{ flex: 1 }}>
                       <span style={{ fontSize: 17, fontWeight: 500 }}>{componentName(item)}</span>
-                      <span className="sm" style={{ fontSize: 15 }}>
-                        {['half', 'whole'].map((u, k) => (
-                          <span key={u}>{k ? ' · ' : ''}
-                            <button type="button" disabled={!l} onClick={() => setAddon('bread', item, u, l.qty)} aria-pressed={l?.unit === u}
-                              style={{ background: 'none', border: 0, padding: '12px 2px', minHeight: 44, font: 'inherit', color: 'inherit', cursor: l ? 'pointer' : 'default', textDecoration: l?.unit === u ? 'underline' : 'none', textUnderlineOffset: 3 }}>
-                              {u === 'half' ? 'Half loaf' : 'Whole loaf'} · AED {addonPrice({ group: 'bread', item, unit: u, qty: 1 })}
-                            </button>
-                          </span>
-                        ))}
-                      </span>
+                      <LoafPicker name={componentName(item)} unit={l?.unit}
+                        prices={{ half: addonPrice({ group: 'bread', item, unit: 'half', qty: 1 }), whole: addonPrice({ group: 'bread', item, unit: 'whole', qty: 1 }) }}
+                        onPick={u => setAddon('bread', item, u, l?.qty || 1)} />
+                      {l && <span className="loaf-qty"><Qty value={l.qty} max={9} label={componentName(item)} onChange={q => setAddon('bread', item, l.unit, q)} /></span>}
                     </span>
-                    {l ? <Qty value={l.qty} max={9} label={componentName(item)} onChange={q => setAddon('bread', item, l.unit, q)} />
-                      : <button type="button" className="add round" aria-label={`Add ${componentName(item)}`} onClick={() => setAddon('bread', item, 'half', 1)}><Icon name="plus" size={20} stroke={1.6} /></button>}
                   </div>
                 );
               })}

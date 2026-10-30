@@ -63,7 +63,7 @@ export function MenuRules({ data, act, busy, call }) {
       {section === 'try' && <TryIt lists={lists} call={call} name={name} dirty={dirty} />}
       {section === 'history' && (
         <div className="card stack gap-8" style={{ padding: 18 }}>
-          {data.history.length === 0 && <span className="xs">No changes yet — the approved menu is in use.</span>}
+          {data.history.length === 0 && <span className="xs">No changes yet. The approved menu is in use.</span>}
           {data.history.map((h, i) => <div key={i} className="stack gap-4"><span className="strong xs">{h.at}</span>{h.changes.map((c, k) => <span key={k} className="xs">· {c}</span>)}</div>)}
         </div>
       )}
@@ -240,7 +240,7 @@ function TryIt({ lists, call, name, dirty }) {
       <button type="button" className="btn" style={{ maxWidth: 220 }} disabled={!p.preferences.length} onClick={run}>Show recommendation</button>
       {err && <span className="tag warn" role="alert">{err}</span>}
       {r && (r.primary
-        ? <div className="stack gap-6"><span>Your Morning Box: {box(r.primary)}</span><span>Another Option: {r.alternative ? box(r.alternative) : <span className="xs">none — only one safe breakfast matches</span>}</span>
+        ? <div className="stack gap-6"><span>Your Morning Box: {box(r.primary)}</span><span>Another Option: {r.alternative ? box(r.alternative) : <span className="xs">none, only one safe breakfast matches</span>}</span>
           {r.rejected?.length > 0 && <span className="xs">Removed as unsafe for this profile: {r.rejected.join(', ')}</span>}</div>
         : <span className="tag warn">{r.message}</span>)}
     </div>

@@ -149,13 +149,13 @@ function PlanConfirm({ plan, date, issues, busy, act }) {
       {plan.status?.status === 'Confirmed'
         ? <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2} /><span>You confirmed this plan.</span></div>
         : <button type="button" className="btn" style={{ width: 'auto', padding: '0 24px', alignSelf: 'flex-start' }} disabled={busy} onClick={() => act('POST', '/plan/confirm', { date })}>Confirm production plan</button>}
-      {plan.status?.status === 'Issue Reported' && <span className="xs">Issue reported: {plan.status.reason}{plan.status.note ? ` — ${plan.status.note}` : ''}. Morning Box will contact you.</span>}
+      {plan.status?.status === 'Issue Reported' && <span className="xs">Issue reported: {plan.status.reason}{plan.status.note ? ` (${plan.status.note})` : ''}. Morning Box will contact you.</span>}
       <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
         <select className="input" style={{ width: 260 }} aria-label="Issue" value={issue.reason} onChange={e => setIssue(x => ({ ...x, reason: e.target.value }))}><option value="">Report an issue…</option>{issues.map(k => <option key={k}>{k}</option>)}</select>
         <input className="input" style={{ width: 260 }} placeholder="Details" aria-label="Details" value={issue.note} onChange={e => setIssue(x => ({ ...x, note: e.target.value }))} />
         <button type="button" className="btn-secondary" style={small} disabled={busy || !issue.reason} onClick={() => act('POST', '/plan/issue', { date, ...issue })}>Send</button>
       </div>
-      <span className="xs">Don’t change an order yourself after confirming — report it and Morning Box decides what happens.</span>
+      <span className="xs">Don’t change an order yourself after confirming. Report it and Morning Box decides what happens.</span>
     </div>
   );
 }
@@ -190,8 +190,8 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
               <span className={`status ${blocked || ['Delayed', 'Unable to Fulfil'].includes(o.state) || o.deliveryState === 'Failed' ? 'off' : o.state === 'Ready' || gone ? 'ok' : o.state === 'In Preparation' ? 'prep' : 'done'}`}>{done ? 'Delivered' : o.deliveryState === 'Failed' ? 'Delivery failed' : gone ? (o.deliveryState ? 'Out for delivery' : 'Your part is out') : o.state || 'Not started'}</span>
             </div>
             <Stepper steps={STEPS} current={stepOf(o)} bad={['Delayed', 'Unable to Fulfil'].includes(o.state) || o.deliveryState === 'Failed'} />
-            {o.safetyHold && <div className="banner-err" role="alert"><Icon name="shieldAlert" size={18} stroke={2} /><b>SAFETY HOLD — do not prepare until Morning Box confirms.</b></div>}
-            {!o.safetyHold && o.safetyCheck && <div className="banner-err" role="alert"><Icon name="shieldAlert" size={18} stroke={2} /><b>ALLERGY CHECK PENDING — Morning Box is confirming the customer’s allergy note. Do not prepare until it is cleared.</b></div>}
+            {o.safetyHold && <div className="banner-err" role="alert"><Icon name="shieldAlert" size={18} stroke={2} /><b>SAFETY HOLD: do not prepare until Morning Box confirms.</b></div>}
+            {!o.safetyHold && o.safetyCheck && <div className="banner-err" role="alert"><Icon name="shieldAlert" size={18} stroke={2} /><b>ALLERGY CHECK PENDING: Morning Box is confirming the customer’s allergy note. Do not prepare until it is cleared.</b></div>}
             <div className="staff-lines">
               {o.lines.map((l, i) => <span key={i}><b>{l.qty}× {l.box}</b> · {l.size}{l.special.length ? <b className="staff-special"> · {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? ` + ${l.addons.join(', ')}` : ''}<br /><small>{l.components.join(', ')}</small></span>)}
             </div>
@@ -200,7 +200,7 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
             <span className="xs"><b>Deliver to:</b> {[d.company, d.building, d.place].filter(Boolean).join(', ')} · {d.handover}{d.contact?.name ? ` · ${d.contact.name}${d.contact.mobile ? ` (${d.contact.mobile})` : ''}` : ''}{d.notes ? ` · ${d.notes}` : ''}</span>
             {o.lateNote && !done && <span className="xs">Customer told: arriving around {o.lateNote}</span>}
             {done && <span className="xs">Delivered to {o.delivered?.point}{o.delivered?.late ? ' · after the window' : ''}.</span>}
-            {gone && !o.deliveryState && <span className="xs">Your part is out — waiting for the other bakery on this order to send theirs.</span>}
+            {gone && !o.deliveryState && <span className="xs">Your part is out. Waiting for the other bakery on this order to send theirs.</span>}
             {gone && !done && o.deliveryState === 'Failed' && (
               <div className="row staff-actions" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
                 <button type="button" className="btn-secondary" style={small} disabled={busy} onClick={() => act('POST', `/days/${k}/out`)}>Re-attempt delivery</button>
@@ -210,14 +210,14 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
               <div className="row staff-actions" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
                 <b style={{ fontSize: 14 }}>Delivered to:</b>
                 {(points[o.kind] || []).filter(p => p !== 'your door' || o.dropOff?.handover === 'Door').map(p => <button key={p} type="button" className="btn-secondary" style={small} disabled={busy} onClick={() => act('POST', `/days/${k}/delivered`, { deliveryPoint: p })}>{p[0].toUpperCase() + p.slice(1)}</button>)}
-                <select className="input" style={{ width: 230, minHeight: 40 }} aria-label="Why delivery failed" value={fail[k] || ''} onChange={e => setFail(x => ({ ...x, [k]: e.target.value }))}><option value="">Couldn’t deliver — why?</option>{failures.map(x => <option key={x}>{x}</option>)}</select>
+                <select className="input" style={{ width: 230, minHeight: 40 }} aria-label="Why delivery failed" value={fail[k] || ''} onChange={e => setFail(x => ({ ...x, [k]: e.target.value }))}><option value="">Why couldn’t it be delivered?</option>{failures.map(x => <option key={x}>{x}</option>)}</select>
                 <button type="button" className="btn-text" disabled={busy || !fail[k]} onClick={() => act('POST', `/days/${k}/failed`, { reason: fail[k] })}>Delivery failed</button>
               </div>
             )}
             {gone && !done && (
               <div className="row staff-actions" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
                 <input className="input" style={{ width: 110, minHeight: 40 }} placeholder="9:20 AM" aria-label="New arrival time" value={eta[k] || ''} onChange={e => setEta(x => ({ ...x, [k]: e.target.value }))} />
-                <button type="button" className="btn-text" disabled={busy || !eta[k]?.trim()} onClick={() => act('POST', `/days/${k}/late`, { eta: eta[k].trim() })}>Running late — tell the customer</button>
+                <button type="button" className="btn-text" disabled={busy || !eta[k]?.trim()} onClick={() => act('POST', `/days/${k}/late`, { eta: eta[k].trim() })}>Running late? Tell the customer</button>
               </div>
             )}
             {!gone && (
@@ -231,14 +231,14 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
                   <button type="button" className="btn-secondary" style={small} disabled={busy || blocked || !allChecked(k)} onClick={() => act('POST', path, { state: 'Ready', qc: qc[k] })}>Ready</button>
                 </>}
                 {o.state === 'Ready' && <>
-                  <b style={{ fontSize: 14 }}>Out for delivery — count:</b>
+                  <b style={{ fontSize: 14 }}>Out for delivery. Count:</b>
                   <input className="input" style={{ width: 80, minHeight: 40 }} inputMode="numeric" placeholder="Boxes" aria-label="Boxes" value={c.boxes} onChange={e => setCount(x => ({ ...x, [k]: { ...c, boxes: e.target.value } }))} />
                   <input className="input" style={{ width: 90, minHeight: 40 }} inputMode="numeric" placeholder="Special" aria-label="Special boxes" value={c.special} onChange={e => setCount(x => ({ ...x, [k]: { ...c, special: e.target.value } }))} />
                   <button type="button" className="btn-secondary" style={small} disabled={busy || blocked || c.boxes === '' || c.special === ''} onClick={() => act('POST', `/days/${k}/handover`, { boxes: Number(c.boxes), specialBoxes: Number(c.special) })}>Out for delivery</button>
                 </>}
                 <input className="input" style={{ width: 90, minHeight: 40 }} inputMode="numeric" placeholder="Min" aria-label="Delay in minutes" value={delay[k] || ''} onChange={e => setDelay(x => ({ ...x, [k]: e.target.value }))} />
                 <button type="button" className="btn-text" disabled={busy || !delay[k]} onClick={() => act('POST', path, { state: 'Delayed', delayMinutes: Number(delay[k]) })}>Report delay</button>
-                <select className="input" style={{ width: 230, minHeight: 40 }} aria-label="Why it can’t be made" value={reason[k] || ''} onChange={e => setReason(x => ({ ...x, [k]: e.target.value }))}><option value="">Unable to fulfil — why?</option>{reasons.map(x => <option key={x}>{x}</option>)}</select>
+                <select className="input" style={{ width: 230, minHeight: 40 }} aria-label="Why it can’t be made" value={reason[k] || ''} onChange={e => setReason(x => ({ ...x, [k]: e.target.value }))}><option value="">Why can’t it be made?</option>{reasons.map(x => <option key={x}>{x}</option>)}</select>
                 <button type="button" className="btn-text" disabled={busy || !reason[k]} onClick={() => act('POST', path, { state: 'Unable to Fulfil', reason: reason[k] })}>Report</button>
               </div>
             )}
@@ -258,7 +258,7 @@ function Availability({ plan, items, date, busy, act }) {
     <section className="staff-card">
       <h2 className="h3">Tell Morning Box about {date}</h2>
       <span className="xs">Report it before 9:00 PM the evening before so orders can go to another bakery.</span>
-      {plan.conditions.map(c => <span key={c.id} className="xs">• {c.kind}{c.item ? ` — ${name(c.item)}` : ''}{c.capacity != null ? ` — ${c.capacity} boxes` : ''}{c.need ? ` — ${c.need}` : ''}{c.note ? ` · ${c.note}` : ''}</span>)}
+      {plan.conditions.map(c => <span key={c.id} className="xs">• {c.kind}{c.item ? `: ${name(c.item)}` : ''}{c.capacity != null ? `, ${c.capacity} boxes` : ''}{c.need ? `, ${c.need}` : ''}{c.note ? ` · ${c.note}` : ''}</span>)}
       <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
         <select className="input" style={{ width: 260 }} aria-label="Condition" value={v.kind} onChange={e => setV(x => ({ ...x, kind: e.target.value }))}>{CONDITIONS.map(k => <option key={k}>{k}</option>)}</select>
         {v.kind === 'Item Unavailable' && <select className="input" style={{ width: 240 }} aria-label="Item" value={v.item} onChange={e => setV(x => ({ ...x, item: e.target.value }))}><option value="">Choose item</option>{items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select>}

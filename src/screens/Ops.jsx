@@ -232,7 +232,7 @@ function ExceptionCard({ x, busy, act, call }) {
       </div>
       <span className="help">{x.note}</span>
       {!!x.has_photo && <ExceptionPhoto id={x.id} call={call} />}
-      {x.resolved ? <span className="xs">Resolved {x.resolved_at} by {x.owner || '—'} — {x.resolution}{x.cause ? ` · Cause: ${x.cause}` : ''}</span> : (
+      {x.resolved ? <span className="xs">Resolved {x.resolved_at} by {x.owner || '—'}: {x.resolution}{x.cause ? ` · Cause: ${x.cause}` : ''}</span> : (
         <>
           <div className="grid-2">
             <input className="input" placeholder="Owner" aria-label="Owner" value={v.owner} onChange={set('owner')} />
@@ -243,7 +243,7 @@ function ExceptionCard({ x, busy, act, call }) {
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="btn-text" disabled={busy} onClick={() => act('PATCH', `/exceptions/${x.id}`, { owner: v.owner, action: v.action, cause: v.cause, responsibleParty: v.responsibleParty })}>Save</button>
             <span className="row" style={{ gap: 8, flex: 1, minWidth: 260 }}>
-              <input className="input" style={{ flex: 1 }} placeholder="Resolution — what was done" aria-label="Resolution" value={v.resolution} onChange={set('resolution')} />
+              <input className="input" style={{ flex: 1 }} placeholder="Resolution: what was done" aria-label="Resolution" value={v.resolution} onChange={set('resolution')} />
               <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 16px' }} disabled={busy || !v.resolution.trim() || !v.owner.trim() || !v.action.trim()} title="Owner, action and resolution are all required (MB-OPS-001 §8)" onClick={() => act('POST', `/exceptions/${x.id}/resolve`, { resolution: v.resolution, owner: v.owner, action: v.action })}>Resolve</button>
             </span>
           </div>
@@ -265,7 +265,7 @@ function Closed({ items, busy, act }) {
           <input className="input" placeholder="Reason, e.g. National Day" value={reason} onChange={e => setReason(e.target.value)} aria-label="Reason" />
         </div>
         <button type="button" className="btn" disabled={busy || !date} onClick={() => act('POST', '/closed-dates', { date, reason })}>Close this day</button>
-        <span className="xs">Customers can’t order closed days. Orders already booked for that day are not cancelled automatically — check Deliveries.</span>
+        <span className="xs">Customers can’t order closed days. Orders already booked for that day are not cancelled automatically. Check Deliveries.</span>
       </div>
       {items.map(c => (
         <div key={c.date} className="card row" style={{ padding: 16 }}>

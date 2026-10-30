@@ -136,7 +136,7 @@ function prepareBusinessOrder(userId, body) {
 /** Saves a paid business order (`payment`: { provider, ref, amount }). */
 function createBusinessOrder(userId, body, payment, key = null) {
   const { acct, built, invoice, total, capacity } = prepareBusinessOrder(userId, body);
-  if (Math.abs(total - payment.amount) > 0.001) throw new ApiError(409, 'price_changed', 'The price changed while you were paying. Your payment is being refunded — please order again.');
+  if (Math.abs(total - payment.amount) > 0.001) throw new ApiError(409, 'price_changed', 'The price changed while you were paying. Your payment is being refunded. Please order again.');
   const id = newOrderId('MB-B', 'business_orders');
   const order = tx(() => {
     capacity();
@@ -193,7 +193,7 @@ function editBusinessDay(userId, orderId, date, body, payment = null) {
   });
   const diff = Math.round((b.total - d.total) * 100) / 100;
   if (diff > 0 && !payment) return { due: diff, label: `Morning Box Business Breakfast · change to ${rules.prettyDate(d.date)}` };
-  if (diff > 0 && Math.abs(payment.amount - diff) > 0.001) throw new ApiError(409, 'price_changed', 'The price of this change moved while you were paying. Your payment is being refunded — please try again.');
+  if (diff > 0 && Math.abs(payment.amount - diff) > 0.001) throw new ApiError(409, 'price_changed', 'The price of this change moved while you were paying. Your payment is being refunded. Please try again.');
   tx(() => {
     if (window !== d.window || b.people > d.people) assertCapacity(d.date, window, b.people, { excludeBusinessDay: d.id });
     /* Any change of boxes or Special Breakfasts must still be allocatable (DLV §8). */
@@ -235,7 +235,7 @@ businessRouter.post('/orders/:id/days/:date/issue', (req, res) => {
   if (d.date > dubaiTodayIso() && d.stage < 2) throw bad('issue_too_early', 'You can report a problem on the morning of delivery.');
   /* Same limits as personal reports: 5 per delivery day, 20 per account per day (keeps the ops queue usable). */
   if (db.prepare('SELECT COUNT(*) AS n FROM customer_issues WHERE order_id = ? AND date = ?').get(o.id, d.date).n >= 5) {
-    throw new ApiError(429, 'issue_limit', 'We already have your reports for this day. Our team will contact you — or message Support.');
+    throw new ApiError(429, 'issue_limit', 'We already have your reports for this day. Our team will contact you, or you can message Support.');
   }
   if (db.prepare("SELECT COUNT(*) AS n FROM customer_issues WHERE user_id = ? AND created_at > datetime('now', '-1 day')").get(req.userId).n >= 20) {
     throw new ApiError(429, 'issue_limit', 'Too many reports today. Please message Support.');
@@ -303,7 +303,7 @@ businessRouter.get('/orders/:id/invoice', (req, res) => {
   const name = id => { const r = recipeById[id]; return r ? describe(r) : id; };
   const money = n => (Math.round(n * 100) / 100).toFixed(2);
   const vatOf = gross => gross - gross / (1 + VAT_RATE);
-  const rows = o.days.map(d => `<tr><td>${esc(d.date)}${d.cancelled ? ` (cancelled — refunded AED ${esc(d.refund)})` : ''}</td><td>${esc(d.people)}</td>
+  const rows = o.days.map(d => `<tr><td>${esc(d.date)}${d.cancelled ? ` (cancelled, refunded AED ${esc(d.refund)})` : ''}</td><td>${esc(d.people)}</td>
     <td>${d.lines.map(l => `${esc(name(l.recipeId))} · ${esc(l.size)} × ${esc(l.qty)}`).join('<br>')}${d.specials.length ? `<br>Special Breakfasts × ${d.specials.reduce((t, s) => t + s.qty, 0)}` : ''}</td>
     <td style="text-align:right">${d.cancelled ? 0 : esc(d.gross)}</td><td style="text-align:right">${d.cancelled ? 0 : esc(d.discount)}</td><td style="text-align:right">${d.cancelled ? 0 : esc(d.total)}</td></tr>`).join('');
   /* B2B §8: what was paid, then each edit charge, refund and credit, so the invoice matches the money moved. */
@@ -311,15 +311,15 @@ businessRouter.get('/orders/:id/invoice', (req, res) => {
   const settlement = [{ at: o.createdAt, label: 'Paid at order', amount: o.paid },
     ...dayIds.flatMap(d => db.prepare('SELECT amount, created_at FROM business_payment_adjustments WHERE business_day_id = ?').all(d.id)
       .map(a => ({ at: a.created_at, label: `${a.amount > 0 ? 'Charge' : 'Refund'} for change to ${d.date}`, amount: a.amount }))),
-    ...o.days.filter(d => d.cancelled).map(d => ({ at: d.date, label: `Refund — ${d.date} cancelled`, amount: -d.refund })),
+    ...o.days.filter(d => d.cancelled).map(d => ({ at: d.date, label: `Refund: ${d.date} cancelled`, amount: -d.refund })),
     ...dayIds.flatMap(d => db.prepare("SELECT type, amount, reason, created_at FROM service_recovery WHERE day_kind = 'business' AND day_id = ? AND type LIKE '%Refund'").all(d.id)
-      .map(r => ({ at: r.created_at, label: `${r.type} — ${d.date}: ${r.reason}`, amount: -r.amount })))];
+      .map(r => ({ at: r.created_at, label: `${r.type}, ${d.date}: ${r.reason}`, amount: -r.amount })))];
   const inv = o.invoice || {};
   const isTax = inv.wanted && !!SUPPLIER.trn;
   const vat = vatOf(o.total);
   res.type('html').send(`<!doctype html><meta charset="utf-8"><title>Invoice ${esc(o.id)}</title>
 <style>body{font-family:Inter,Arial,sans-serif;color:#3B2D22;max-width:820px;margin:40px auto;padding:0 20px}h1{font-family:Georgia,serif;font-weight:400}table{width:100%;border-collapse:collapse;font-size:14px}td,th{border-bottom:1px solid #EADCC1;padding:8px;text-align:left;vertical-align:top}</style>
-<h1>${esc(SUPPLIER.name)} — ${isTax ? 'Tax Invoice' : inv.wanted ? 'Invoice' : 'Receipt'}</h1>
+<h1>${esc(SUPPLIER.name)} ${isTax ? 'Tax Invoice' : inv.wanted ? 'Invoice' : 'Receipt'}</h1>
 <p>Invoice ${esc(o.id)} · ${esc(o.createdAt)} UTC</p>
 <p><b>Supplier:</b> ${esc(SUPPLIER.name)}<br>${esc(SUPPLIER.address)}${SUPPLIER.trn ? `<br>TRN ${esc(SUPPLIER.trn)}` : ''}</p>
 <p><b>Billed to:</b> ${esc(inv.billingName || o.company)}<br>Company: ${esc(o.company)}<br>Email: ${esc(o.email)}${inv.address ? `<br>${esc(inv.address)}` : ''}${inv.trn ? `<br>TRN ${esc(inv.trn)}` : ''}${inv.po ? `<br>PO number: ${esc(inv.po)}` : ''}</p>

@@ -21,7 +21,7 @@ const hhmm = d => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-di
 
 /** "Overnight Oats (plant milk base) · 150 g" — the build and approved portion the bakery must make (MB-PRO-001 §15.3). */
 const builtName = (id, variants = {}, size = 'regular', flavour = null) =>
-  `${componentName(id)}${variantLabel(id, variants[id]) ? ` (${variantLabel(id, variants[id]).toLowerCase()})` : ''}${id === 'fruitDanish' && flavour ? ` — ${flavour}` : ''} · ${componentPortion(id, size === 'standard' ? 'regular' : size)}`;
+  `${componentName(id)}${variantLabel(id, variants[id]) ? ` (${variantLabel(id, variants[id]).toLowerCase()})` : ''}${id === 'fruitDanish' && flavour ? ` (${flavour})` : ''} · ${componentPortion(id, size === 'standard' ? 'regular' : size)}`;
 
 /* Preparation standard per item for the bakery sheet (MB-PRO-001 §1, §4): the item's approved note,
    and bread is served untoasted by default. Not sent to customer views. */

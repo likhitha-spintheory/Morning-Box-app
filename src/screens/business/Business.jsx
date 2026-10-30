@@ -95,7 +95,7 @@ function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
       {adding && !adding.special && (
         <div className="card stack gap-8" style={{ padding: 14 }}>
           <select className="input" aria-label="Breakfast" value={adding.recipeId} onChange={e => setAdding(a => ({ ...a, recipeId: e.target.value }))}>
-            <option value="">Choose a breakfast…</option>{models.map(m => <option key={m.recipe.id} value={m.recipe.id}>{modelName(m.recipe)} — {m.label}</option>)}</select>
+            <option value="">Choose a breakfast…</option>{models.map(m => <option key={m.recipe.id} value={m.recipe.id}>{modelName(m.recipe)} ({m.label})</option>)}</select>
           <SizeSeg value={adding.size} label="Size" onChange={sz => setAdding(a => ({ ...a, size: sz }))} />
           <div className="row"><button type="button" className="link" onClick={() => setAdding(null)}>Cancel</button>
             <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} disabled={!adding.recipeId}
@@ -248,10 +248,10 @@ function downloadInvoice(order) {
   const inv = order.invoice || {};
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Order summary ${esc(order.id)}</title>
 <style>body{font-family:Arial,sans-serif;color:#3B2D22;max-width:720px;margin:40px auto;padding:0 20px}td,th{padding:8px;border-bottom:1px solid #EADCC1;text-align:left;font-size:14px}table{border-collapse:collapse;width:100%}</style></head>
-<body><h1>Morning Box — Order summary</h1><p>Order ${esc(order.id)}<br>Placed ${esc(dateInfo(serverDateIso(order.createdAt)).label)}</p>
+<body><h1>Morning Box order summary</h1><p>Order ${esc(order.id)}<br>Placed ${esc(dateInfo(serverDateIso(order.createdAt)).label)}</p>
 <p><b>Billed to:</b> ${esc(inv.billingName || order.company)}<br>${esc(inv.address || '')}${inv.trn ? `<br>TRN ${esc(inv.trn)}` : ''}${inv.po ? `<br>PO number: ${esc(inv.po)}` : ''}</p>
 <table><thead><tr><th>Date</th><th>Headcount</th><th>Breakfasts</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table>
-<p style="text-align:right"><b>Total: AED ${esc(order.total)}</b><br>Delivery included</p><p style="font-size:12px">Saved offline — this summary is not a tax invoice. Download the invoice again when you’re back online.</p></body></html>`;
+<p style="text-align:right"><b>Total: AED ${esc(order.total)}</b><br>Delivery included</p><p style="font-size:12px">Saved offline. This summary is not a tax invoice. Download the invoice again when you’re back online.</p></body></html>`;
   const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
   const a = document.createElement('a');
   a.href = url; a.download = `MorningBox-Order-${order.id}.html`;
@@ -361,14 +361,14 @@ export function BizWelcome() {
               <button type="button" className="option" onClick={() => fromPlan(pl)}>
                 <span className="ico"><Icon name="bookmark" size={22} stroke={1.6} /></span>
                 <span className="stack gap-4"><span style={{ fontWeight: 600, fontSize: 17 }}>Use a Saved Plan · {pl.name}</span>
-                  <span className="sm">{pl.plan.people} people. Headcount, special breakfasts and boxes are copied — you choose the dates.</span></span>
+                  <span className="sm">{pl.plan.people} people. Headcount, special breakfasts and boxes are copied. You choose the dates.</span></span>
                 <Icon name="chevron" size={20} stroke={1.8} style={{ marginLeft: 'auto' }} />
               </button>
               <button type="button" className="btn-text" style={{ alignSelf: 'flex-end', fontSize: 13, color: 'var(--text-3)' }} onClick={() => removePlan(pl.id)}>Remove saved plan</button>
             </div>
           ))}
         </div>
-        <Note>Every order is one-off — never a subscription.</Note>
+        <Note>Every order is one-off, never a subscription.</Note>
       </main>
       <Footer><button className="btn" onClick={fresh}><Icon name="plus" size={18} stroke={2} />New Business Breakfast</button></Footer>
     </Screen>
@@ -486,7 +486,7 @@ export function Specials() {
             </button>
             {overLimit && <Err>Special Breakfasts ({sq}) can’t be more than the {b.people} people in the order</Err>}
             <Note icon="shield">Special Breakfasts are packed and labelled separately.</Note>
-            <Note icon="info">Please confirm dietary needs and allergies with your attendees before ordering — we prepare exactly what you enter here.</Note>
+            <Note icon="info">Please confirm dietary needs and allergies with your attendees before ordering. We prepare exactly what you enter here.</Note>
           </>
         )}
       </main>
@@ -774,7 +774,7 @@ export function BizDates() {
             Copy each day as in order {b.source?.orderId} ({b.sourceDays.length} days)
           </button>
         )}
-        {custom && <Note>Change a day’s headcount and its boxes are rescaled — or change the boxes for that day directly. Volume discount is calculated per day.</Note>}
+        {custom && <Note>Change a day’s headcount and its boxes are rescaled, or you can change the boxes for that day directly. Volume discount is calculated per day.</Note>}
         {picked.length > 0 && !custom && (
           <div className="card stack gap-4" style={{ padding: 16 }}>
             <span className="strong">{picked.length} morning{picked.length > 1 ? 's' : ''} selected</span>
@@ -812,7 +812,7 @@ export function BizDelivery() {
     contact: !dl.contact.trim() && 'Enter who will receive the delivery',
     mobile: !/^5\d{8}$/.test(digits) && 'Enter a UAE mobile number, e.g. 50 123 4567',
     window: (!(same ? dl.window : b.dates.every(iso => windowFor(b, iso))) && 'Choose a delivery window')
-      || (b.dates.some(iso => fullOn(iso, same ? dl.window : windowFor(b, iso))) && 'That window is full for your headcount — choose another')
+      || (b.dates.some(iso => fullOn(iso, same ? dl.window : windowFor(b, iso))) && 'That window is full for your headcount. Please choose another')
   };
   const ok = !Object.values(errs).some(Boolean) && (same || !b.dates.some(iso => ownBad(iso)));
   const field = (key, label, placeholder, extra = {}) => (
@@ -1203,7 +1203,7 @@ export function BizReview() {
               <div className="field"><label htmlFor="bi-t">TRN <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
                 <input id="bi-t" className={`input${trnTouched && trnBad ? ' invalid' : ''}`} inputMode="numeric" maxLength={20} value={inv.trn}
                   aria-invalid={trnTouched && trnBad} onBlur={() => setTrnTouched(true)} onChange={e => upd(d => { d.invoice.trn = e.target.value; })} />
-                {trnTouched && trnBad && <Err>A UAE TRN has 15 digits — check it or leave it empty</Err>}</div>
+                {trnTouched && trnBad && <Err>A UAE TRN has 15 digits. Check it or leave it empty</Err>}</div>
               <div className="field"><label htmlFor="bi-p">PO number <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
                 <input id="bi-p" className="input" maxLength={40} value={inv.po || ''} onChange={e => upd(d => { d.invoice.po = e.target.value; })} /></div>
             </>
@@ -1234,7 +1234,7 @@ export function BizConfirmed() {
     post('/business/plans', {
       name: `${order.company} · ${d.people} people`.slice(0, 60),
       plan: { people: d.people, mode: order.mode, lines: d.lines, specials: d.specials, delivery: { ...d.delivery, window: d.window } }
-    }).then(() => setPlanSaved('Saved — find it under Use a Saved Plan next time.')).catch(e => setPlanSaved(e.message));
+    }).then(() => setPlanSaved('Saved. Find it under Use a Saved Plan next time.')).catch(e => setPlanSaved(e.message));
   };
   const heads = [...new Set(order.days.map(d => d.people))];
   const wins = [...new Set(order.days.map(d => windowLabel(d.window)))];
@@ -1369,7 +1369,7 @@ function ReportIssue({ order, day, set }) {
     try { const res = await post(`/business/orders/${order.id}/days/${day.date}/issue`, { reason, note, ...(photo ? { photo } : {}) }); set(s => putOrder(s, res)); setState({ busy: false, error: '', sent: true }); setOpen(false); }
     catch (e) { setState({ busy: false, error: e.message, sent: false }); }
   };
-  if (state.sent) return <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2.4} />Thanks — our team has your report and will contact you.</div>;
+  if (state.sent) return <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2.4} />Thanks, our team has your report and will contact you.</div>;
   if (!open) return <button type="button" className="link" style={{ alignSelf: 'flex-start' }} onClick={() => setOpen(true)}>Report a problem</button>;
   return (
     <section className="card stack gap-10" aria-label="Report a problem">
@@ -1396,7 +1396,7 @@ function Tracking({ day }) {
       </div>
       {st === 3 && <span className="strong">Delivered to {day.deliveryPoint || 'Reception'}{time ? ` · ${time}` : ''}</span>}
       {day.lateNote && st < 3 && !day.problem && <span className="help">Running late · now around {day.lateNote}</span>}
-      {day.problem && <span className="help" style={{ color: 'var(--err)' }}>{day.problem === 'Not Fulfilled' ? 'We couldn’t prepare this order.' : 'We couldn’t complete the handover — our team will contact you.'}</span>}
+      {day.problem && <span className="help" style={{ color: 'var(--err)' }}>{day.problem === 'Not Fulfilled' ? 'We couldn’t prepare this order.' : 'We couldn’t complete the handover. Our team will contact you.'}</span>}
       {day.refund > 0 && <span className="help">AED {day.refund} refunded to your original payment method.</span>}
       {day.bakeries?.length > 0 && <span className="help">Prepared by {day.bakeries.join(' & ')}</span>}
     </section>
@@ -1528,7 +1528,7 @@ function DayEditor({ order, day, set, signedIn }) {
           {open && diff !== 0 && (
             <div className="banner-warn" role="status">
               <Icon name="alert" size={18} stroke={2.2} color="var(--warn)" style={{ flex: 'none' }} />
-              <span>{diff > 0 ? `${diff} ${diff === 1 ? 'person' : 'people'} without a breakfast — add ${diff} box${diff === 1 ? '' : 'es'}` : `${-diff} extra box${diff === -1 ? '' : 'es'} — remove ${-diff}`}</span>
+              <span>{diff > 0 ? `${diff} ${diff === 1 ? 'person' : 'people'} without a breakfast. Add ${diff} box${diff === 1 ? '' : 'es'}` : `${-diff} extra box${diff === -1 ? '' : 'es'}. Remove ${-diff}`}</span>
             </div>
           )}
           {open && diff !== 0 && sum(lines) > 0 && people - sq > 0 && (

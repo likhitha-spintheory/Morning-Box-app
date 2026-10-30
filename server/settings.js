@@ -31,7 +31,7 @@ function validatePricing(p) {
   if (!money(p.sizeAdjustment?.light, { min: -500, max: 0 }) || p.sizeAdjustment.light === 0) throw bad('pricing_invalid', 'Light must be priced below Regular (a negative adjustment).');
   if (!money(p.sizeAdjustment?.large, { min: 0 }) || p.sizeAdjustment.large === 0) throw bad('pricing_invalid', 'Large must be priced above Regular (a positive adjustment).');
   const lowest = Math.min(...Object.keys(PRICE_LEVELS).map(k => p.priceLevels[k]));
-  if (lowest + p.sizeAdjustment.light <= 0) throw bad('pricing_invalid', 'A Light breakfast would cost nothing — reduce the Light adjustment.');
+  if (lowest + p.sizeAdjustment.light <= 0) throw bad('pricing_invalid', 'A Light breakfast would cost nothing. Reduce the Light adjustment.');
   /* Each bread has its own half / whole price; a single { half, whole } (older saves) applies to every bread. */
   const bread = expandBreadPrices(p.addons?.bread);
   for (const id of Object.keys(ADDON_PRICES.breads)) for (const k of ['half', 'whole']) {

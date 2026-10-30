@@ -30,7 +30,7 @@ const DOCS = {
       ['Who is responsible', [`${c.company.name} (${c.company.address}) is responsible for your personal data in Morning Box.`]],
       ['What we collect', ['Your mobile number and first name; optionally your email. Your Morning Profile: eating style, breakfast preferences, dietary requirements and allergies. Delivery details: building, office and notes. Your orders, feedback and messages to support.', 'Allergy and dietary information is sensitive: we use it only to keep your breakfast safe.']],
       ['Why we use it', ['To create your account and sign you in; to recommend safe breakfasts; to prepare and deliver your orders; to send order updates; to answer support requests; to issue receipts and invoices; and to improve our breakfasts using your feedback. We send offers only if you turn them on.']],
-      ['Who we share it with', ['The partner bakery that prepares and delivers your breakfast (your breakfast and allergen needs, and your building, office and delivery window). Our payment provider, which processes your payment — we never see or store your full card number. We never sell your data.']],
+      ['Who we share it with', ['The partner bakery that prepares and delivers your breakfast (your breakfast and allergen needs, and your building, office and delivery window). Our payment provider, which processes your payment. We never see or store your full card number. We never sell your data.']],
       ['How long we keep it', ['Your profile is kept while you have an account. Order and invoice records are kept as required by UAE tax law, without your personal details once you delete your account.']],
       ['Your rights', ['You can see and correct your details in Profile, download a copy of your data, turn offers off, and delete your account. For anything else, contact us from Help & Support.']],
       ['Cookies and storage', ['We use one secure cookie to keep you signed in, and store your unfinished plan on your device. We don’t use advertising cookies.']],
@@ -42,7 +42,7 @@ const DOCS = {
     title: 'Refunds & Cancellations',
     sections: () => [
       ['Before the cutoff', ['Change or cancel any morning until 9:00 PM (Dubai time) the evening before. A cancelled morning is refunded in full. Other mornings in the same order stay as planned.', 'If you change a morning and the price changes, we charge or refund the difference.']],
-      ['After the cutoff', ['Your breakfast is prepared fresh for you, so it can’t be cancelled or refunded — unless something went wrong on our side.']],
+      ['After the cutoff', ['Your breakfast is prepared fresh for you, so it can’t be cancelled or refunded unless something went wrong on our side.']],
       ['When something goes wrong', ['Not delivered, very late, wrong or missing items, quality or allergy concerns: report it from the order screen on the day, or contact Help & Support within 24 hours. We review every report and refund or credit where appropriate.']],
       ['If we cancel', ['If we can’t deliver (for example an unexpected closure), we tell you as early as possible and refund that morning in full.']],
       ['How refunds are paid', ['Refunds go back to your original payment method. Most banks show them within 5–10 working days.']]
@@ -52,7 +52,7 @@ const DOCS = {
     title: 'Allergen Information',
     sections: () => [
       ['How we keep you safe', ['Every ingredient in Morning Box has an approved allergen record. When you mark an allergy or dietary requirement, we never recommend, swap in or add anything that contains it.', 'Breakfasts for customers with allergies are prepared only by partner bakeries approved to handle them, and are labelled separately.']],
-      ['Allergens we track', ['Our records cover gluten (wheat), milk, egg, peanut, tree nuts, sesame and soy. If you have an allergy we don’t list, add it under “Other allergies” — our team checks it with the bakery for every morning you order.']],
+      ['Allergens we track', ['Our records cover gluten (wheat), milk, egg, peanut, tree nuts, sesame and soy. If you have an allergy we don’t list, add it under “Other allergies” and our team checks it with the bakery for every morning you order.']],
       ['Traces and cross-contact', ['Our partner bakeries handle common allergens in the same kitchen. Although they follow strict controls, we can’t guarantee any breakfast is completely free from traces. If you have a severe allergy, please consider whether Morning Box is right for you.']],
       ['If you have a reaction', ['Call 998 for an ambulance immediately. Then report it from the order screen (Allergy concern) so we can investigate with the bakery the same day.']],
       ['Questions', ['Ask us about any ingredient from Help & Support before you order.']]
