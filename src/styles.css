@@ -76,7 +76,7 @@ img { max-width: 100%; display: block; }
 .footer.compact { flex-direction: row; align-items: center; gap: 14px; padding: 10px 16px calc(12px + var(--mb-inset-bottom)); }
 .footer.sheet.compact { padding-top: 12px; border-radius: 22px 22px 0 0; }
 .footer.compact .btn { flex: 1; width: auto; min-width: 0; min-height: 52px; padding: 0 16px; }
-@media (max-width: 340px) { .footer.compact { gap: 10px; } .footer.compact .btn { font-size: 16px; padding: 0 12px; } .footer.compact .price-sum .sm { font-size: 12px; } }
+@media (max-width: 340px) { .footer.compact { gap: 10px; } .footer.compact .btn { font-size: 15px; padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .footer.compact .price-sum .sm { font-size: 12px; } }
 .footer.compact .price-sum { display: flex; flex-direction: column; min-width: 0; }
 .footer.compact .price-sum .total { font: 700 22px/1.15 var(--sans); white-space: nowrap; }
 .footer.compact .price-sum .sm { font-size: 13px; white-space: nowrap; }
