@@ -42,7 +42,8 @@
     h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(42px, 8.5vw, 72px); line-height: 1.08; letter-spacing: -.01em; margin: 22px 0 0; text-wrap: balance; }
     h1 em { font-style: italic; color: var(--muted-gold); }
     .rule { width: 72px; height: 2px; border: 0; background: var(--gold); margin: 40px auto 0; }
-    .lede { margin: 34px 0 0; font-size: 18px; color: var(--text-2); max-width: 32em; text-wrap: pretty; }
+    .lede { margin: 30px 0 0; font-size: 16px; line-height: 1.75; color: var(--text-2); }
+    .lede span { display: block; text-wrap: balance; }   /* the sentence, then the email centred on its own line */
     .lede a { color: var(--espresso); font-weight: 600; text-decoration: underline; text-decoration-color: var(--gold); text-decoration-thickness: 2px; text-underline-offset: 5px; }
     .lede a:hover, .lede a:focus-visible { color: var(--label); }
 
@@ -51,7 +52,7 @@
       .logo { --w: 190px; }
       .eyebrow { margin-top: 40px; font-size: 12px; }
       .rule { margin-top: 32px; }
-      .lede { font-size: 17px; }
+      .lede { font-size: 15px; }
     }
   </style>
 </head>
@@ -61,7 +62,7 @@
     <p class="eyebrow">Coming soon</p>
     <h1>Your next breakfast, <em>already sorted.</em></h1>
     <hr class="rule">
-    <p class="lede">Personalised breakfasts, prepared fresh by partner bakeries and delivered to your office in DIFC. Our website is launching soon. Until then, write to us at <a href="mailto:info@morningbox.ae">info@morningbox.ae</a>.</p>
+    <p class="lede"><span>Our website is launching soon. Until then, write to us at</span> <a href="mailto:info@morningbox.ae">info@morningbox.ae</a>.</p>
   </main>
   <script>
     /* Visitors who opened the app here before have its offline cache installed: remove it so they see this page. */
