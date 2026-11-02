@@ -95,16 +95,41 @@ Release builds require an `https://` app URL and have web debugging switched off
 
 ### Test release: a link and an APK for testers
 
-1. Deploy (`npm ci && npm run build && npm start`) behind HTTPS, e.g. `https://app.morningbox.ae`, with:
+1. Deploy (`npm ci && npm run build && npm start`) behind HTTPS at `https://dev.morningbox.ae` (see Domains), with:
    `NODE_ENV=production`, `APP_URL=<that URL>`, `OPS_KEY=<random, 24+ chars>`, `TRUST_PROXY=1` (behind a proxy),
    `RESEND_API_KEY` + `EMAIL_FROM` (email codes), `PAYMENTS_DEMO=1` until Stripe is connected (no real charges),
    `DB_FILE` on a persistent disk. Sign-in offers only what is configured: email now, mobile once
    `WHATSAPP_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID` are set.
-2. Build the APK against the same URL: `MB_APP_URL=https://app.morningbox.ae npm run apk` →
+2. Build the APK against the same URL: `MB_APP_URL=https://dev.morningbox.ae npm run apk` →
    `apk/morning-box-debug.apk`. Testers install it by allowing "Install unknown apps" for their browser or files app.
 3. Share the link and the APK. After a new deploy, open apps pick up the new version on their own (index.html is never
    cached; a screen that fails to load after an update reloads once). The APK only needs rebuilding when the
    URL, app icon or native settings change.
+
+### Domains
+
+- `https://morningbox.ae` (and `www`) serves the static **coming-soon page** in `coming-soon/` (no Node needed).
+  Its `sw.js` replaces the app's service worker there, so browsers that opened the app on morningbox.ae before
+  clear its cache and see the page.
+- `https://dev.morningbox.ae` runs the app (`APP_URL=https://dev.morningbox.ae`) and is kept out of search
+  results with an `X-Robots-Tag` header.
+
+Caddy (`/etc/caddy/Caddyfile`; adjust the folder and the app's port):
+
+```
+morningbox.ae, www.morningbox.ae {
+	root * /var/www/morningbox-coming-soon
+	encode gzip
+	file_server
+	try_files {path} /index.html
+}
+
+dev.morningbox.ae {
+	encode gzip
+	header X-Robots-Tag "noindex, nofollow"
+	reverse_proxy 127.0.0.1:8787
+}
+```
 
 ## Backend API
 

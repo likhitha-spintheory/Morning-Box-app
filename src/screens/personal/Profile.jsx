@@ -8,13 +8,13 @@ import { EATING_STYLES, PREFERENCES, DIETARY, ALLERGENS, allergyLabel, dietLabel
 const EATING_ICON = { health: 'leafy', flexible: 'sunny' };
 /* MB-PER-001 Q1 — the approved descriptions, word for word. */
 const EATING_TEXT = Object.fromEntries(EATING_STYLES.map(e => [e.id, e.blurb]));
-const PREF_ICON = { savory: 'egg', bakery: 'croissant', fresh: 'bowl', sweet: 'heart' };
-const PREF_SHORT = {
+export const PREF_ICON = { savory: 'egg', bakery: 'croissant', fresh: 'bowl', sweet: 'heart' };
+export const PREF_SHORT = {
   savory: 'Eggs, warm & hearty', bakery: 'Fresh bread, croissants',
   fresh: 'Yogurt, oats, fruit', sweet: 'Pastry, berries, honey'
 };
 /* MB-PER-001 Q2 titles. */
-const PREF_TITLE = Object.fromEntries(PREFERENCES.map(p => [p.id, p.label]));
+export const PREF_TITLE = Object.fromEntries(PREFERENCES.map(p => [p.id, p.label]));
 
 /**
  * Onboarding shows the sun-arc progress and saves as you go. Editing from the

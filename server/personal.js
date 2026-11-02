@@ -293,7 +293,17 @@ function preparePersonalOrder(userId, body) {
   const contactMobile = own.startsWith('+') ? '' : normaliseMobile(body.contactMobile);
   const built = days.map(d => {
     assertOrderable(d.date);
-    const b = buildPersonalDay(d, profile);
+    let b;
+    try { b = buildPersonalDay(d, profile); }
+    catch (e) {
+      /* Name the morning, so the customer can fix that one day and keep the rest of the plan. */
+      if (!(e instanceof ApiError) || e.status !== 400) throw e;
+      const name = boxName({ recipeId: d.recipeId, context: d.context });
+      const message = e.code === 'not_eligible'
+        ? `Your ${prettyDate(d.date)} breakfast${name ? ` (${name})` : ''} no longer matches your profile. Please choose it again.`
+        : `${prettyDate(d.date)}${name ? ` (${name})` : ''}: ${e.message}`;
+      throw bad(e.code, message, { ...(e.details || {}), date: d.date });
+    }
     const dayAddress = { ...(d.address ? validateAddress(d.address) : address), ...(contactMobile ? { mobile: contactMobile } : {}) };
     return { ...b, date: d.date, window: d.window, address: dayAddress };
   });
@@ -366,7 +376,7 @@ personalRouter.post('/orders', requireUser, (req, res, next) => {
     : res.status(201).json(serializeOrder(db.prepare('SELECT * FROM orders WHERE id = ?').get(r.done))))).catch(next);
 });
 
-const RECIPE_FIELDS = ['context', 'recipeId', 'components', 'size', 'addons', 'danishFlavour'];
+const RECIPE_FIELDS = ['context', 'preference', 'recipeId', 'components', 'size', 'addons', 'danishFlavour'];
 
 /** Edit one morning before its cutoff: context, size, add-ons, window, delivery address.
     A window-only change keeps the breakfast exactly as ordered. A morning on
@@ -392,6 +402,7 @@ function editPersonalDay(userId, orderId, date, body, payment = null) {
     b = buildPersonalDay({
       context: body.context ?? current.context,
       recipeId: body.recipeId ?? current.recipeId,
+      preference: body.preference !== undefined ? body.preference : current.preference,
       components: body.components ?? current.components,
       danishFlavour: body.danishFlavour ?? current.danishFlavour,
       size: body.size ?? current.size,

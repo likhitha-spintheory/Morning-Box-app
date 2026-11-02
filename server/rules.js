@@ -6,7 +6,7 @@ import {
   businessModels, resolveSpecial, priceBusinessDay
 } from '../src/domain/engine.js';
 import { recipeById, describe, priceLevel } from '../src/domain/recipes.js';
-import { unsafeComponents } from '../src/domain/app.js';
+import { unsafeComponents, dayProfile } from '../src/domain/app.js';
 import {
   CONTEXTS, DELIVERY_WINDOWS, DIETARY, ALLERGENS, PREFERENCES, EATING_STYLES, PRICE_LEVELS,
   isBeforeCutoff, orderableDates, isoDate, dubaiTodayIso, EXCEPTION_KINDS as BASE_EXCEPTION_KINDS, ACTIVE_AREAS, areaFor
@@ -105,11 +105,15 @@ export function assertCapacity(date, window, boxes, exclude = {}) {
 export function buildPersonalDay(input, profile) {
   const { context, recipeId, components, size, addons = [], danishFlavour } = input;
   if (!ids(CONTEXTS).includes(context)) throw bad('context_invalid', 'Choose a daily context.');
-  const rec = recommend(profile, context);
+  /* The breakfast type picked for this morning, when the profile has several (client feedback REC-021). */
+  const preference = input.preference || null;
+  if (preference && !(profile.preferences || []).includes(preference)) throw bad('not_eligible', 'This breakfast is not available for your profile and morning. Please plan it again.');
+  const forDay = dayProfile(profile, preference);
+  const rec = recommend(forDay, context);
   const candidate = [rec.primary, rec.alternative].find(c => c && c.recipe.id === recipeId);
   if (!candidate) throw bad('not_eligible', 'This breakfast is not available for your profile and morning. Please plan it again.');
 
-  const config = configure(candidate, profile);
+  const config = configure(candidate, forDay);
   /* Same items as recommended, apart from eligible same-group swaps (MB-BOX-001 §5). */
   const custom = applyUserSwaps(config, components);
   if (!custom.ok) throw bad('components_invalid', custom.reason);
@@ -145,7 +149,7 @@ export function buildPersonalDay(input, profile) {
 
   const price = priceBox(config).total;
   const cfg = {
-    recipeId: config.recipe.id, context, which: candidate === rec.primary ? 'primary' : 'alternative',
+    recipeId: config.recipe.id, context, ...(preference ? { preference } : {}), which: candidate === rec.primary ? 'primary' : 'alternative',
     components: config.components, substitutions: config.substitutions, userSwaps: config.userSwaps, danishFlavour: flavour,
     size: config.size, addons: config.addons, label: config.label, format: config.recipe.format || null,
     variants: config.variants
@@ -157,7 +161,9 @@ export function buildPersonalDay(input, profile) {
 /* Deliveries only to active service areas (MB-PRD-001 §3). */
 function areaOrFail(requested) {
   const area = areaFor(requested);
-  if (!area) throw bad('area_unavailable', `We deliver to ${ACTIVE_AREAS.join(', ')} for now. Choose one of these areas.`);
+  /* Client wording (Requirements Matrix FLW-023), listing whichever areas are active in Admin. */
+  const list = ACTIVE_AREAS.length > 1 ? `${ACTIVE_AREAS.slice(0, -1).join(', ')} and ${ACTIVE_AREAS[ACTIVE_AREAS.length - 1]}` : ACTIVE_AREAS[0];
+  if (!area) throw bad('area_unavailable', `Sorry, Morning Box is currently available for delivery in ${list} only. More areas are coming soon!`);
   return area;
 }
 

@@ -1,7 +1,7 @@
 /* App-level helpers on top of the locked engine (engine.js, library.js,
    recipes.js, standards.js are the MVP implementations of the standards and
    are used unchanged). */
-import { recommend, configure, priceBox, hasSizeSelector, addonPrice } from './engine.js';
+import { recommend, configure, priceBox, hasSizeSelector, addonPrice, applyUserSwaps, addonGroups } from './engine.js';
 import { COMPONENTS, portion, resolveBuild } from './library.js';
 import { recipeById } from './recipes.js';
 import {
@@ -78,9 +78,9 @@ export function hydrate(cfg, profile) {
   return { ...cfg, recipe: recipeById[cfg.recipeId], profile };
 }
 
-export function serialize(config, context, which) {
+export function serialize(config, context, which, preference = null) {
   return {
-    recipeId: config.recipe.id, context, which,
+    recipeId: config.recipe.id, context, which, ...(preference ? { preference } : {}),
     components: config.components.slice(), substitutions: config.substitutions || [],
     userSwaps: config.userSwaps || [], size: config.size, addons: config.addons || [],
     label: config.label, format: config.recipe.format || null,
@@ -88,16 +88,29 @@ export function serialize(config, context, which) {
   };
 }
 
-/** Runs the deterministic engine for one morning. */
-export function recommendDay(profile, context) {
-  const res = recommend(profile, context);
+/* Client feedback (Requirements Matrix REC-021 / FLW-011, Nov 2026): a customer with more than one
+   Breakfast Preference picks one for each morning, and that morning is recommended from that
+   Preference only. With one Preference, or no choice recorded (older plans, business), the whole
+   selection is used as MB-REC-001 §6–7 describe. */
+/** The profile one morning is recommended from. */
+export const dayProfile = (profile, preference) =>
+  preference && (profile.preferences || []).includes(preference) ? { ...profile, preferences: [preference] } : profile;
+/** Does this morning still need the customer to pick its breakfast type? */
+export const needsPreference = (profile, preference) =>
+  (profile.preferences || []).length > 1 && !(profile.preferences || []).includes(preference);
+
+/** Runs the deterministic engine for one morning (optionally for the breakfast type picked for it). */
+export function recommendDay(profile, context, preference = null) {
+  const pick = preference && (profile.preferences || []).includes(preference) ? preference : null;
+  const p = dayProfile(profile, pick);
+  const res = recommend(p, context);
   if (!res.primary) return { none: true, message: res.message };
-  const primary = configure(res.primary, profile);
-  const alternative = res.alternative ? configure(res.alternative, profile) : null;
+  const primary = configure(res.primary, p);
+  const alternative = res.alternative ? configure(res.alternative, p) : null;
   return {
     none: false,
-    primary: serialize(primary, context, 'primary'),
-    alternative: alternative ? serialize(alternative, context, 'alternative') : null
+    primary: serialize(primary, context, 'primary', pick),
+    alternative: alternative ? serialize(alternative, context, 'alternative', pick) : null
   };
 }
 
@@ -188,6 +201,23 @@ export function unsafeComponents(cfg, profile) {
   };
   const ids = [...(cfg.components || []), ...(cfg.addons || []).map(a => a.item)];
   return [...new Set(ids.filter(id => !fits(recordedBuild(id))))];
+}
+
+/**
+ * Would the server still accept this saved morning for this profile? The same test it runs before
+ * payment: the breakfast is still Your Morning Box or Another Option for its context, the swaps are
+ * still eligible and every extra is still offered. A changed eating style or preference can fail it
+ * even when nothing is unsafe.
+ */
+export function stillOffered(cfg, profile) {
+  if (!cfg) return false;
+  if (cfg.preference && !(profile.preferences || []).includes(cfg.preference)) return false;
+  const p = dayProfile(profile, cfg.preference);
+  const rec = recommend(p, cfg.context);
+  const candidate = [rec.primary, rec.alternative].find(c => c && c.recipe.id === cfg.recipeId);
+  if (!candidate || !applyUserSwaps(configure(candidate, p), cfg.components).ok) return false;
+  const groups = addonGroups(profile);
+  return (cfg.addons || []).every(a => groups.some(g => g.id === a.group && g.items.includes(a.item)));
 }
 
 /** Allergens in a breakfast as it will be made (recorded builds, or the build the profile would get). */

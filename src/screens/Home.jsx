@@ -48,7 +48,7 @@ export default function Home() {
       <section className="home-wide home-hero">
         <div className="home-hero-text stack gap-16">
           <span className="eyebrow grey" style={{ letterSpacing: '.24em' }}>{greeting()}{signedIn ? `, ${state.user.firstName}` : ''}</span>
-          <h1 className="h-hero big">Tomorrow’s breakfast, <em>already sorted.</em></h1>
+          <h1 className="h-hero big">Your next breakfast, <em>already sorted.</em></h1>
           <p className="home-lede">Personalized breakfast boxes from partner bakeries, delivered in the window you choose.</p>
         </div>
 

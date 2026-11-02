@@ -51,7 +51,7 @@
 body { padding-top: var(--mb-inset-top); }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-bottom: 120px; }   /* focused items stay clear of the sticky footer */
 body {
   margin: 0; background: var(--ivory); color: var(--espresso);
   font-family: var(--sans); font-size: 16px; line-height: 1.5;
@@ -72,6 +72,13 @@ img { max-width: 100%; display: block; }
 .footer { position: sticky; bottom: 0; z-index: 5; padding: 14px 20px calc(22px + var(--mb-inset-bottom)); display: flex; flex-direction: column; gap: 12px; background: linear-gradient(180deg, rgba(251, 247, 239, 0) 0, var(--ivory) 18px); }
 .footer.sheet { background: var(--white); border-radius: 28px 28px 0 0; box-shadow: var(--shadow-sheet); padding-top: 20px; }
 .footer.split { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
+/* One row (price beside the button) so the sticky bar hides as little of the list as possible. */
+.footer.compact { flex-direction: row; align-items: center; gap: 14px; padding: 10px 16px calc(12px + var(--mb-inset-bottom)); }
+.footer.sheet.compact { padding-top: 12px; border-radius: 22px 22px 0 0; }
+.footer.compact .btn { flex: 1; width: auto; min-height: 52px; padding: 0 18px; }
+.footer.compact .price-sum { display: flex; flex-direction: column; min-width: 0; }
+.footer.compact .price-sum .total { font: 700 22px/1.15 var(--sans); white-space: nowrap; }
+.footer.compact .price-sum .sm { font-size: 13px; white-space: nowrap; }
 .stack { display: flex; flex-direction: column; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .gap-4 { gap: 4px; } .gap-8 { gap: 8px; } .gap-10 { gap: 10px; } .gap-12 { gap: 12px; } .gap-16 { gap: 16px; }

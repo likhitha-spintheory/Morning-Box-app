@@ -8,7 +8,7 @@ import { LEGAL_PAGES } from '../Legal.jsx';
 import { useStore } from '../../state/store.jsx';
 import { useConfig, closedOn } from '../../state/config.js';
 import {
-  CONTEXTS, DELIVERY_WINDOWS, dateInfo, todayIso, boxName, sizeLabel, extrasText, windowLabel, contextLabel,
+  CONTEXTS, PREFERENCES, DELIVERY_WINDOWS, dateInfo, todayIso, boxName, sizeLabel, extrasText, windowLabel, contextLabel,
   eatingLabel, prefLabel, dietLabel, allergyLabel, componentName, componentIcon, trackingStage,
   isBeforeCutoff, cutoffLabel, timeLeft, dayPrice, sizePrice, canChooseSize, recommendDay, addonPrice, shortPlace, serverDateIso,
   whatsappLink, containsAllergens, planningWeeks, tomorrowIso
@@ -505,7 +505,7 @@ export function EditMorning() {
   /* A morning on safety review starts from a fresh, safe recommendation for the same morning type. */
   const startCfg = () => {
     if (!day.safetyReview) return day.cfg;
-    const r = recommendDay(state.profile, day.cfg.context);
+    const r = recommendDay(state.profile, day.cfg.context, day.cfg.preference);
     return r.none ? null : { ...r.primary, size: canChooseSize(r.primary) ? (day.cfg.size === 'standard' ? 'regular' : day.cfg.size) : 'standard', addons: [] };
   };
   const [draft, setDraft] = useState(null);
@@ -547,16 +547,18 @@ export function EditMorning() {
   });
   const windowFull = w => w !== day.window && avail[w] && !avail[w].available;
   /* The other recommended breakfast is one tap away. */
-  const options = noSafe ? null : recommendDay(state.profile, draft.cfg.context);
+  const options = noSafe ? null : recommendDay(state.profile, draft.cfg.context, draft.cfg.preference);
   const other = options && !options.none ? [options.primary, options.alternative].find(o => o && o.recipeId !== draft.cfg.recipeId) : null;
   const useOther = () => setDraft(d => ({ ...d, cfg: { ...structuredClone(other), size: canChooseSize(other) ? (d.cfg.size === 'standard' ? 'regular' : d.cfg.size) : 'standard', addons: d.cfg.addons } }));
   const breadItems = bread ? bread.items.filter((item, i) => moreBread || loafOf(item) || i < 2) : [];
-  const changeContext = ctx => {
-    const r = recommendDay(state.profile, ctx);
-    if (r.none) { setCtxError(`No safe ${contextLabel(ctx)} breakfast matches your profile. Your current breakfast is kept.`); return; }
+  const changeContext = (ctx, pref = draft.cfg.preference) => {
+    const r = recommendDay(state.profile, ctx, pref);
+    if (r.none) { setCtxError(`No safe ${contextLabel(ctx)}${pref ? ` ${prefLabel(pref)}` : ''} breakfast matches your profile. Your current breakfast is kept.`); return; }
     setCtxError('');
     setDraft(d => ({ ...d, cfg: { ...r.primary, size: canChooseSize(r.primary) ? (d.cfg.size === 'standard' ? 'regular' : d.cfg.size) : 'standard', addons: d.cfg.addons } }));
   };
+  /* Client feedback REC-021: with several breakfast types, this morning's type can be changed here too. */
+  const types = PREFERENCES.filter(p => (state.profile.preferences || []).includes(p.id));
   const run = async fn => {
     setBusy(true); setError('');
     try {
@@ -567,7 +569,7 @@ export function EditMorning() {
     catch (e) { setError(e.message); setBusy(false); }
   };
   /* Only what changed is sent: a window-only change keeps the breakfast exactly as ordered. */
-  const recipe = c => ({ context: c.context, recipeId: c.recipeId, components: c.components, size: c.size, addons: c.addons, ...(c.components.includes('fruitDanish') ? { danishFlavour: c.danishFlavour } : {}) });
+  const recipe = c => ({ context: c.context, preference: c.preference || null, recipeId: c.recipeId, components: c.components, size: c.size, addons: c.addons, ...(c.components.includes('fruitDanish') ? { danishFlavour: c.danishFlavour } : {}) });
   const recipeChanged = day.safetyReview || JSON.stringify(recipe(draft.cfg)) !== JSON.stringify(recipe(day.cfg));
   /* FLW §8: the delivery location of this morning can change before cutoff too. */
   const setAddr = (k, v) => setDraft(d => ({ ...d, address: { ...d.address, [k]: v } }));
@@ -603,6 +605,12 @@ export function EditMorning() {
           <div className="chips">
             {CONTEXTS.map(c => <Chip key={c.id} on={draft.cfg.context === c.id} onClick={() => changeContext(c.id)}>{c.label}</Chip>)}
           </div>
+          {types.length > 1 && <>
+            <h2 className="h3" style={{ fontSize: 19, marginTop: 6 }}>Breakfast type</h2>
+            <div className="chips" aria-label="Breakfast type">
+              {types.map(p => <Chip key={p.id} on={draft.cfg.preference === p.id} onClick={() => changeContext(draft.cfg.context, p.id)}>{p.label}</Chip>)}
+            </div>
+          </>}
           {ctxError && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />{ctxError}</span>}
         </section>}
 
@@ -724,8 +732,8 @@ export function EditMorning() {
         </section>
         <ErrorBanner>{error}</ErrorBanner>
       </main>
-      <Footer sheet>
-        {!noSafe && <div className="row" style={{ alignItems: 'flex-end' }}><span className="sm" style={{ fontSize: 15 }}>This morning</span><span style={{ font: '700 26px/1.15 var(--sans)' }}>AED {price.total}</span></div>}
+      <Footer sheet compact>
+        {!noSafe && <span className="price-sum"><span className="sm">This morning</span><span className="total">AED {price.total}</span></span>}
         <button className="btn" disabled={busy || noSafe} onClick={save}>{busy ? 'Saving…' : 'Save changes'}</button>
       </Footer>
     </Screen>

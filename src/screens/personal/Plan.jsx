@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  Screen, TopBar, Option, Footer, Icon, MorningPills, Qty, Ring, RuledDate, Go, InfoTip, SunArc
+  Screen, TopBar, Option, Footer, Icon, MorningPills, Qty, Ring, RuledDate, Go, InfoTip, SunArc, Tick
 } from '../../components/ui.jsx';
+import { PREF_ICON, PREF_SHORT, PREF_TITLE } from './Profile.jsx';
 import { useConfig, closedOn } from '../../state/config.js';
 import { useStore } from '../../state/store.jsx';
 import { track } from '../../api.js';
 import {
-  CONTEXTS, dateInfo, planningWeeks, recommendDay, hydrate, dayPrice, sizePrice, todayIso,
+  CONTEXTS, PREFERENCES, dateInfo, planningWeeks, recommendDay, hydrate, dayPrice, sizePrice, todayIso,
   canChooseSize, boxName, componentName, componentIcon, componentPortion, contextLabel, eatingLabel, prefLabel,
-  dietLabel, allergyLabel, sizeLabel, addonPrice, tomorrowIso as dubaiTomorrowIso, unsafeComponents, dubaiNote, boxPhoto, containsAllergens
+  dietLabel, allergyLabel, sizeLabel, addonPrice, tomorrowIso as dubaiTomorrowIso, unsafeComponents, stillOffered, needsPreference, dubaiNote, boxPhoto, containsAllergens
 } from '../../domain/app.js';
 import { usePruneExpired } from '../../state/orders.jsx';
 import { BoxEditor, FlavourPicker, LoafPicker, offeredPastries } from '../../components/BoxEditor.jsx';
@@ -41,11 +42,17 @@ const extrasLine = addons => addons.map(a => `${a.qty} ${componentName(a.item)}$
 /** Copy a past morning onto a new date, re-checked against the current Morning Profile
     (PER §3.2: copies stay editable; safety rules always re-apply). */
 export function copyDay(cfg, profile) {
-  const options = recommendDay(profile, cfg.context);
+  const preference = (profile.preferences || []).includes(cfg.preference) ? cfg.preference : null;
+  const day = copyDayCfg(cfg, profile, preference);
+  return preference ? { ...day, preference } : day;
+}
+function copyDayCfg(cfg, profile, preference) {
+  const options = recommendDay(profile, cfg.context, preference);
   if (options.none) return { context: cfg.context, which: 'primary', options, cfg: null, saved: false, copied: true, changed: true };
   const still = [options.primary, options.alternative].find(o => o && o.recipeId === cfg.recipeId);
   if (still) {
     const c = structuredClone(cfg);
+    if (!preference) delete c.preference;   // a type no longer in the profile is not carried over
     /* Swaps carry over when they are still valid for this morning. */
     const sameParts = applyUserSwaps(hydrate(structuredClone(still), profile), c.components).ok;
     return { context: cfg.context, which: still.which, options, cfg: sameParts ? c : { ...still, size: c.size, addons: c.addons }, saved: true, copied: true };
@@ -120,7 +127,7 @@ export function ChooseDates() {
 
   return (
     <Screen>
-      <TopBar back={-1} close={null}><span className="topbar-title">{source ? 'Use this plan again' : roDay ? 'Reorder a morning' : firstRun ? 'Step 4 of 5' : 'Plan your mornings'}</span></TopBar>
+      <TopBar back={firstRun && !source && !roDay ? '/profile/dietary' : -1} close={null}><span className="topbar-title">{source ? 'Use this plan again' : roDay ? 'Reorder a morning' : firstRun ? 'Step 4 of 5' : 'Plan your mornings'}</span></TopBar>
       {firstRun && <div style={{ paddingTop: 8 }}><SunArc step={4} total={5} /></div>}
       <main className="screen-main" style={{ paddingTop: firstRun ? 24 : 16, gap: 24 }}>
         <div className="stack gap-8">
@@ -204,25 +211,37 @@ export function DailyContext() {
     return past?.cfg?.context || null;
   };
   const [ctx, setCtx] = useState(() => plan.days[iso]?.context || learned());
+  /* Client feedback REC-021 / FLW-011: with several breakfast types in the profile, the customer picks one
+     for this morning (only their own types, nothing preselected for a new morning). One type: not asked. */
+  const types = state.profile.preferences || [];
+  const askType = types.length > 1;
+  const [pref, setPref] = useState(() => (types.includes(plan.days[iso]?.preference) ? plan.days[iso].preference : null));
   if (!plan.dates.includes(iso)) return <Navigate to="/plan/dates" replace />;
   const i = plan.dates.indexOf(iso);
   const firstRun = !!state.onboarding;
+  /* Back goes to the step before this one, never through browser history (which may be empty after a reload). */
+  const prevIso = plan.dates[i - 1];
+  const back = !prevIso ? '/plan/dates' : plan.days[prevIso]?.saved ? `/plan/day/${iso}/next` : `/plan/day/${prevIso}/context`;
 
   const go = () => {
+    /* Coming back with the same morning type keeps the breakfast as it was customised. */
+    const day = plan.days[iso];
+    const dayPref = askType ? pref : null;
+    if (day?.cfg && day.context === ctx && (day.preference || null) === dayPref && day.profileKey === profileKey(state.profile)) return nav(`/plan/day/${iso}/box`);
     /* Same inputs → same recommendation (MB-REC-001 §1.4); feedback never reorders it (§14). */
-    const options = recommendDay(state.profile, ctx);
+    const options = recommendDay(state.profile, ctx, dayPref);
     /* REC §15: a no-match is recorded with its inputs and reason code. */
-    track(options.none ? 'no_match' : 'recommendation_shown', options.none ? { reasonCode: 'NO_ELIGIBLE_RECOMMENDATION', context: ctx, eatingStyle: state.profile.eatingStyle, preferences: state.profile.preferences, dietary: state.profile.dietary, allergies: state.profile.allergies } : { recipeId: options.primary.recipeId });
+    track(options.none ? 'no_match' : 'recommendation_shown', options.none ? { reasonCode: 'NO_ELIGIBLE_RECOMMENDATION', context: ctx, eatingStyle: state.profile.eatingStyle, preferences: dayPref ? [dayPref] : state.profile.preferences, dietary: state.profile.dietary, allergies: state.profile.allergies } : { recipeId: options.primary.recipeId });
     /* Start from the size the customer chose last time (they can change it on the next screen). */
     const lastSize = state.orders.flatMap(o => o.days).filter(d => !d.cancelled && d.cfg?.size && d.cfg.size !== 'standard').sort((a, b) => b.date.localeCompare(a.date))[0]?.cfg.size;
     const first = options.none ? null : { ...options.primary, size: canChooseSize(options.primary) && lastSize ? lastSize : options.primary.size };
-    set(s => { s.plan.days[iso] = { context: ctx, which: 'primary', options, cfg: first, saved: false, profileKey: profileKey(s.profile) }; });
+    set(s => { s.plan.days[iso] = { context: ctx, ...(dayPref ? { preference: dayPref } : {}), which: 'primary', options, cfg: first, saved: false, profileKey: profileKey(s.profile) }; });
     nav(`/plan/day/${iso}/box`);
   };
 
   return (
     <Screen>
-      <TopBar back={-1} close={null}><span className="topbar-title">{firstRun ? 'Step 5 of 5' : `Morning ${i + 1} of ${plan.dates.length}`}</span></TopBar>
+      <TopBar back={back} close={null}><span className="topbar-title">{firstRun ? 'Step 5 of 5' : `Morning ${i + 1} of ${plan.dates.length}`}</span></TopBar>
       {firstRun && <div style={{ paddingTop: 8 }}><SunArc step={5} total={5} /></div>}
       <main className="screen-main" style={{ paddingTop: firstRun ? 24 : 8, gap: 24 }}>
         {firstRun && <span className="eyebrow">Step 5 of 5 · Your daily context{plan.dates.length > 1 ? <span style={{ color: 'var(--text-3)' }}> · Morning {i + 1} of {plan.dates.length}</span> : null}</span>}
@@ -237,8 +256,28 @@ export function DailyContext() {
             <Option key={c.id} icon={CONTEXT_ICON[c.id]} on={ctx === c.id} title={c.label} onClick={() => setCtx(c.id)}>{CONTEXT_TEXT[c.id]}</Option>
           ))}
         </div>
+        {askType && (
+          <section className="stack gap-16" aria-labelledby="pref-q">
+            <div className="stack gap-8">
+              <h2 id="pref-q" className="q" style={{ fontSize: 26 }}>What would you prefer for this morning?</h2>
+              <p className="help" style={{ fontSize: 17 }}>Choose one of your breakfast types.</p>
+            </div>
+            <div className="grid-2" style={{ gap: 16 }} role="radiogroup" aria-labelledby="pref-q">
+              {PREFERENCES.filter(p => types.includes(p.id)).map(p => (
+                <button key={p.id} type="button" className={`tile${pref === p.id ? ' on' : ''}`} role="radio" aria-checked={pref === p.id} onClick={() => setPref(p.id)}>
+                  <Tick on={pref === p.id} />
+                  <span className="ico"><Icon name={PREF_ICON[p.id]} size={24} stroke={1.6} /></span>
+                  <span className="stack" style={{ gap: 4, marginTop: 'auto' }}>
+                    <span style={{ fontWeight: 600, fontSize: 18, lineHeight: 1.25 }}>{PREF_TITLE[p.id]}</span>
+                    <span className="help" style={{ fontSize: 15.5 }}>{PREF_SHORT[p.id]}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
-      <Footer><button className="btn" disabled={!ctx} onClick={go}><Go>See my Morning Box</Go></button></Footer>
+      <Footer><button className="btn" disabled={!ctx || (askType && !pref)} onClick={go}><Go>See my Morning Box</Go></button></Footer>
     </Screen>
   );
 }
@@ -248,20 +287,23 @@ export function MorningBox() {
   const { iso } = useParams();
   const { state, set, plan } = usePlan();
   const nav = useNavigate();
+  const notice = useLocation().state?.notice;   // why checkout sent the customer back to this morning
   const day = plan.days[iso];
   const key = profileKey(state.profile);
   useEffect(() => {
     if (!day?.context) return;
     if (!day.options) {
-      const options = recommendDay(state.profile, day.context);
+      const options = recommendDay(state.profile, day.context, day.preference);
       set(s => { if (s.plan.days[iso]) { s.plan.days[iso].options = options; s.plan.days[iso].profileKey = key; } });
     } else if (!day.saved && day.profileKey && day.profileKey !== key) {
       /* The profile was edited from this morning (e.g. after "no safe match"): plan it again. */
-      const options = recommendDay(state.profile, day.context);
+      const options = recommendDay(state.profile, day.context, day.preference);
       set(s => { if (s.plan.days[iso]) s.plan.days[iso] = { ...s.plan.days[iso], options, which: 'primary', cfg: options.none ? null : options.primary, profileKey: key }; });
     }
   }, [iso, day?.options, day?.context, key]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!day) return <Navigate to={`/plan/day/${iso}/context`} replace />;
+  /* The breakfast type picked for this morning was removed from the profile: pick again. */
+  if (!day.saved && needsPreference(state.profile, day.preference) && day.preference) return <Navigate to={`/plan/day/${iso}/context`} replace />;
   if (!day.cfg) return <NoMatch iso={iso} />;
 
   const profile = state.profile;
@@ -283,6 +325,7 @@ export function MorningBox() {
       <TopBar back={`/plan/day/${iso}/context`} close={null}><span className="topbar-title">{dayComma(iso)} · {contextLabel(day.context)}</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 8, gap: 20 }}>
         {plan.dates.length > 1 && <MorningPills dates={plan.dates.map(dateInfo)} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />}
+        {notice && <div className="note" role="status"><Icon name="alert" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{notice} Your other mornings are unchanged.</span></div>}
         <div className="stack gap-8">
           <span className="eyebrow row" style={{ justifyContent: 'flex-start', gap: 10 }}><Icon name="sparkle" size={18} stroke={1.6} color="var(--espresso)" />{day.which === 'primary' ? 'Your Morning Box' : 'Another option for you'}<InfoTip label="Why this breakfast">Matched to: {matched.join(' · ')}</InfoTip></span>
           <h1 className="h-display" style={{ fontSize: 34 }}>{boxName(cfg)}</h1>
@@ -494,11 +537,11 @@ export function Extras() {
           </section>
         )}
       </main>
-      <Footer sheet>
-        <div className="row" style={{ alignItems: 'flex-end' }}>
-          <span className="stack"><span className="sm" style={{ fontSize: 15 }}>Breakfast AED {price.base + price.sizeAdj}{price.addons ? ` + Extras AED ${price.addons}` : ''}</span>
-            <span style={{ font: '700 28px/1.15 var(--sans)' }}>AED {price.total}</span></span>
-        </div>
+      <Footer sheet compact>
+        <span className="price-sum">
+          <span className="sm">{price.addons ? `Incl. extras AED ${price.addons}` : 'Breakfast'}</span>
+          <span className="total">AED {price.total}</span>
+        </span>
         <button className="btn" onClick={save}>Save this morning</button>
       </Footer>
     </Screen>
@@ -532,7 +575,7 @@ export function NextMorning() {
 
   return (
     <Screen>
-      <TopBar back={-1} close={null}><span className="topbar-title">Morning {i + 1} of {plan.dates.length}</span></TopBar>
+      <TopBar back={`/plan/day/${prevIso}/extras`} close={null}><span className="topbar-title">Morning {i + 1} of {plan.dates.length}</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 8, gap: 24 }}>
         <MorningPills dates={infos} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />
         <div className="banner-ok" role="status">
@@ -563,14 +606,15 @@ export function WeeklySummary() {
   useEffect(() => { track('summary_viewed'); }, []);
   const expiredNote = usePruneExpired();
   const rows = plan.dates.filter(d => plan.days[d]?.saved);
-  /* Saved mornings are re-checked whenever the profile changes: safety always comes first. */
-  const unsafeSaved = rows.filter(d => unsafeComponents(plan.days[d].cfg, state.profile).length);
+  /* Saved mornings are re-checked whenever the profile changes: safety always comes first, and a
+     breakfast that no longer fits the eating style or preferences would be refused at payment. */
+  const unsafeSaved = rows.filter(d => unsafeComponents(plan.days[d].cfg, state.profile).length || !stillOffered(plan.days[d].cfg, state.profile));
   useEffect(() => {
     if (!unsafeSaved.length) return;
     set(s => {
       unsafeSaved.forEach(d => {
         const day = s.plan.days[d];
-        const options = recommendDay(s.profile, day.context);
+        const options = recommendDay(s.profile, day.context, day.preference);
         s.plan.days[d] = { ...day, options, which: 'primary', cfg: options.none ? null : options.primary, saved: false, changed: true, profileKey: profileKey(s.profile) };
       });
     });
@@ -613,7 +657,7 @@ export function WeeklySummary() {
         })}
         {plan.dates.some(d => plan.days[d]?.changed && !plan.days[d]?.saved) && (
           <div className="note"><Icon name="shield" size={20} stroke={1.6} style={{ flex: 'none' }} />
-            <span>Some copied mornings no longer match your current profile, so we updated or held them for review. Check them before continuing.</span></div>
+            <span>Some mornings no longer match your current profile, so we updated them. Check {plan.dates.filter(d => plan.days[d]?.changed && !plan.days[d]?.saved).map(d => dateInfo(d).label).join(', ')} before continuing.</span></div>
         )}
         {unsaved
           ? <Link to={plan.days[unsaved]?.cfg ? `/plan/day/${unsaved}/box` : `/plan/day/${unsaved}/context`} className="btn-secondary">Plan {dateInfo(unsaved).label}</Link>

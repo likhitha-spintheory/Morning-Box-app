@@ -163,8 +163,8 @@ export function Money({ value, className = '' }) {
   return <span className={`money ${className}`}>AED {Math.round(value).toLocaleString('en-AE')}</span>;
 }
 
-export function Footer({ children, split, sheet }) {
-  return <div className={`footer${split ? ' split' : ''}${sheet ? ' sheet' : ''}`}>{children}</div>;
+export function Footer({ children, split, sheet, compact }) {
+  return <div className={`footer${split ? ' split' : ''}${sheet ? ' sheet' : ''}${compact ? ' compact' : ''}`}>{children}</div>;
 }
 
 export function Screen({ children }) {

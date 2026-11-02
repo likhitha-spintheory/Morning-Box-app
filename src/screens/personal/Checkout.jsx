@@ -5,13 +5,26 @@ import { Screen, TopBar, Footer, Icon, Chip, Switch, Option, Logo, PhoneField, G
 import { useStore } from '../../state/store.jsx';
 import {
   DELIVERY_WINDOWS, dateInfo, dayPrice, boxName, sizeLabel, windowLabel, canChooseSize, componentName, shortPlace,
-  recommendDay, unsafeComponents
+  recommendDay, unsafeComponents, stillOffered
 } from '../../domain/app.js';
 import { useOrder, Loading, usePruneExpired } from '../../state/orders.jsx';
 import { PRICING, areaFor } from '../../domain/standards.js';
 
 const emailValid = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.trim());
 const union = (a = [], b = []) => [...new Set([...a, ...b])];
+/** The plan's profile with the account's allergies and dietary needs added: safety never weakens. */
+const withAccountSafety = (local, account) => ({
+  ...local, dietary: union(local.dietary, account.dietary), allergies: union(local.allergies, account.allergies),
+  otherAllergies: [...new Set([local.otherAllergies, account.otherAllergies].map(x => (x || '').trim()).filter(Boolean))].join(', ').slice(0, 120)
+});
+const profileText = p => JSON.stringify([p.eatingStyle, [...(p.preferences || [])].sort(), [...(p.dietary || [])].sort(), [...(p.allergies || [])].sort(), (p.otherAllergies || '').trim()]);
+/** Saved mornings the server would refuse for this profile (unsafe, or no longer offered). */
+const mornings = (plan, profile) => plan.dates.filter(iso => plan.days[iso]?.saved && (unsafeComponents(plan.days[iso].cfg, profile).length || !stillOffered(plan.days[iso].cfg, profile)));
+/** Re-plan one morning for the profile: the customer checks it again from the summary. */
+const replan = (day, profile) => {
+  const options = recommendDay(profile, day.context, day.preference);
+  return { ...day, options, which: 'primary', cfg: options.none ? null : options.primary, saved: false, changed: true };
+};
 /** Terms and Privacy open in the app; a hosted version (VITE_TERMS_URL / VITE_PRIVACY_URL) can replace them. */
 const TERMS_URL = import.meta.env.VITE_TERMS_URL || '';
 const PRIVACY_URL = import.meta.env.VITE_PRIVACY_URL || '';
@@ -103,24 +116,17 @@ export function SignIn() {
       const changedDays = [];
       if (keepLocal) {
         const sp = r.profile;
-        merged = sp ? {
-          ...state.profile, dietary: union(state.profile.dietary, sp.dietary), allergies: union(state.profile.allergies, sp.allergies),
-          otherAllergies: [...new Set([state.profile.otherAllergies, sp.otherAllergies].map(x => (x || '').trim()).filter(Boolean))].join(', ').slice(0, 120)
-        } : state.profile;
+        merged = sp ? withAccountSafety(state.profile, sp) : state.profile;
         if (JSON.stringify(sp) !== JSON.stringify(merged)) await put('/me/profile', merged).catch(() => {});
         r.profile = merged;
-        planned.forEach(iso => { if (unsafeComponents(state.plan.days[iso].cfg, merged).length) changedDays.push(iso); });
+        changedDays.push(...mornings(state.plan, merged));
       }
       set(s => {
         if (switching && !keepLocal) resetPersonal(s);
         if (switching && keepLocal) { s.orders = []; s.businessOrders = []; s.businessUser = null; }
         if (merged) {
           s.profile = merged; s.profileDone = true;
-          changedDays.forEach(iso => {
-            const d = s.plan.days[iso];
-            const options = recommendDay(merged, d.context);
-            s.plan.days[iso] = { ...d, options, which: 'primary', cfg: options.none ? null : options.primary, saved: false, changed: true };
-          });
+          changedDays.forEach(iso => { s.plan.days[iso] = replan(s.plan.days[iso], merged); });
         }
         applySession(s, r);
       });
@@ -391,7 +397,7 @@ export function afterPersonalOrder(s, order) {
 
 /* ---------- Review your mornings (style-1 P17) ---------- */
 export function ReviewPay() {
-  const { state, set } = useStore();
+  const { state, set, markProfileSynced } = useStore();
   const nav = useNavigate();
   /* Apple Pay is offered first only where the device supports it. */
   const [method, setMethod] = useState(() => (typeof window !== 'undefined' && window.ApplePaySession ? 'apple' : 'card'));
@@ -424,18 +430,34 @@ export function ReviewPay() {
 
   /* The server re-validates every morning and re-prices the order before payment;
      if its total differs from the one shown, nothing is charged and the new total is shown. */
+  /* The server checks every morning against the profile on the account. Make sure it is the one this
+     plan was built with (a save can fail on a weak connection), keeping any allergies and dietary needs
+     saved on the account. Mornings that no longer fit go back to the summary; the rest stay as they are. */
+  const syncProfile = async () => {
+    const me = await get('/me');
+    const merged = me.profile ? withAccountSafety(state.profile, me.profile) : state.profile;
+    if (!me.profile || profileText(me.profile) !== profileText(merged)) { await put('/me/profile', merged); markProfileSynced(merged); }
+    if (profileText(merged) === profileText(state.profile)) return true;
+    const changed = mornings(plan, merged);
+    set(s => { s.profile = merged; changed.forEach(iso => { s.plan.days[iso] = replan(s.plan.days[iso], merged); }); });
+    if (!changed.length) return true;
+    nav('/plan/summary');
+    return false;
+  };
+
   const pay = async () => {
     setEmailTouched(true);
     if (emailBad) return;
     setPaying(true); setError('');
     try {
+      if (!(await syncProfile())) return;
       const order = await post('/orders', {
         idempotencyKey: idemKey, expectedTotal: payTotal,
         method: method === 'apple' ? 'apple' : 'card', email: email.trim(), address: addrOf(dates[0]),
         ...(!state.user?.mobile ? { contactMobile: dl.contactMobile || '' } : {}),
         days: dates.map(iso => {
           const c = plan.days[iso].cfg;
-          return { date: iso, context: c.context, recipeId: c.recipeId, components: c.components, size: c.size, addons: c.addons, danishFlavour: c.danishFlavour, window: win(iso), address: addrOf(iso) };
+          return { date: iso, context: c.context, ...(c.preference ? { preference: c.preference } : {}), recipeId: c.recipeId, components: c.components, size: c.size, addons: c.addons, danishFlavour: c.danishFlavour, window: win(iso), address: addrOf(iso) };
         })
       });
       if (order.checkout) return goToPayment(order.checkout);   // card payment page; comes back to #/pay/<id>
@@ -443,6 +465,12 @@ export function ReviewPay() {
       nav(`/orders/${order.id}/confirmed`, { replace: true });
     } catch (e) {
       if (e.code === 'price_changed' && typeof e.details?.total === 'number') setServerTotal(e.details.total);
+      /* One morning can't be made as planned: re-plan just that day and keep the rest of the plan. */
+      const bad = e.details?.date;
+      if (bad && plan.days[bad] && ['not_eligible', 'components_invalid', 'addon_invalid', 'danish_unavailable', 'size_invalid', 'context_invalid'].includes(e.code)) {
+        set(s => { s.plan.days[bad] = replan(s.plan.days[bad], s.profile); });
+        return nav(`/plan/day/${bad}/${plan.days[bad].context ? 'box' : 'context'}`, { state: { notice: e.message } });
+      }
       setError(e.message); setPaying(false);
     }
   };

@@ -89,7 +89,8 @@ export function StoreProvider({ children }) {
     if (synced.current.profile === null) { synced.current.profile = p; return; }
     if (p === synced.current.profile) return;
     synced.current.profile = p;
-    put('/me/profile', state.profile).catch(() => { synced.current.profile = null; });
+    /* A failed save is retried with the next change (and checkout syncs before paying); it is never treated as saved. */
+    put('/me/profile', state.profile).catch(() => { synced.current.profile = 'unsaved'; });
   }, [state.session, state.profileDone, state.profile]);
   useEffect(() => {
     if (!state.session) { synced.current.coffee = null; return; }
