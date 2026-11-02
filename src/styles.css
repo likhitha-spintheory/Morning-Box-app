@@ -540,3 +540,16 @@ img { max-width: 100%; display: block; }
 .activity summary::-webkit-details-marker { display: none; }
 .activity[open] summary svg { transform: rotate(90deg); }
 .btn-text svg { margin-right: 6px; flex: none; }
+
+/* Business: expandable Special Breakfast groups (client feedback PRD-006). */
+.special-group { border-top: 1px solid var(--line-soft); padding: 4px 0; }
+.special-group summary { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 0; cursor: pointer; list-style: none; }
+.special-group summary::-webkit-details-marker { display: none; }
+.special-group summary .chev { display: flex; flex: none; transform: rotate(90deg); transition: transform .15s; color: var(--text-3); }
+.special-group[open] summary .chev { transform: rotate(-90deg); }
+.special-group.bad { display: flex; flex-direction: column; gap: 6px; padding: 14px 0; color: var(--err); }
+.special-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0 0 12px 56px; font-size: 15px; }
+.special-facts dt { color: var(--text-3); }
+.special-facts dd { margin: 0; color: var(--espresso); }
+.special-facts ul { margin: 0; padding-left: 18px; }
+@media (max-width: 400px) { .special-facts { margin-left: 0; grid-template-columns: 1fr; gap: 2px; } .special-facts dd { margin-bottom: 8px; } }

@@ -15,7 +15,7 @@ import { COMPONENTS } from '../../domain/library.js';
 import { DIETARY, ALLERGENS, DELIVERY_WINDOWS, SIZE_ADJUSTMENT, PRICE_LEVELS, areaFor } from '../../domain/standards.js';
 import {
   dateInfo, planningWeeks, cutoffLabel, isBeforeCutoff, windowLabel, componentName, dietLabel, allergyLabel,
-  sizeLabel, todayIso, serverDateIso
+  sizeLabel, todayIso, serverDateIso, componentPortion, containsAllergens
 } from '../../domain/app.js';
 
 /* ============================================================
@@ -505,6 +505,52 @@ export function Specials() {
   );
 }
 
+/* Client feedback PRD-006: each Special Breakfast group shows exactly what will be made for it, with the same
+   price the order is charged (priceBusinessDay); a group no approved breakfast can safely meet is flagged. */
+const specialUnitPrice = (recipe, size) => PRICE_LEVELS[priceLevel(recipe)] + SIZE_ADJUSTMENT[size || 'regular'];
+function SpecialDetails({ specials }) {
+  return specials.map((s, i) => {
+    const r = resolveSpecial(s, 'regular');
+    const need = specialText({ ...s, size: 'regular' });
+    const size = s.size || 'regular';
+    if (!r.resolved) {
+      return (
+        <div key={i} className="special-group bad" role="alert">
+          <span className="row" style={{ justifyContent: 'flex-start', gap: 10 }}><Icon name="alert" size={18} stroke={2} /><span className="strong">Special Breakfast {i + 1} × {s.qty}</span></span>
+          <span className="sm">No approved breakfast can safely meet: {need}. Change this group in Special Breakfasts to continue.</span>
+          <Link to="/business/special" className="link" style={{ alignSelf: 'flex-start', padding: '6px 0' }}>Change Special Breakfasts</Link>
+        </div>
+      );
+    }
+    const { recipe, components } = r.resolved;
+    const unit = specialUnitPrice(recipe, size);
+    const contains = containsAllergens({ components, addons: [] }, r.profile);
+    return (
+      <details key={i} className="special-group">
+        <summary>
+          <span className="ci"><Icon name="shield" size={20} stroke={1.6} /></span>
+          <span className="stack" style={{ flex: 1, minWidth: 0 }}>
+            <span className="strong">Special Breakfast {i + 1}: {modelName(recipe)}</span>
+            <span className="xs">{need} · AED {unit} each</span>
+          </span>
+          <span className="strong" style={{ whiteSpace: 'nowrap' }}>× {s.qty}</span>
+          <span className="chev" aria-hidden="true"><Icon name="chevron" size={18} stroke={1.8} /></span>
+        </summary>
+        <dl className="special-facts">
+          <dt>Breakfast</dt><dd>{modelName(recipe)}: {describe({ ...recipe, components })}</dd>
+          <dt>Ingredients</dt><dd><ul>{components.map(id => <li key={id}>{componentName(id)} · {componentPortion(id, size)}</li>)}</ul></dd>
+          <dt>Suitable for</dt><dd>{need}</dd>
+          <dt>Contains</dt><dd>{contains.length ? contains.join(', ') : 'None of the allergens we track'}</dd>
+          <dt>Quantity</dt><dd>{s.qty}</dd>
+          <dt>Size</dt><dd>{sizeLabel(size)}</dd>
+          <dt>Unit price</dt><dd>AED {unit}</dd>
+          <dt>Subtotal</dt><dd>AED {unit * s.qty} <span className="xs">(before any volume discount)</span></dd>
+        </dl>
+      </details>
+    );
+  });
+}
+
 /* ---------- Step 3 · Selection ---------- */
 export function Selection() {
   const { b, upd } = useBiz();
@@ -520,6 +566,7 @@ export function Selection() {
 
   const specials = activeSpecials(b);
   const price = priceDay(lines, specials);
+  const specialsOk = specials.every(s => resolveSpecial(s, 'regular').resolved);
   const confirm = () => { upd(d => { d.mode = mode; d.lines = lines.filter(l => l.qty > 0); }); nav('/business/dates'); };
 
   return (
@@ -568,17 +615,19 @@ export function Selection() {
               </div>
             );
           })}
-          {specials.length > 0 && (
-            <div className="list-row">
-              <span className="ci"><Icon name="shield" size={20} stroke={1.6} /></span>
-              <span className="stack"><span className="strong">Special Breakfasts × {sq} <InfoTip label="About special breakfasts">Packed and labelled separately for each person.</InfoTip></span>
-                <span className="xs">{specials.map(specialText).join(' · ')}</span></span>
-            </div>
-          )}
         </section>
+        {specials.length > 0 && (
+          <section className="card list" aria-label="Special Breakfasts">
+            <div className="row" style={{ padding: '14px 0 4px' }}>
+              <h2 className="h3">Special Breakfasts × {sq} <InfoTip label="About special breakfasts">Packed and labelled separately for each person. Tap a group to see exactly what it contains.</InfoTip></h2>
+              <Link to="/business/special" className="link" style={{ padding: '8px 0' }}>Change</Link>
+            </div>
+            <SpecialDetails specials={specials} />
+          </section>
+        )}
         <PriceSummary price={price} people={b.people} />
       </main>
-      <Footer><button className="btn" disabled={price.boxes !== b.people} onClick={confirm}>Confirm Selection</button></Footer>
+      <Footer><button className="btn" disabled={price.boxes !== b.people || !specialsOk} onClick={confirm}>{specialsOk ? 'Confirm Selection' : 'Change Special Breakfasts to continue'}</button></Footer>
     </Screen>
   );
 }
