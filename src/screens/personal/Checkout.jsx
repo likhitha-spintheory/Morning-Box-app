@@ -291,7 +291,7 @@ export function Delivery() {
 
   return (
     <Screen>
-      <TopBar back={-1} close={null}><span className="topbar-title">Delivery</span></TopBar>
+      <TopBar back="/plan/summary" close={null}><span className="topbar-title">Delivery</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 8, gap: 20 }}>
         <div className="stack gap-8">
           <h1 className="h-display" style={{ fontSize: 34 }}>Where &amp; when?</h1>
@@ -477,7 +477,7 @@ export function ReviewPay() {
 
   return (
     <Screen>
-      <TopBar back={-1} close={null}><span className="topbar-title">Review &amp; pay</span></TopBar>
+      <TopBar back="/checkout/delivery" close={null}><span className="topbar-title">Review &amp; pay</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 8, gap: 16 }}>
         <h1 className="h-display" style={{ fontSize: 34 }}>Review your mornings</h1>
         {expiredNote && <div className="note" role="status"><Icon name="clock" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{expiredNote}</span></div>}

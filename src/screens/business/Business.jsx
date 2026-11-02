@@ -377,7 +377,7 @@ export function BizWelcome() {
 
 /* ---------- Step 1 · People ---------- */
 export function People() {
-  const { b, upd } = useBiz();
+  const { state, b, upd } = useBiz();
   const nav = useNavigate();
   const [text, setText] = useState(String(b.people));
   const setPeople = n => {
@@ -389,7 +389,8 @@ export function People() {
 
   return (
     <Screen>
-      <StepBar n={1} back="/business" />
+      {/* Without an account or orders, /business forwards straight here, so Back goes to the home page. */}
+      <StepBar n={1} back={state.businessUser || state.businessOrders?.length ? '/business' : '/'} />
       <main className="screen-main" style={{ paddingTop: 28 }}>
         <div className="stack gap-10">
           <span className="eyebrow">Business Breakfast</span>
