@@ -206,7 +206,12 @@ personalRouter.delete('/me', requireUser, (req, res) => {
     db.prepare('DELETE FROM otp_codes WHERE mobile IN (?, ?)').run(u.mobile, `email:${u.login_email}`);
     db.prepare(`UPDATE users SET mobile = ?, first_name = 'Deleted customer', email = NULL, login_email = NULL WHERE id = ?`).run(`deleted:${req.userId}:${randomBytes(4).toString('hex')}`, req.userId);
     db.prepare('UPDATE orders SET email = NULL WHERE user_id = ?').run(req.userId);
-    db.prepare(`UPDATE order_days SET feedback_note = NULL, address = json_set(address, '$.notes', '') WHERE order_id IN (SELECT id FROM orders WHERE user_id = ?)`).run(req.userId);
+    db.prepare(`UPDATE order_days SET feedback_note = NULL, address = json_remove(json_set(address, '$.notes', ''), '$.mobile') WHERE order_id IN (SELECT id FROM orders WHERE user_id = ?)`).run(req.userId);
+    /* Orders and invoices stay for financial and VAT records, without the customer's contact details. */
+    db.prepare(`UPDATE business_orders SET email = '' WHERE user_id = ?`).run(req.userId);
+    db.prepare(`UPDATE business_days SET delivery = json_set(delivery, '$.contact', '', '$.mobile', '', '$.notes', '') WHERE order_id IN (SELECT id FROM business_orders WHERE user_id = ?)`).run(req.userId);
+    db.prepare('UPDATE customer_issues SET note = NULL, photo = NULL WHERE user_id = ?').run(req.userId);
+    db.prepare('UPDATE analytics_events SET user_id = NULL WHERE user_id = ?').run(req.userId);
   });
   res.clearCookie(SESSION_COOKIE, { path: '/' });
   res.json({ ok: true });

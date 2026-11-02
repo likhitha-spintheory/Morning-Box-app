@@ -77,3 +77,56 @@ test('a morning planned for one of several breakfast types is accepted only with
   assert.equal(ok.status, 201, JSON.stringify(ok.body));
   assert.equal(ok.body.days[0].cfg.preference, 'sweet');
 });
+
+/* FLW-028: "Yes, delete" answered "Request not allowed". The app signs in with a cookie, and the server takes
+   cookie-signed changes only as JSON; the app's DELETE had no body, so it never counted as JSON. */
+test('delete account works from the browser (cookie session), removes personal data and ends sign-in', async () => {
+  const email = 'delete.me@example.com';
+  const otp = await call('POST', '/auth/otp', { email });
+  const v = await fetch(`${base}/auth/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, code: otp.body.devCode, firstName: 'Dana' }) });
+  assert.equal(v.status, 200);
+  const cookie = v.headers.get('set-cookie').split(';')[0];
+  const { user } = await v.json();
+  const asBrowser = (method, path, body) => fetch(base + path, { method, headers: { 'content-type': 'application/json', cookie }, body: body === undefined ? undefined : JSON.stringify(body) });
+
+  assert.equal((await asBrowser('PUT', '/me/profile', savory)).status, 200);
+  const order = await (await asBrowser('POST', '/orders', { days: [dayFor(dates[4], savory)], address, email, contactMobile: '501234567' })).json();
+  const userId = db.prepare('SELECT user_id FROM orders WHERE id = ?').get(order.id).user_id;
+  assert.equal((await asBrowser('DELETE', '/me', {})).status, 409, 'an upcoming morning must be cancelled first');
+  assert.equal((await asBrowser('POST', `/orders/${order.id}/days/${dates[4]}/cancel`, {})).status, 200);
+
+  // exactly what the app now sends: DELETE with an empty JSON body
+  const del = await asBrowser('DELETE', '/me', {});
+  assert.equal(del.status, 200, await del.text());
+  // a bodyless cross-site style request is still refused by the JSON check (protection kept)
+  assert.equal((await fetch(base + '/me/profile', { method: 'PUT', headers: { cookie } })).status, 401, 'session is gone');
+
+  assert.equal((await asBrowser('GET', '/me')).status, 401, 'signed out everywhere');
+  const u = db.prepare('SELECT first_name, email, login_email, mobile FROM users WHERE id = ?').get(userId);
+  assert.equal(u.first_name, 'Deleted customer'); assert.equal(u.email, null); assert.equal(u.login_email, null);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM profiles WHERE user_id = ?').get(userId).n, 0);
+  const kept = db.prepare('SELECT email FROM orders WHERE id = ?').get(order.id);
+  assert.equal(kept.email, null, 'the order is kept for records without the email');
+  assert.equal(JSON.parse(db.prepare('SELECT address FROM order_days WHERE order_id = ?').get(order.id).address).mobile, undefined);
+
+  // signing in again with the same email starts a brand-new, empty account
+  const again = await call('POST', '/auth/otp', { email });
+  const v2 = await call('POST', '/auth/verify', { email, code: again.body.devCode, firstName: 'Dana' });
+  assert.equal(v2.status, 200);
+  assert.equal(v2.body.profile, null);
+  assert.notEqual(db.prepare('SELECT id FROM users WHERE login_email = ?').get(email).id, userId);
+  assert.ok(user);
+});
+
+test('a signed-in browser request without a JSON body is still refused (cross-site protection kept)', async () => {
+  const email = 'csrf.check@example.com';
+  const otp = await call('POST', '/auth/otp', { email });
+  const v = await fetch(`${base}/auth/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, code: otp.body.devCode, firstName: 'Sam' }) });
+  const cookie = v.headers.get('set-cookie').split(';')[0];
+  const form = await fetch(base + '/me', { method: 'DELETE', headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' }, body: 'x=1' });
+  assert.equal(form.status, 403);
+  // what the old app sent for "Yes, delete": no body, so not JSON -> 403 "Request not allowed"
+  const old = await fetch(base + '/me', { method: 'DELETE', headers: { cookie, 'content-type': 'application/json' } });
+  assert.equal(old.status, 403);
+  assert.equal((await old.json()).message, 'Request not allowed.');
+});

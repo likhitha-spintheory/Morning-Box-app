@@ -54,7 +54,9 @@ export const patch = (p, b) => api('PATCH', p, b);
 /** Payment: when the server answers { checkout }, open the payment page; the app comes back to #/pay/<id>.
     Returns a promise that never settles, so the screen keeps showing "Processing…" while the page changes. */
 export const goToPayment = checkout => { window.location.assign(checkout.url); return new Promise(() => {}); };
-export const del = p => api('DELETE', p);
+/* Sent with an empty JSON body: the server accepts signed-in changes only as JSON requests (server/auth.js), and a
+   request without a body never counts as one, so a bare DELETE was refused with "Request not allowed". */
+export const del = (p, b = {}) => api('DELETE', p, b);
 /** Fire-and-forget product analytics for the MVP KPIs (funnel, no-match). Never blocks the screen. */
 export const track = (kind, data) => { api('POST', '/events', { kind, data }).catch(() => {}); };
 
