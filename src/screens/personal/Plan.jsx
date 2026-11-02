@@ -135,9 +135,11 @@ export function ChooseDates() {
           <h1 className="h-display">{source ? 'Which dates should we copy your plan to?' : roDay ? 'Which mornings would you like it again?' : 'Which mornings should we plan?'}</h1>
         </div>
 
-        <div className="row">
+        {/* On the narrowest phones the week controls wrap under the month instead of widening the page
+            (a wider page made the browser zoom out and pushed the Continue button off screen). */}
+        <div className="row" style={{ flexWrap: 'wrap', rowGap: 2 }}>
           <span className="strong" style={{ fontSize: 18, whiteSpace: 'nowrap' }}>{monthName}</span>
-          <span className="row" style={{ gap: 4 }} role="group" aria-label="Week">
+          <span className="row" style={{ gap: 4, marginLeft: 'auto' }} role="group" aria-label="Week">
             <button type="button" className="icon-btn" style={{ border: 0, background: 'none' }} aria-label="Previous week" disabled={week === 0} onClick={() => setWeek(w => w - 1)}><Icon name="back" size={18} stroke={1.8} /></button>
             <span style={{ fontSize: 15.5, whiteSpace: 'nowrap', minWidth: 96, textAlign: 'center' }} aria-live="polite">{weekLabel}</span>
             <button type="button" className="icon-btn" style={{ border: 0, background: 'none' }} aria-label="Next week" disabled={week === weeks.length - 1} onClick={() => setWeek(w => w + 1)}><Icon name="chevron" size={18} stroke={1.8} /></button>
