@@ -35,6 +35,13 @@ export function Dashboard({ data, call, open }) {
 
   return (
     <section className="dash">
+      {support.length > 0 && (
+        <button type="button" className="dash-alert" onClick={() => open('support')}>
+          <Icon name="help" size={20} stroke={1.8} />
+          <span><b>{support.length} new support message{support.length > 1 ? 's' : ''}</b> from customers {support.length > 1 ? 'are' : 'is'} waiting for a reply.</span>
+          <span className="link">View</span>
+        </button>
+      )}
       <div className="dash-tiles">
         {tiles.map(([tone, icon, label, n]) => (
           <button key={label} type="button" className={`dash-tile ${tone}`} onClick={() => open('days')}>

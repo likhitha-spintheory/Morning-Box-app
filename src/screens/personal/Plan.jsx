@@ -127,7 +127,8 @@ export function ChooseDates() {
 
   return (
     <Screen>
-      <TopBar back={firstRun && !source && !roDay ? '/profile/dietary' : -1} close={null}><span className="topbar-title">{source ? 'Use this plan again' : roDay ? 'Reorder a morning' : firstRun ? 'Step 4 of 5' : 'Plan your mornings'}</span></TopBar>
+      {/* A fixed previous screen: browser history could lead back into a morning already open and loop. */}
+      <TopBar back={firstRun && !source && !roDay ? '/profile/dietary' : state.session ? '/today' : '/'} close={null}><span className="topbar-title">{source ? 'Use this plan again' : roDay ? 'Reorder a morning' : firstRun ? 'Step 4 of 5' : 'Plan your mornings'}</span></TopBar>
       {firstRun && <div style={{ paddingTop: 8 }}><SunArc step={4} total={5} /></div>}
       <main className="screen-main" style={{ paddingTop: firstRun ? 24 : 16, gap: 24 }}>
         <div className="stack gap-8">

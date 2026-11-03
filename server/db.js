@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEV } from './env.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const file = process.env.DB_FILE || join(here, '..', 'data', 'morningbox.db');
@@ -346,9 +347,9 @@ CREATE INDEX IF NOT EXISTS idx_bakery_events ON bakery_events(bakery_id, date);
    NULL = only the daily capacity applies. */
 addColumns('bakeries', { window_capacity: 'TEXT' });
 
-/* Launch partner set for the DIFC pilot (MB-BKY-001). Names are placeholders
-   until partner agreements are signed. */
-if (db.prepare('SELECT COUNT(*) AS n FROM bakeries').get().n === 0) {
+/* Placeholder partners for development and tests only. A real server starts with no bakeries: Morning Box adds
+   its partner bakeries in Admin → Bakeries and gives each its access code. */
+if (DEV && db.prepare('SELECT COUNT(*) AS n FROM bakeries').get().n === 0) {
   const ins = db.prepare('INSERT INTO bakeries (name, area, distance_km, daily_capacity, gluten_free_certified) VALUES (?, ?, ?, ?, ?)');
   ins.run('Partner Bakery A', 'DIFC', 0.6, 120, 1);
   ins.run('Partner Bakery B', 'Downtown Dubai', 2.1, 150, 0);

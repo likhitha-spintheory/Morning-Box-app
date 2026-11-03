@@ -51,6 +51,17 @@ export default function Ops() {
     try { const value = await call('GET', path); setData({ key: `${tab}|${date}|${range.from}|${range.to}`, value }); } catch (e) { setError(e.message); if (e.status === 401) save(''); }
   }, [key, tab, date, range, call]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
+  /* Counts on the side navigation: open support messages and open exceptions, refreshed every minute and after
+     every change, so a new customer message is noticed without opening Support. */
+  const [counts, setCounts] = useState({});
+  const loadCounts = useCallback(() => {
+    if (!key) return;
+    Promise.all([call('GET', '/support').catch(() => null), call('GET', '/exceptions').catch(() => null)]).then(([s, e]) => setCounts({
+      support: Array.isArray(s) ? s.filter(x => x.status === 'open').length : 0,
+      exceptions: Array.isArray(e) ? e.filter(x => !x.resolved).length : 0
+    }));
+  }, [key, call]);
+  useEffect(() => { loadCounts(); const t = setInterval(loadCounts, 60000); return () => clearInterval(t); }, [loadCounts, data]);
   /* Run an action, reload the tab; resolves true when it worked (errors show in the banner). */
   const act = async (method, path, body) => {
     setBusy(true); setError('');
@@ -91,6 +102,7 @@ export default function Ops() {
               {items.map(([id, label, icon]) => (
                 <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>
                   <Icon name={icon} size={18} stroke={1.6} /><span>{label}</span>
+                  {counts[id] > 0 && <span className="ops-badge" aria-label={`${counts[id]} open`}>{counts[id]}</span>}
                 </button>
               ))}
             </div>

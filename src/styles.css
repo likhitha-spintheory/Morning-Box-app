@@ -432,12 +432,13 @@ img { max-width: 100%; display: block; }
 .staff-special { color: var(--peach-text); }
 .staff-actions { padding-top: 12px; border-top: 1px solid var(--line-soft); }
 .staff-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 40px 16px; border-radius: 22px; border: 1.5px dashed var(--input); color: var(--muted-gold); text-align: center; }
-.staff-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.staff-steps li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; color: var(--text-4); font-size: 12px; font-weight: 600; }
-.staff-steps li::before { content: ""; position: absolute; top: 10px; left: -50%; right: 50%; height: 2px; background: var(--line); }
+/* One row whatever the number of steps (the bakery has five). */
+.staff-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.staff-steps li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; color: var(--text-4); font-size: 11.5px; font-weight: 600; min-width: 0; }
+.staff-steps li::before { content: ""; position: absolute; top: 9px; left: -50%; right: 50%; height: 2px; background: var(--line); }
 .staff-steps li:first-child::before { display: none; }
 .staff-steps li.done::before, .staff-steps li.now::before, .staff-steps li.bad::before { background: var(--muted-gold); }
-.staff-step-dot { position: relative; z-index: 1; width: 22px; height: 22px; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: var(--white); border: 2px solid var(--line); color: var(--white); }
+.staff-step-dot { position: relative; z-index: 1; width: 20px; height: 20px; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: var(--white); border: 2px solid var(--line); color: var(--white); }
 .staff-steps li.done { color: var(--text-2); }
 .staff-steps li.done .staff-step-dot { background: var(--muted-gold); border-color: var(--muted-gold); }
 .staff-steps li.now { color: var(--espresso); }
@@ -506,6 +507,9 @@ img { max-width: 100%; display: block; }
 .ops-nav button:hover, .ops-signout:hover { background: rgba(251, 247, 239, .08); color: var(--ivory); }
 .ops-nav button.on { background: var(--gold-chip); color: var(--espresso); font-weight: 600; }
 .ops-nav button.on svg { color: var(--muted-gold); }
+.ops-badge { margin-left: auto; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px; background: var(--gold); color: var(--on-gold); font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.dash-alert { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 18px; border: 1px solid var(--warn-bd); border-radius: 16px; background: var(--warn-bg); color: var(--warn); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.dash-alert .link { margin-left: auto; color: var(--espresso); }
 .ops-signout { position: absolute; top: calc(14px + var(--mb-inset-top)); right: 16px; }
 @media (min-width: 900px) {
   .ops-shell { display: grid; grid-template-columns: 260px minmax(0, 1fr); }
@@ -555,3 +559,14 @@ img { max-width: 100%; display: block; }
 .special-facts dd { margin: 0; color: var(--espresso); }
 .special-facts ul { margin: 0; padding-left: 18px; }
 @media (max-width: 400px) { .special-facts { margin-left: 0; grid-template-columns: 1fr; gap: 2px; } .special-facts dd { margin-bottom: 8px; } }
+
+/* Bakery View: what to do now, and the problem section on each order. */
+.staff-next { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-radius: 18px; background: var(--gold-wash); border: 1px solid var(--gold-soft); }
+.staff-next-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.staff-next-steps li { padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--white); color: var(--text-4); border: 1px solid var(--line); }
+.staff-next-steps li.done { color: var(--ok); border-color: var(--ok-bd); background: var(--ok-bg); }
+.staff-next-steps li.now { color: var(--on-gold); background: var(--gold-soft); border-color: var(--gold); }
+.staff-problem { border-top: 1px dashed var(--line); padding-top: 8px; }
+.staff-problem summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-3); min-height: 36px; display: flex; align-items: center; }
+.staff-problem[open] { display: flex; flex-direction: column; gap: 8px; }
+.staff-problem[open] summary { color: var(--espresso); }

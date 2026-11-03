@@ -118,7 +118,14 @@ export function Today() {
   const nextOpen = planningWeeks()[0].find(d => !closedOn(config, d.iso) && !allDays(state.orders).some(x => x.date === d.iso && !x.cancelled));
   const usualContext = nextOpen && (allDays(state.orders).filter(d => !d.cancelled && dateInfo(d.date).wd === nextOpen.wd).sort((a, b) => b.date.localeCompare(a.date))[0]?.cfg?.context || 'regular');
   const suggestion = nextOpen && state.profileDone ? recommendDay(state.profile, usualContext) : null;
+  /* With several breakfast types the customer picks one for that morning (client feedback REC-021), so the
+     shortcut opens the morning (usual morning type preselected) instead of jumping to a breakfast. */
+  const askType = (state.profile.preferences || []).length > 1;
   const startWith = which => {
+    if (askType) {
+      set(s => { s.plan = { dates: [nextOpen.iso], days: { [nextOpen.iso]: { context: usualContext } } }; });
+      return nav(`/plan/day/${nextOpen.iso}/context`);
+    }
     const options = suggestion;
     set(s => { s.plan = { dates: [nextOpen.iso], days: { [nextOpen.iso]: { context: usualContext, which, options, cfg: structuredClone(options[which]), saved: false } } }; });
     nav(`/plan/day/${nextOpen.iso}/box`);
@@ -191,11 +198,17 @@ export function Today() {
         {suggestion && !suggestion.none && !inProgress && (
           <section className="card stack gap-12" style={{ padding: 18 }} aria-label="Your Morning Box">
             <span className="eyebrow row" style={{ justifyContent: 'flex-start', gap: 8 }}><Icon name="sparkle" size={16} stroke={1.6} color="var(--espresso)" />Your Morning Box · {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</span>
-            <span className="strong" style={{ fontSize: 18 }}>{boxName(suggestion.primary)}</span>
-            <span className="help" style={{ fontSize: 15 }}>{contextLabel(usualContext)} · AED {dayPrice(suggestion.primary, state.profile).total}</span>
-            <button type="button" className="btn" onClick={() => startWith('primary')}>Order for {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</button>
+            {askType ? <>
+              <span className="strong" style={{ fontSize: 18 }}>Choose your breakfast for {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</span>
+              <span className="help" style={{ fontSize: 15 }}>Usually a {contextLabel(usualContext)}. Pick what you’d prefer that morning and we’ll recommend your box.</span>
+              <button type="button" className="btn" onClick={() => startWith('primary')}>Plan {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</button>
+            </> : <>
+              <span className="strong" style={{ fontSize: 18 }}>{boxName(suggestion.primary)}</span>
+              <span className="help" style={{ fontSize: 15 }}>{contextLabel(usualContext)} · AED {dayPrice(suggestion.primary, state.profile).total}</span>
+              <button type="button" className="btn" onClick={() => startWith('primary')}>Order for {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</button>
+            </>}
             <div className="row">
-              {suggestion.alternative ? <button type="button" className="btn-text" onClick={() => startWith('alternative')}>Another option: {boxName(suggestion.alternative)}</button> : <span />}
+              {suggestion.alternative && !askType ? <button type="button" className="btn-text" onClick={() => startWith('alternative')}>Another option: {boxName(suggestion.alternative)}</button> : <span />}
               <Link to="/me" className="link">Edit preferences</Link>
             </div>
           </section>

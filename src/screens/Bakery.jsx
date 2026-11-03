@@ -15,7 +15,10 @@ const CONDITIONS = ['Item Unavailable', 'Reduced Capacity', 'Special Requirement
 const small = { width: 'auto', padding: '0 14px', minHeight: 40 };
 const VIEWS = [['plan', 'Production plan', 'doc'], ['orders', 'Orders', 'box'], ['labels', 'Labels', 'bookmark'], ['conditions', 'Availability', 'cal']];
 const STEPS = ['Confirmed', 'In Preparation', 'Ready', 'Out for Delivery', 'Delivered'];
+/* Shown to the bakery in MB-BKY-001 §7 wording: accepting the plan accepts its orders. */
+const STEP_LABELS = ['Accepted', 'In Preparation', 'Ready', 'Out for Delivery', 'Delivered'];
 const stepOf = o => (o.stage >= 3 ? 4 : o.state === 'Handed Over' ? 3 : Math.max(0, STEPS.indexOf(o.state)));
+const notStarted = o => (!o.state || o.state === 'Confirmed') && !o.safetyHold && !o.safetyCheck;
 const dayTitle = iso => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
 export default function Bakery() {
@@ -118,10 +121,11 @@ export default function Bakery() {
             ['croissant', 'Boxes to make', plan.boxes],
             ['shieldAlert', 'Special boxes', plan.special || 0, plan.special ? 'warn' : ''],
             ['check', 'Delivered', `${delivered} / ${plan.packing.length}`, plan.packing.length && delivered === plan.packing.length ? 'ok' : ''],
-            ['doc', 'Plan', plan.status?.status || (plan.packing.length ? 'To confirm' : '—'), plan.status?.status === 'Confirmed' ? 'ok' : plan.packing.length ? 'warn' : '']
+            ['doc', 'Plan', plan.status?.status === 'Confirmed' ? 'Accepted' : plan.status?.status || (plan.packing.length ? 'To accept' : '—'), plan.status?.status === 'Confirmed' ? 'ok' : plan.packing.length ? 'warn' : '']
           ]} />
         </div>
       )}
+      {plan && view !== 'labels' && <NextStep plan={plan} view={view} setView={setView} />}
       {!plan ? <p className="help">Loading…</p> : <>
         {view === 'plan' && (
           <ProductionPlan plan={plan} date={date}>
@@ -140,6 +144,42 @@ export default function Bakery() {
   );
 }
 
+/* What the bakery should do next, in plain words: accept the orders, prepare, mark ready, send out (MB-BKY-001 §1, §7). */
+function NextStep({ plan, view, setView }) {
+  const all = plan.packing;
+  if (!all.length) return null;
+  const accepted = plan.status?.status === 'Confirmed';
+  const count = f => all.filter(f).length;
+  const toStart = count(notStarted);
+  const preparing = count(o => ['In Preparation', 'Delayed'].includes(o.state));
+  const ready = count(o => o.state === 'Ready');
+  const out = count(o => o.state === 'Handed Over' && o.stage < 3);
+  const done = count(o => o.stage >= 3);
+  const held = count(o => o.safetyHold || o.safetyCheck);
+  const n = (x, one, many) => `${x} ${x === 1 ? one : many}`;
+  const [step, text, target] =
+    plan.status?.status === 'Issue Reported' ? [1, 'You reported an issue with this plan. Morning Box will contact you.', 'plan']
+    : !accepted ? [1, `Accept ${n(all.length, 'order', 'orders')}: check the production plan, then tap “Accept these orders”.`, 'plan']
+    : toStart ? [2, `Start preparing ${n(toStart, 'order', 'orders')} so each is ready by its Ready-by time.`, 'orders']
+    : preparing ? [3, `${n(preparing, 'order is', 'orders are')} in preparation: do the final check and mark ${preparing === 1 ? 'it' : 'them'} ready.`, 'orders']
+    : ready ? [4, `${n(ready, 'order is', 'orders are')} ready: count the boxes and send ${ready === 1 ? 'it' : 'them'} out for delivery.`, 'orders']
+    : out ? [4, `${n(out, 'order is', 'orders are')} out for delivery: mark each one delivered.`, 'orders']
+    : done === all.length ? [5, `All ${n(all.length, 'order', 'orders')} delivered. Nothing left for this date.`, null]
+    : [2, 'Check the orders below.', 'orders'];
+  return (
+    <section className="staff-next no-print" aria-label="What to do now">
+      <ol className="staff-next-steps">
+        {['Accept orders', 'Prepare', 'Mark ready', 'Send out'].map((l, i) => <li key={l} className={i + 1 < step ? 'done' : i + 1 === step ? 'now' : ''}>{i + 1}. {l}</li>)}
+      </ol>
+      <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <span className="strong" style={{ fontSize: 16 }}>{text}</span>
+        {target && target !== view && <button type="button" className="btn-secondary" style={small} onClick={() => setView(target)}>{target === 'plan' ? 'Open the production plan' : 'Open orders'}</button>}
+      </div>
+      {held > 0 && <span className="xs" style={{ color: 'var(--err)' }}>{n(held, 'order is', 'orders are')} on a safety check: don’t prepare {held === 1 ? 'it' : 'them'} until Morning Box clears it.</span>}
+    </section>
+  );
+}
+
 /** Confirm the production plan or report an issue (MB-OPS-001 §4). */
 function PlanConfirm({ plan, date, issues, busy, act }) {
   const [issue, setIssue] = useState({ reason: '', note: '' });
@@ -147,8 +187,11 @@ function PlanConfirm({ plan, date, issues, busy, act }) {
   return (
     <div className="stack gap-8 no-print">
       {plan.status?.status === 'Confirmed'
-        ? <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2} /><span>You confirmed this plan.</span></div>
-        : <button type="button" className="btn" style={{ width: 'auto', padding: '0 24px', alignSelf: 'flex-start' }} disabled={busy} onClick={() => act('POST', '/plan/confirm', { date })}>Confirm production plan</button>}
+        ? <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2} /><span>You accepted these {plan.packing.length} orders. Prepare them from the Orders page on the morning.</span></div>
+        : <>
+          <span className="sm">Check the plan above. Accepting commits you to prepare every order on it to the Morning Box standard. If something can’t be made, report it below instead.</span>
+          <button type="button" className="btn" style={{ width: 'auto', padding: '0 24px', alignSelf: 'flex-start' }} disabled={busy} onClick={() => act('POST', '/plan/confirm', { date })}>Accept these {plan.packing.length} orders</button>
+        </>}
       {plan.status?.status === 'Issue Reported' && <span className="xs">Issue reported: {plan.status.reason}{plan.status.note ? ` (${plan.status.note})` : ''}. Morning Box will contact you.</span>}
       <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
         <select className="input" style={{ width: 260 }} aria-label="Issue" value={issue.reason} onChange={e => setIssue(x => ({ ...x, reason: e.target.value }))}><option value="">Report an issue…</option>{issues.map(k => <option key={k}>{k}</option>)}</select>
@@ -170,7 +213,7 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
   const [fail, setFail] = useState({});
   const allChecked = k => Object.keys(checks).every(c => qc[k]?.[c]);
   /* Orders waiting on a safety check are never started (MB-BKY-001 §3). */
-  const pending = plan.packing.filter(o => (!o.state || o.state === 'Confirmed') && !o.safetyHold && !o.safetyCheck);
+  const pending = plan.packing.filter(notStarted);
   return (
     <section className="stack gap-12">
       <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}><span className="strong">{plan.packing.length} orders · {plan.boxes} boxes</span>
@@ -187,9 +230,9 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
           <article key={k} className={`staff-card${blocked ? ' risk' : o.lines.some(l => l.special.length) ? ' special' : ''}`}>
             <div className="staff-card-head">
               <span className="stack" style={{ gap: 2 }}><b className="staff-ref">{o.ref}{o.shared ? ` · your part: ${o.shared}` : ''}</b><span className="xs">Ready by <b>{o.readyBy}</b> · {o.window}</span></span>
-              <span className={`status ${blocked || ['Delayed', 'Unable to Fulfil'].includes(o.state) || o.deliveryState === 'Failed' ? 'off' : o.state === 'Ready' || gone ? 'ok' : o.state === 'In Preparation' ? 'prep' : 'done'}`}>{done ? 'Delivered' : o.deliveryState === 'Failed' ? 'Delivery failed' : gone ? (o.deliveryState ? 'Out for delivery' : 'Your part is out') : o.state || 'Not started'}</span>
+              <span className={`status ${blocked || ['Delayed', 'Unable to Fulfil'].includes(o.state) || o.deliveryState === 'Failed' ? 'off' : o.state === 'Ready' || gone ? 'ok' : o.state === 'In Preparation' ? 'prep' : 'done'}`}>{done ? 'Delivered' : o.deliveryState === 'Failed' ? 'Delivery failed' : gone ? (o.deliveryState ? 'Out for delivery' : 'Your part is out') : (o.state === 'Confirmed' ? 'Accepted' : o.state) || 'Not started'}</span>
             </div>
-            <Stepper steps={STEPS} current={stepOf(o)} bad={['Delayed', 'Unable to Fulfil'].includes(o.state) || o.deliveryState === 'Failed'} />
+            <Stepper steps={STEP_LABELS} current={stepOf(o)} bad={['Delayed', 'Unable to Fulfil'].includes(o.state) || o.deliveryState === 'Failed'} />
             {o.safetyHold && <div className="banner-err" role="alert"><Icon name="shieldAlert" size={18} stroke={2} /><b>SAFETY HOLD: do not prepare until Morning Box confirms.</b></div>}
             {!o.safetyHold && o.safetyCheck && <div className="banner-err" role="alert"><Icon name="shieldAlert" size={18} stroke={2} /><b>ALLERGY CHECK PENDING: Morning Box is confirming the customer’s allergy note. Do not prepare until it is cleared.</b></div>}
             <div className="staff-lines">
@@ -220,28 +263,42 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
                 <button type="button" className="btn-text" disabled={busy || !eta[k]?.trim()} onClick={() => act('POST', `/days/${k}/late`, { eta: eta[k].trim() })}>Running late? Tell the customer</button>
               </div>
             )}
-            {!gone && (
-              <div className="row staff-actions" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
-                {o.state !== 'In Preparation' && o.state !== 'Ready' && <button type="button" className="btn-text" disabled={busy || blocked} onClick={() => act('POST', path, { state: 'In Preparation' })}>In preparation</button>}
-                {o.state !== 'Ready' && <>
-                  {/* Final check before Ready (MB-BKY-001 §4). */}
-                  <span className="row" style={{ gap: 10, flexWrap: 'wrap', justifyContent: 'flex-start' }}>{Object.entries(checks).map(([id, label]) => (
+            {!gone && !blocked && o.state !== 'Unable to Fulfil' && (
+              <div className="staff-actions stack gap-10">
+                {/* One next step at a time: Start preparing → final check & Mark ready → count & Send out (MB-BKY-001 §4, §7). */}
+                {(!o.state || o.state === 'Confirmed') && (
+                  <button type="button" className="btn" style={small} disabled={busy} onClick={() => act('POST', path, { state: 'In Preparation' })}>Start preparing</button>
+                )}
+                {(o.state === 'In Preparation' || o.state === 'Delayed') && <>
+                  <span className="label">Final check before it’s ready</span>
+                  <span className="row" style={{ gap: 12, flexWrap: 'wrap', justifyContent: 'flex-start' }}>{Object.entries(checks).map(([id, label]) => (
                     <label key={id} className="row xs" style={{ gap: 6 }}><input type="checkbox" checked={!!qc[k]?.[id]} onChange={e => setQc(x => ({ ...x, [k]: { ...(x[k] || {}), [id]: e.target.checked } }))} />{label}</label>
                   ))}</span>
-                  <button type="button" className="btn-secondary" style={small} disabled={busy || blocked || !allChecked(k)} onClick={() => act('POST', path, { state: 'Ready', qc: qc[k] })}>Ready</button>
+                  <button type="button" className="btn" style={small} disabled={busy || !allChecked(k)} onClick={() => act('POST', path, { state: 'Ready', qc: qc[k] })}>{allChecked(k) ? 'Mark ready' : 'Tick every check to mark it ready'}</button>
                 </>}
                 {o.state === 'Ready' && <>
-                  <b style={{ fontSize: 14 }}>Out for delivery. Count:</b>
-                  <input className="input" style={{ width: 80, minHeight: 40 }} inputMode="numeric" placeholder="Boxes" aria-label="Boxes" value={c.boxes} onChange={e => setCount(x => ({ ...x, [k]: { ...c, boxes: e.target.value } }))} />
-                  <input className="input" style={{ width: 90, minHeight: 40 }} inputMode="numeric" placeholder="Special" aria-label="Special boxes" value={c.special} onChange={e => setCount(x => ({ ...x, [k]: { ...c, special: e.target.value } }))} />
-                  <button type="button" className="btn-secondary" style={small} disabled={busy || blocked || c.boxes === '' || c.special === ''} onClick={() => act('POST', `/days/${k}/handover`, { boxes: Number(c.boxes), specialBoxes: Number(c.special) })}>Out for delivery</button>
+                  <span className="label">Count the boxes as they leave</span>
+                  <span className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
+                    <input className="input" style={{ width: 110, minHeight: 40 }} inputMode="numeric" placeholder="Boxes" aria-label="Boxes" value={c.boxes} onChange={e => setCount(x => ({ ...x, [k]: { ...c, boxes: e.target.value } }))} />
+                    <input className="input" style={{ width: 130, minHeight: 40 }} inputMode="numeric" placeholder="Special boxes" aria-label="Special boxes" value={c.special} onChange={e => setCount(x => ({ ...x, [k]: { ...c, special: e.target.value } }))} />
+                    <button type="button" className="btn" style={small} disabled={busy || c.boxes === '' || c.special === ''} onClick={() => act('POST', `/days/${k}/handover`, { boxes: Number(c.boxes), specialBoxes: Number(c.special) })}>Send out for delivery</button>
+                  </span>
                 </>}
-                <input className="input" style={{ width: 90, minHeight: 40 }} inputMode="numeric" placeholder="Min" aria-label="Delay in minutes" value={delay[k] || ''} onChange={e => setDelay(x => ({ ...x, [k]: e.target.value }))} />
-                <button type="button" className="btn-text" disabled={busy || !delay[k]} onClick={() => act('POST', path, { state: 'Delayed', delayMinutes: Number(delay[k]) })}>Report delay</button>
-                <select className="input" style={{ width: 230, minHeight: 40 }} aria-label="Why it can’t be made" value={reason[k] || ''} onChange={e => setReason(x => ({ ...x, [k]: e.target.value }))}><option value="">Why can’t it be made?</option>{reasons.map(x => <option key={x}>{x}</option>)}</select>
-                <button type="button" className="btn-text" disabled={busy || !reason[k]} onClick={() => act('POST', path, { state: 'Unable to Fulfil', reason: reason[k] })}>Report</button>
+                <details className="staff-problem">
+                  <summary>Something wrong with this order?</summary>
+                  <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
+                    <input className="input" style={{ width: 130, minHeight: 40 }} inputMode="numeric" placeholder="Minutes late" aria-label="Delay in minutes" value={delay[k] || ''} onChange={e => setDelay(x => ({ ...x, [k]: e.target.value }))} />
+                    <button type="button" className="btn-secondary" style={small} disabled={busy || !delay[k]} onClick={() => act('POST', path, { state: 'Delayed', delayMinutes: Number(delay[k]) })}>Report a delay</button>
+                  </div>
+                  <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
+                    <select className="input" style={{ width: 260, minHeight: 40 }} aria-label="Why it can’t be made" value={reason[k] || ''} onChange={e => setReason(x => ({ ...x, [k]: e.target.value }))}><option value="">Why can’t it be made?</option>{reasons.map(x => <option key={x}>{x}</option>)}</select>
+                    <button type="button" className="btn-secondary" style={small} disabled={busy || !reason[k]} onClick={() => act('POST', path, { state: 'Unable to Fulfil', reason: reason[k] })}>Report unable to fulfil</button>
+                  </div>
+                  <span className="xs">Morning Box decides what happens next (another bakery, or a refund). Don’t change the order yourself.</span>
+                </details>
               </div>
             )}
+            {o.state === 'Unable to Fulfil' && <span className="xs">You reported this order can’t be made. Morning Box is handling it.</span>}
           </article>
         );
       })}
