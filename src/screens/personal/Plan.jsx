@@ -15,7 +15,7 @@ import {
 import { usePruneExpired } from '../../state/orders.jsx';
 import { BoxEditor, FlavourPicker, LoafPicker, offeredPastries } from '../../components/BoxEditor.jsx';
 import { addonGroups, applyUserSwaps } from '../../domain/engine.js';
-import { PRICING, cutoffFor } from '../../domain/standards.js';
+import { PRICING, cutoffFor, glutenFreeBlocked, GLUTEN_FREE_MESSAGE } from '../../domain/standards.js';
 
 const CONTEXT_ICON = { active: 'bolt', regular: 'brief', busy: 'clock', relaxed: 'coffee' };
 /* MB-PER-001 §2 — the purpose of each Daily Context, word for word. */
@@ -133,6 +133,11 @@ export function ChooseDates() {
         <div className="stack gap-8">
           <span className="eyebrow">{source || roDay ? 'Choose new dates' : firstRun ? 'Step 4 of 5 · Choose your mornings' : 'Choose your mornings'}</span>
           <h1 className="h-display">{source ? 'Which dates should we copy your plan to?' : roDay ? 'Which mornings would you like it again?' : 'Which mornings should we plan?'}</h1>
+          {/* A profile saved with Gluten-Free while it isn't available (client feedback PRD-004). */}
+          {glutenFreeBlocked(state.profile.dietary) && (
+            <div className="banner-warn" role="alert"><Icon name="alert" size={18} stroke={2} color="var(--warn)" style={{ flex: 'none' }} />
+              <span>{GLUTEN_FREE_MESSAGE} <Link to="/profile/dietary?edit=me" className="link" style={{ color: 'inherit' }}>Update my dietary needs</Link></span></div>
+          )}
         </div>
 
         {/* On the narrowest phones the week controls wrap under the month instead of widening the page
@@ -190,7 +195,7 @@ export function ChooseDates() {
         )}
       </main>
       <Footer>
-        <button className="btn" disabled={!picked.length} onClick={proceed}>
+        <button className="btn" disabled={!picked.length || glutenFreeBlocked(state.profile.dietary)} onClick={proceed}>
           {!picked.length ? 'Choose at least one morning'
             : source || roDay ? <Go>Copy to these dates</Go>
               : <Go>{picked.length > 1 ? `Plan ${dayComma(picked.find(d => !plan.days[d]?.saved) || picked[0])} first` : `Plan ${dayComma(picked[0])}`}</Go>}

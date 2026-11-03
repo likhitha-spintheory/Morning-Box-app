@@ -268,6 +268,9 @@ export function Company({ data, act, busy, call }) {
   const [cost, setCost] = useState('0');
   const [areas, setAreas] = useState(null);
   useEffect(() => { call('GET', '/admin/areas').then(d => setAreas(d.areas)).catch(() => {}); }, [call]);
+  /* Client feedback PRD-004: gluten-free stays off until an approved gluten-free partner bakery and verified items exist. */
+  const [gf, setGf] = useState(null);
+  useEffect(() => { call('GET', '/admin/gluten-free').then(d => setGf(d.available)).catch(() => {}); }, [call]);
   useEffect(() => { call('GET', '/admin/library').then(setLib).catch(() => {}); call('GET', '/admin/delivery').then(d => { setCap(d.capacity); setCost(String(d.costPerDelivery)); }).catch(() => {}); }, [call]);
   const set = (group, k) => e => setV(x => ({ ...x, [group]: { ...x[group], [k]: e.target.value } }));
   return (
@@ -297,6 +300,15 @@ export function Company({ data, act, busy, call }) {
         ))}</div>
         <button type="button" className="btn-secondary" style={{ width: 'auto', alignSelf: 'flex-start' }} disabled={busy || !areas.some(a => a.active)}
           onClick={() => act('PUT', '/admin/areas', { active: areas.filter(a => a.active).map(a => a.id) })}>Save service areas</button>
+      </>}
+      {gf !== null && <>
+        <h2 className="h3">Gluten-free breakfasts</h2>
+        <span className="xs">While this is off, customers who choose Gluten-Free (personal and business) are asked to deselect it and can’t order. Switch it on only once an approved gluten-free partner bakery and verified menu items are in place.</span>
+        <label className="row xs" style={{ gap: 8, justifyContent: 'flex-start' }}>
+          <input type="checkbox" checked={gf} onChange={e => setGf(e.target.checked)} /><b>Gluten-free breakfasts are available</b>
+        </label>
+        <button type="button" className="btn-secondary" style={{ width: 'auto', alignSelf: 'flex-start' }} disabled={busy}
+          onClick={() => act('PUT', '/admin/gluten-free', { available: gf })}>Save gluten-free setting</button>
       </>}
       {cap && <>
         <h2 className="h3">Delivery capacity per window (boxes)</h2>

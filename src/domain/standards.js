@@ -256,6 +256,12 @@ export function applyAreas(list) {
   const ok = Array.isArray(list) ? SERVICE_AREAS.map(a => a.id).filter(id => list.includes(id)) : [];
   if (ok.length) ACTIVE_AREAS.splice(0, ACTIVE_AREAS.length, ...ok);
 }
+/* Client feedback PRD-004 (Gluten-Free – MVP adjustment): the option stays visible, but until Morning Box has an
+   approved gluten-free partner bakery and verified items (switched on in Admin → Company) it can't be ordered. */
+export const GLUTEN_FREE = { available: false };
+export const applyGlutenFree = v => { if (typeof v === 'boolean') GLUTEN_FREE.available = v; };
+export const GLUTEN_FREE_MESSAGE = 'Gluten-free breakfasts are not yet available on the Morning Box menu. We’re working to introduce them soon. Please deselect Gluten-Free to continue with other breakfast options.';
+export const glutenFreeBlocked = (dietary = []) => !GLUTEN_FREE.available && dietary.includes('glutenFree');
 /** The area to store for a delivery: the one asked for when active; with one active area, that one. */
 export const areaFor = requested => (ACTIVE_AREAS.includes(requested) ? requested : ACTIVE_AREAS.length === 1 ? ACTIVE_AREAS[0] : null);
 export const areasText = () => ACTIVE_AREAS.join(' · ');

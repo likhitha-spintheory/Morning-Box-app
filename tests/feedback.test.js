@@ -185,3 +185,29 @@ test('a new support message is emailed to SUPPORT_NOTIFY_EMAIL and listed for op
     globalThis.fetch = real; delete process.env.RESEND_API_KEY; delete process.env.EMAIL_FROM; delete process.env.SUPPORT_NOTIFY_EMAIL;
   }
 });
+
+/* Client feedback PRD-004: Gluten-Free stays visible but can't be ordered until switched on in Admin. */
+test('gluten-free is refused (personal and business) until switched on in Admin', async () => {
+  const opsH = async (m, p, body) => { const r = await fetch(base + '/ops' + p, { method: m, headers: { 'content-type': 'application/json', 'x-ops-key': 'dev-ops-key' }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json() }; };
+  assert.equal((await opsH('GET', '/admin/gluten-free')).body.available, false, 'off by default');
+  const cfg = await call('GET', '/config');
+  assert.equal(cfg.body.glutenFree, false);
+
+  const u = await signIn('502220099');
+  const gf = { eatingStyle: 'flexible', preferences: ['bakery'], dietary: ['glutenFree'], allergies: [] };
+  await call('PUT', '/me/profile', gf, u);
+  const r = recommendDay(gf, 'regular');
+  if (!r.none) {
+    const o = await call('POST', '/orders', { days: [{ date: dates[5], context: 'regular', recipeId: r.primary.recipeId, components: r.primary.components, size: 'regular', addons: [], window: 'w2' }], address }, u);
+    assert.equal(o.status, 400); assert.equal(o.body.error, 'gluten_free_unavailable');
+    assert.match(o.body.message, /Gluten-free breakfasts are not yet available/);
+  }
+  const q = await call('POST', '/business/quote', { days: [{ date: dates[5], window: 'w2', people: 2, lines: [], specials: [{ dietary: ['glutenFree'], allergies: [], qty: 2 }] }] }, u);
+  assert.equal(q.body.error, 'gluten_free_unavailable');
+
+  assert.equal((await opsH('PUT', '/admin/gluten-free', { available: true })).body.available, true);
+  assert.equal((await call('GET', '/config')).body.glutenFree, true);
+  const q2 = await call('POST', '/business/quote', { days: [{ date: dates[5], window: 'w2', people: 2, lines: [], specials: [{ dietary: ['glutenFree'], allergies: [], qty: 2 }] }] }, u);
+  assert.notEqual(q2.body.error, 'gluten_free_unavailable');
+  await opsH('PUT', '/admin/gluten-free', { available: false });
+});

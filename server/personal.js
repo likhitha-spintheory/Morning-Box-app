@@ -19,7 +19,7 @@ import { openSafetyCheck } from './days.js';
 import { pricingSnapshot } from '../src/domain/standards.js';
 import { LIBRARY_SETTINGS } from '../src/domain/library.js';
 import { menuSnapshot } from '../src/domain/menu.js';
-import { ACTIVE_AREAS } from '../src/domain/standards.js';
+import { ACTIVE_AREAS, GLUTEN_FREE } from '../src/domain/standards.js';
 import { notify, listNotifications, markRead, alreadyNotified } from './notify.js';
 import { recommend } from '../src/domain/engine.js';
 import { boxName, componentName, sizeLabel, windowLabel, extrasText } from '../src/domain/app.js';
@@ -111,7 +111,8 @@ personalRouter.get('/config', (_req, res) => {
     /* Which sign-in codes can be delivered, so the app only offers those (development shows codes in the server log). */
     signIn: { email: DEV || mailConfigured(), mobile: DEV || whatsappConfigured() },
     /* Real map on order tracking (Google Maps Embed API: free, key restricted to this site in Google Cloud). */
-    maps: process.env.GOOGLE_MAPS_EMBED_KEY ? { embedKey: process.env.GOOGLE_MAPS_EMBED_KEY } : null });
+    maps: process.env.GOOGLE_MAPS_EMBED_KEY ? { embedKey: process.env.GOOGLE_MAPS_EMBED_KEY } : null,
+    glutenFree: GLUTEN_FREE.available });
 });
 
 /** Product analytics (Master Plan §15): the app reports funnel steps and no-match results. */

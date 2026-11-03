@@ -8,7 +8,7 @@ export const emptyPlan = () => ({ dates: [], days: {} });
 export const emptyBusiness = () => ({
   people: 20, hasSpecial: null, specials: [], mode: 'mix', lines: [],
   dates: [], sameForAll: true, perDay: {},
-  delivery: { company: '', building: '', office: '', area: 'DIFC', contact: '', mobile: '', notes: '', window: null },
+  delivery: { company: '', building: '', office: '', area: '', contact: '', mobile: '', notes: '', window: null },
   invoice: { wanted: false, billingName: '', address: '', trn: '', po: '' }
 });
 /** Any business draft (saved in the browser, or copied from a previous order) in the shape the screens expect:
@@ -42,7 +42,7 @@ const initial = () => ({
   session: null,
   plan: emptyPlan(),
   user: null,
-  delivery: { sameForAll: null, address: { building: '', unit: '', area: 'DIFC', handover: 'reception', notes: '' }, window: null, perDay: {} },
+  delivery: { sameForAll: null, address: { building: '', unit: '', area: '', handover: 'reception', notes: '' }, window: null, perDay: {} },
   orders: [],
   settings: { coffeeReminder: true },
   business: emptyBusiness(),

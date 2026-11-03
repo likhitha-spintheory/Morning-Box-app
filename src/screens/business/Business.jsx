@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import {
-  Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch, InfoTip, AreaField, PhotoPicker
+  Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch, InfoTip, AreaField, areaChosen, PhotoPicker
 } from '../../components/ui.jsx';
 import { useStore, emptyBusiness, normalizeBusiness } from '../../state/store.jsx';
 import { get, post, patch, del, download, applySession, ownerOf, setToken, resetPersonal, newIdempotencyKey, track, goToPayment, signIn } from '../../api.js';
 import { pastedCode, enteredDigits, Agreement } from '../personal/Checkout.jsx';
 import { useConfig, closedOn } from '../../state/config.js';
+import { Loading } from '../../state/orders.jsx';
 
 const SHOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_DEMO === '1';
 import { businessModels, morningBoxMix, resolveSpecial, priceBusinessDay } from '../../domain/engine.js';
 import { recipeById, describe, priceLevel } from '../../domain/recipes.js';
 import { COMPONENTS } from '../../domain/library.js';
-import { DIETARY, ALLERGENS, DELIVERY_WINDOWS, SIZE_ADJUSTMENT, PRICE_LEVELS, areaFor } from '../../domain/standards.js';
+import { DIETARY, ALLERGENS, DELIVERY_WINDOWS, SIZE_ADJUSTMENT, PRICE_LEVELS, areaFor, glutenFreeBlocked, GLUTEN_FREE_MESSAGE } from '../../domain/standards.js';
 import {
   dateInfo, planningWeeks, cutoffLabel, isBeforeCutoff, windowLabel, componentName, dietLabel, allergyLabel,
   sizeLabel, todayIso, serverDateIso, componentPortion, containsAllergens
@@ -113,9 +114,10 @@ function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
           <div className="chips">{DIETARY.map(x => <Chip key={x.id} on={adding.special.dietary.includes(x.id)} onClick={() => toggleNeed('dietary', x.id)}>{x.label}</Chip>)}</div>
           <span className="label">Allergens</span>
           <div className="chips">{ALLERGENS.map(x => <Chip key={x.id} on={adding.special.allergies.includes(x.id)} onClick={() => toggleNeed('allergies', x.id)}>{x.label}</Chip>)}</div>
-          {resolved && !resolved.resolved && <Err>No approved breakfast can safely meet this combination yet.</Err>}
+          {glutenFreeBlocked(adding.special.dietary) ? <Err>{GLUTEN_FREE_MESSAGE}</Err>
+            : resolved && !resolved.resolved && <Err>No approved breakfast can safely meet this combination yet.</Err>}
           <div className="row"><button type="button" className="link" onClick={() => setAdding(null)}>Cancel</button>
-            <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} disabled={!resolved?.resolved}
+            <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} disabled={!resolved?.resolved || glutenFreeBlocked(adding.special.dietary)}
               onClick={() => {
                 const { index, special } = adding;
                 /* Only the requirements change; quantity and size stay, and the safe breakfast is re-resolved from them. */
@@ -234,12 +236,14 @@ export function putOrder(s, order) {
 function useSyncOrders() {
   const { state, set } = useStore();
   const signedIn = !!state.session;
+  const [synced, setSynced] = useState(false);
   useEffect(() => {
     if (!signedIn) return undefined;
     let live = true;
-    get('/business/orders').then(res => { if (live && Array.isArray(res)) set(s => { s.businessOrders = res; }); }).catch(() => {});
+    get('/business/orders').then(res => { if (live && Array.isArray(res)) set(s => { s.businessOrders = res; }); }).catch(() => {}).finally(() => { if (live) setSynced(true); });
     return () => { live = false; };
   }, [signedIn, set]);
+  return synced;
 }
 
 /** Server invoice when signed in; local demo invoice otherwise (or if the server can't be reached). */
@@ -434,7 +438,7 @@ export function Specials() {
   const sq = b.hasSpecial ? sum(specials) : 0;
   const general = b.people - sq;
   const resolved = specials.map(s => resolveSpecial(s, 'regular'));
-  const groupErr = s => !(s.dietary.length + s.allergies.length) ? 'Choose at least one requirement' : s.qty < 1 ? 'Add at least one breakfast' : null;
+  const groupErr = s => !(s.dietary.length + s.allergies.length) ? 'Choose at least one requirement' : s.qty < 1 ? 'Add at least one breakfast' : glutenFreeBlocked(s.dietary) ? GLUTEN_FREE_MESSAGE : null;
   const overLimit = sq > b.people;
   const ok = b.hasSpecial === false ||
     (b.hasSpecial === true && specials.length > 0 && !overLimit && specials.every((s, i) => !groupErr(s) && resolved[i].resolved));
@@ -485,7 +489,7 @@ export function Specials() {
                     {/* Master Plan §16: a safe no-match, with a way to reach us; recorded as a business inquiry (§15). */}
                     <Link to={`/help?topic=business&note=${encodeURIComponent(`Special Breakfast for: ${specialText(s)}`)}`} className="link" onClick={() => track('business_inquiry', { dietary: s.dietary, allergies: s.allergies })}>Ask our team about this requirement</Link>
                   </>}
-                  {touched && err && <Err>{err}</Err>}
+                  {(touched || glutenFreeBlocked(s.dietary)) && err && <Err>{err}</Err>}
                 </section>
               );
             })}
@@ -865,7 +869,7 @@ export function BizDelivery() {
     company: !dl.company.trim() && 'Enter the company name',
     building: !dl.building.trim() && 'Enter the building or tower',
     office: !dl.office.trim() && 'Enter the office, floor or unit',
-    area: !areaFor(dl.area) && 'Choose the delivery area',
+    area: !areaChosen(dl.area) && 'Choose the delivery area',
     contact: !dl.contact.trim() && 'Enter who will receive the delivery',
     mobile: !/^5\d{8}$/.test(digits) && 'Enter a UAE mobile number, e.g. 50 123 4567',
     window: (!(same ? dl.window : b.dates.every(iso => windowFor(b, iso))) && 'Choose a delivery window')
@@ -901,7 +905,7 @@ export function BizDelivery() {
   /* FLW §15: a day can have its own location and contact when "Set per day" is chosen. */
   const own = iso => b.perDay?.[iso]?.delivery || null;
   const setOwn = (iso, patch) => upd(d => { d.perDay[iso] = { ...(d.perDay[iso] || {}), delivery: patch === null ? null : { ...(d.perDay[iso]?.delivery || { building: d.delivery.building, office: d.delivery.office, area: d.delivery.area, contact: d.delivery.contact, mobile: d.delivery.mobile, notes: d.delivery.notes }), ...patch } }; });
-  const ownBad = iso => { const o = own(iso); return o && (!o.building?.trim() || !o.office?.trim() || !areaFor(o.area || dl.area) || !o.contact?.trim() || !/^5\d{8}$/.test(mobileDigits(o.mobile || ''))); };
+  const ownBad = iso => { const o = own(iso); return o && (!o.building?.trim() || !o.office?.trim() || !areaChosen(o.area || dl.area) || !o.contact?.trim() || !/^5\d{8}$/.test(mobileDigits(o.mobile || ''))); };
 
   return (
     <Screen>
@@ -919,9 +923,9 @@ export function BizDelivery() {
         )}
         <section className="stack gap-12">
           {field('company', 'Company name', 'e.g. Gulf Capital Partners', { autoComplete: 'organization' })}
+          <AreaField id="bd-area" value={dl.area} invalid={touched} onChange={v => upd(d => { d.delivery.area = v; })} />
           {field('building', 'Building / Tower', 'e.g. Gate Village, Building 3')}
           {field('office', 'Office / Floor / Unit', 'e.g. Level 4, Office 402')}
-          <AreaField id="bd-area" value={dl.area} invalid={touched} onChange={v => upd(d => { d.delivery.area = v; })} />
         </section>
         <hr className="divider" />
         <section className="stack gap-12">
@@ -949,11 +953,11 @@ export function BizDelivery() {
             <Windows iso={iso} />
             {own(iso) ? (
               <div className="card stack gap-10" style={{ padding: 16 }}>
+                <AreaField id={`bd-${iso}-area`} value={own(iso).area || dl.area} invalid={touched} onChange={v => setOwn(iso, { area: v })} />
                 {[['building', 'Building / Tower'], ['office', 'Office / Floor / Unit'], ['contact', 'Contact person'], ['mobile', 'Mobile number'], ['notes', 'Delivery notes (optional)']].map(([k, label]) => (
                   <div key={k} className="field"><label htmlFor={`bd-${iso}-${k}`}>{label}</label>
                     <input id={`bd-${iso}-${k}`} className={`input${touched && k !== 'notes' && ownBad(iso) && !(own(iso)[k] || '').trim() ? ' invalid' : ''}`} inputMode={k === 'mobile' ? 'tel' : undefined} value={own(iso)[k] || ''} onChange={e => setOwn(iso, { [k]: e.target.value })} /></div>
                 ))}
-                <AreaField id={`bd-${iso}-area`} value={own(iso).area || dl.area} invalid={touched} onChange={v => setOwn(iso, { area: v })} />
                 {touched && ownBad(iso) && <Err>Complete this day’s location and contact (UAE mobile, e.g. 50 123 4567)</Err>}
                 <button type="button" className="link" style={{ alignSelf: 'flex-start' }} onClick={() => setOwn(iso, null)}>Use the main location and contact</button>
               </div>
@@ -1335,9 +1339,13 @@ export function BizConfirmed() {
 export function BizManage() {
   const { id } = useParams();
   const { state, set } = useStore();
-  useSyncOrders();
+  const synced = useSyncOrders();
   const order = (state.businessOrders || []).find(o => o.id === id);
   const [tab, setTab] = useState(() => Math.max(0, order ? order.days.findIndex(d => !d.cancelled) : 0));
+  /* Client feedback FLW-025: the confirmation email links here. Not signed in on this device: sign in, then come
+     back to this order. Signed in: wait for the orders to load instead of leaving for the ordering steps. */
+  if (!order && !state.session) return <Navigate to={`/sign-in?next=/business/orders/${id}`} replace />;
+  if (!order && !synced) return <Loading back="/business" title="Opening your order…" />;
   if (!order) return <Navigate to="/business" replace />;
   const day = order.days[Math.min(tab, order.days.length - 1)];
 

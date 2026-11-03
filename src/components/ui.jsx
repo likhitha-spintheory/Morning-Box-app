@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ACTIVE_AREAS, areaFor } from '../domain/standards.js';
+import { ACTIVE_AREAS, SERVICE_AREAS, areaFor } from '../domain/standards.js';
 
 const PATHS = {
   back: '<path d="M15 18l-6-6 6-6"/>',
@@ -339,14 +339,22 @@ export function InfoTip({ label = 'More info', children }) {
 
 
 /** Delivery area (MB-PRD-001 §3): fixed while one area is live; a choice once Morning Box opens more. */
+/* Client feedback FLW-022: every service area is listed; areas switched off in Admin are greyed out ("coming soon").
+   Nothing is preselected: the customer chooses the area themselves, so a default is never taken as their location. */
+export const areaChosen = v => ACTIVE_AREAS.includes(v);
 export function AreaField({ id, value, onChange, invalid }) {
-  if (ACTIVE_AREAS.length === 1) return <div className="field"><label htmlFor={id}>Area</label><input id={id} className="input" value={ACTIVE_AREAS[0]} readOnly /></div>;
+  const chosen = areaChosen(value) ? value : '';
+  const list = ACTIVE_AREAS.length > 1 ? `${ACTIVE_AREAS.slice(0, -1).join(', ')} and ${ACTIVE_AREAS[ACTIVE_AREAS.length - 1]}` : ACTIVE_AREAS[0];
   return (
     <div className="field"><label htmlFor={id}>Area</label>
-      <select id={id} className={`input${invalid && !areaFor(value) ? ' invalid' : ''}`} value={areaFor(value) || ''} onChange={e => onChange(e.target.value)}>
-        <option value="" disabled>Choose an area</option>
-        {ACTIVE_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
-      </select></div>
+      <select id={id} className={`input${invalid && !chosen ? ' invalid' : ''}`} value={chosen} aria-describedby={`${id}-h`} onChange={e => onChange(e.target.value)}>
+        <option value="" disabled>Choose your area</option>
+        {SERVICE_AREAS.map(a => {
+          const on = ACTIVE_AREAS.includes(a.id);
+          return <option key={a.id} value={a.id} disabled={!on}>{a.label}{on ? '' : ' (coming soon)'}</option>;
+        })}
+      </select>
+      <span id={`${id}-h`} className="xs">Morning Box currently delivers in {list} only. More areas are coming soon.</span></div>
   );
 }
 

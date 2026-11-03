@@ -95,7 +95,7 @@ export function resetPersonal(s) {
   s.profile = { eatingStyle: null, preferences: [], dietary: [], allergies: [], otherAllergies: '' };
   s.profileDone = false;
   s.plan = { dates: [], days: {} };
-  s.delivery = { sameForAll: null, address: { building: '', unit: '', area: 'DIFC', handover: 'reception', notes: '' }, window: null, perDay: {} };
+  s.delivery = { sameForAll: null, address: { building: '', unit: '', area: '', handover: 'reception', notes: '' }, window: null, perDay: {} };
   s.orders = []; s.businessOrders = []; s.businessUser = null; s.savedPlans = [];
 }
 

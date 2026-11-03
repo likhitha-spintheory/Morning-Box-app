@@ -4,6 +4,7 @@ import { put, track } from '../../api.js';
 import { Screen, TopBar, Option, Chip, Footer, Icon, Tick, SunArc, Go, InfoTip } from '../../components/ui.jsx';
 import { useStore } from '../../state/store.jsx';
 import { EATING_STYLES, PREFERENCES, DIETARY, ALLERGENS, allergyLabel, dietLabel } from '../../domain/app.js';
+import { glutenFreeBlocked, GLUTEN_FREE_MESSAGE } from '../../domain/standards.js';
 
 const EATING_ICON = { health: 'leafy', flexible: 'sunny' };
 /* MB-PER-001 Q1 — the approved descriptions, word for word. */
@@ -140,6 +141,7 @@ export function Dietary() {
   });
   /* First-time profile: dates and daily context follow as steps 4 and 5 of the same flow. */
   const finish = () => goNext(s => { if (!editing) s.onboarding = true; s.profileDone = true; });
+  const gfBlocked = glutenFreeBlocked(dietary);   // client feedback PRD-004
   const safetyText = allergies.length
     ? `We’ll leave out anything with ${allergies.map(a => allergyLabel(a).split(' /')[0].toLowerCase()).join(', ')}.`
     : other.trim() ? 'We’ll check your other allergies with the bakery.'
@@ -148,13 +150,14 @@ export function Dietary() {
 
   return (
     <Frame step={3} back="/profile/preferences" editing={editing}
-      footer={<button className="btn" disabled={busy} onClick={finish}>{editing ? (busy ? 'Saving…' : 'Save') : <Go>Save my profile</Go>}</button>}>
+      footer={<button className="btn" disabled={busy || gfBlocked} onClick={finish}>{editing ? (busy ? 'Saving…' : 'Save') : <Go>Save my profile</Go>}</button>}>
       <Heading q="Do you have any dietary requirements or allergies?" help="Safety always comes first. Anything you mark here is never recommended to you." tip="We never recommend anything you mark here, in breakfasts, swaps or extras. If you add an allergy later, mornings you’ve already ordered are checked again." />
       <section className="card stack gap-16" style={{ padding: 20 }} aria-labelledby="dr">
         <h2 id="dr" className="h3 row" style={{ justifyContent: 'flex-start', gap: 12, fontSize: 18 }}><Icon name="leafy" size={20} stroke={1.6} />Dietary requirements</h2>
         <div className="chips">
           {DIETARY.map(d => <Chip key={d.id} on={dietary.includes(d.id)} onClick={() => toggle('dietary', d.id)}>{d.label}</Chip>)}
         </div>
+        {gfBlocked && <div className="banner-warn" role="alert"><Icon name="alert" size={18} stroke={2} color="var(--warn)" style={{ flex: 'none' }} /><span>{GLUTEN_FREE_MESSAGE}</span></div>}
       </section>
       <section className="card stack gap-16" style={{ padding: 20 }} aria-labelledby="al">
         <h2 id="al" className="h3 row" style={{ justifyContent: 'flex-start', gap: 12, fontSize: 18 }}><Icon name="shield" size={20} stroke={1.6} />Allergies</h2>

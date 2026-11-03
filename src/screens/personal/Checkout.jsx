@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { get, post, put, applySession, ownerOf, setToken, resetPersonal, newIdempotencyKey, download, track, goToPayment, signIn } from '../../api.js';
-import { Screen, TopBar, Footer, Icon, Chip, Switch, Option, Logo, PhoneField, Go, IconButton, InfoTip, AreaField } from '../../components/ui.jsx';
+import { Screen, TopBar, Footer, Icon, Chip, Switch, Option, Logo, PhoneField, Go, IconButton, InfoTip, AreaField, areaChosen } from '../../components/ui.jsx';
 import { useStore } from '../../state/store.jsx';
 import {
   DELIVERY_WINDOWS, dateInfo, dayPrice, boxName, sizeLabel, windowLabel, canChooseSize, componentName, shortPlace,
@@ -263,7 +263,7 @@ export function Delivery() {
   const setDayAddr = (iso, k, v) => upd(d => { const cur = d.perDay[iso]?.address || structuredClone(d.address); d.perDay[iso] = { ...(d.perDay[iso] || {}), address: { ...cur, [k]: v } }; });
   const remaining = (iso, w) => avail[iso]?.[w]?.remaining;
   const windowFor = iso => (sameForAll ? dl.window : dl.perDay[iso]?.window);
-  const addrOk = (sameForAll ? [a] : dates.map(addrFor)).every(x => x.building.trim() && x.unit.trim() && areaFor(x.area));
+  const addrOk = (sameForAll ? [a] : dates.map(addrFor)).every(x => x.building.trim() && x.unit.trim() && areaChosen(x.area));
   const windowsOk = dates.every(iso => windowFor(iso) && !isFull(iso, windowFor(iso)));
   /* Accounts made by email have no mobile: the delivery needs one to reach the customer (DLV §6). */
   const needsMobile = !state.user?.mobile;
@@ -317,13 +317,12 @@ export function Delivery() {
           </div>
         ) : (
           <section className="card stack gap-16" style={{ padding: 20, gap: 16 }}>
+            {/* Client feedback FLW-022: the area comes first. */}
+            <AreaField id="ar" value={a.area} invalid={touched} onChange={v => upd(d => { d.address.area = v; })} />
             <div className="field"><label htmlFor="b">Building / Tower</label>
               <input id="b" className={`input${touched && !a.building.trim() ? ' invalid' : ''}`} placeholder="e.g. Gate Village, Building 3" value={a.building} onChange={e => upd(d => { d.address.building = e.target.value; })} /></div>
-            <div className="grid-2">
-              <div className="field"><label htmlFor="u">Office / Floor</label>
-                <input id="u" className={`input${touched && !a.unit.trim() ? ' invalid' : ''}`} placeholder="Office 402" value={a.unit} onChange={e => upd(d => { d.address.unit = e.target.value; })} /></div>
-              <AreaField id="ar" value={a.area} invalid={touched} onChange={v => upd(d => { d.address.area = v; })} />
-            </div>
+            <div className="field"><label htmlFor="u">Office / Floor</label>
+              <input id="u" className={`input${touched && !a.unit.trim() ? ' invalid' : ''}`} placeholder="Office 402" value={a.unit} onChange={e => upd(d => { d.address.unit = e.target.value; })} /></div>
             <div className="stack gap-8">
               <span className="label">Hand over at</span>
               <div className="chips">
@@ -333,7 +332,7 @@ export function Delivery() {
             </div>
             <div className="field"><label htmlFor="n">Delivery notes <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
               <input id="n" className="input" placeholder="e.g. Leave with the concierge" maxLength={200} value={a.notes} onChange={e => upd(d => { d.address.notes = e.target.value; })} /></div>
-            {touched && !addrOk && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Add your building and office or floor</span>}
+            {touched && !addrOk && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Choose your area and add your building and office or floor</span>}
             {addrOk && <button type="button" className="btn-secondary" onClick={() => setEditing(false)}>Use this address</button>}
           </section>
         )}
@@ -353,14 +352,12 @@ export function Delivery() {
           return (
             <section key={`a${iso}`} className="card stack gap-12" style={{ padding: 16 }} aria-label={`Address for ${dateInfo(iso).long}`}>
               <span className="strong">{dateInfo(iso).long}</span>
+              {/* FLW §8: each date has its own location, within the active service areas (area first, FLW-022). */}
+              <AreaField id={`ar-${iso}`} value={x.area} invalid={touched} onChange={v => setDayAddr(iso, 'area', v)} />
               <div className="field"><label htmlFor={`b-${iso}`}>Building / Tower</label>
                 <input id={`b-${iso}`} className={`input${touched && !x.building.trim() ? ' invalid' : ''}`} value={x.building} onChange={e => setDayAddr(iso, 'building', e.target.value)} /></div>
-              <div className="grid-2">
-                <div className="field"><label htmlFor={`u-${iso}`}>Office / Floor</label>
-                  <input id={`u-${iso}`} className={`input${touched && !x.unit.trim() ? ' invalid' : ''}`} value={x.unit} onChange={e => setDayAddr(iso, 'unit', e.target.value)} /></div>
-                {/* FLW §8: each date has its own location, within the active service areas. */}
-                <AreaField id={`ar-${iso}`} value={x.area} invalid={touched} onChange={v => setDayAddr(iso, 'area', v)} />
-              </div>
+              <div className="field"><label htmlFor={`u-${iso}`}>Office / Floor</label>
+                <input id={`u-${iso}`} className={`input${touched && !x.unit.trim() ? ' invalid' : ''}`} value={x.unit} onChange={e => setDayAddr(iso, 'unit', e.target.value)} /></div>
               <div className="stack gap-8">
                 <span className="label">Hand over at</span>
                 <div className="chips">

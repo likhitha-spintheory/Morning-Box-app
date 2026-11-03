@@ -5,7 +5,7 @@ import { randomInt, createHash } from 'node:crypto';
 import { db, json } from './db.js';
 import { allocate, isFinal } from './allocation.js';
 import { ApiError, bad, isIsoDate, BAKERY_CONDITIONS, areaDistances, bakeryCaps, bakeryProducts, danishFlavours, windowCapacity, WINDOW_IDS } from './rules.js';
-import { getPricing, savePricing, resetPricing, pricingHistory, getCompany, saveCompany, getLibrary, saveLibrary, getDelivery, saveDelivery, getAreas, saveAreas } from './settings.js';
+import { getPricing, savePricing, resetPricing, pricingHistory, getCompany, saveCompany, getLibrary, saveLibrary, getDelivery, saveDelivery, getAreas, saveAreas, getGlutenFree, saveGlutenFree } from './settings.js';
 import { COMPONENTS, ADDON_BREAD, ADDON_PASTRY } from '../src/domain/library.js';
 import { BASE_RECOMMENDATIONS, describe, priceLevel } from '../src/domain/recipes.js';
 import { ALLERGENS, DIETARY, SERVICE_AREAS, dubaiTodayIso } from '../src/domain/standards.js';
@@ -28,6 +28,8 @@ adminRouter.post('/pricing/reset', (_req, res) => res.json({ pricing: resetPrici
 adminRouter.get('/company', (_req, res) => res.json(getCompany()));
 adminRouter.get('/areas', (_req, res) => res.json(getAreas()));
 adminRouter.put('/areas', (req, res) => res.json(saveAreas(req.body)));
+adminRouter.get('/gluten-free', (_req, res) => res.json(getGlutenFree()));
+adminRouter.put('/gluten-free', (req, res) => res.json(saveGlutenFree(req.body)));
 adminRouter.put('/company', (req, res) => res.json(saveCompany(req.body)));
 adminRouter.get('/library', (_req, res) => res.json({ ...getLibrary(), items: Object.values(COMPONENTS).filter(c => c.sample).map(c => c.name) }));
 adminRouter.put('/library', (req, res) => res.json(saveLibrary(req.body)));

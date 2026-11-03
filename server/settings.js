@@ -3,7 +3,7 @@
    objects in place, so every route prices and prints from the same numbers. */
 import { db, json, parse } from './db.js';
 import { DEV } from './env.js';
-import { applyPricing, pricingSnapshot, DEFAULT_PRICING, PRICE_LEVELS, ADDON_PRICES, expandBreadPrices } from '../src/domain/standards.js';
+import { applyPricing, pricingSnapshot, DEFAULT_PRICING, PRICE_LEVELS, ADDON_PRICES, expandBreadPrices, GLUTEN_FREE, applyGlutenFree } from '../src/domain/standards.js';
 import { SUPPLIER, SUPPORT } from './company.js';
 import { LIBRARY_SETTINGS, setLibrarySettings, COMPONENTS } from '../src/domain/library.js';
 import { menuSnapshot, applyMenu, validateMenu, DEFAULT_MENU } from '../src/domain/menu.js';
@@ -170,6 +170,16 @@ applyPricing(read('pricing'));
 try { const m = read('menu'); if (m) applyMenu(validateMenu(m, failMenu)); } catch (e) { console.error('[menu] Saved menu ignored:', e.message); }
 const savedCompany = read('company');
 if (savedCompany) { Object.assign(SUPPLIER, savedCompany.company); Object.assign(SUPPORT, savedCompany.support); }
+
+/* ---------- Gluten-free availability (client feedback PRD-004): off until an approved gluten-free partner exists ---------- */
+export const getGlutenFree = () => ({ available: GLUTEN_FREE.available });
+export function saveGlutenFree(input = {}) {
+  if (typeof input.available !== 'boolean') throw bad('gluten_free_invalid', 'Choose whether gluten-free breakfasts are available.');
+  write('glutenFree', input.available);
+  applyGlutenFree(input.available);
+  return getGlutenFree();
+}
+applyGlutenFree(read('glutenFree') ?? false);
 
 /* ---------- Service areas (MB-PRD-001 §3): Phase 1 DIFC, then Downtown Dubai, then Meydan One ---------- */
 export const getAreas = () => ({ areas: SERVICE_AREAS.map(a => ({ ...a, active: ACTIVE_AREAS.includes(a.id) })) });

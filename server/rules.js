@@ -9,7 +9,8 @@ import { recipeById, describe, priceLevel } from '../src/domain/recipes.js';
 import { unsafeComponents, dayProfile } from '../src/domain/app.js';
 import {
   CONTEXTS, DELIVERY_WINDOWS, DIETARY, ALLERGENS, PREFERENCES, EATING_STYLES, PRICE_LEVELS,
-  isBeforeCutoff, orderableDates, isoDate, dubaiTodayIso, EXCEPTION_KINDS as BASE_EXCEPTION_KINDS, ACTIVE_AREAS, areaFor
+  isBeforeCutoff, orderableDates, isoDate, dubaiTodayIso, EXCEPTION_KINDS as BASE_EXCEPTION_KINDS, ACTIVE_AREAS, areaFor,
+  glutenFreeBlocked, GLUTEN_FREE_MESSAGE
 } from '../src/domain/standards.js';
 import { db } from './db.js';
 /* allocation.js imports this module too; the cycle is safe because neither uses the other at load time. */
@@ -105,6 +106,7 @@ export function assertCapacity(date, window, boxes, exclude = {}) {
 export function buildPersonalDay(input, profile) {
   const { context, recipeId, components, size, addons = [], danishFlavour } = input;
   if (!ids(CONTEXTS).includes(context)) throw bad('context_invalid', 'Choose a daily context.');
+  if (glutenFreeBlocked(profile.dietary)) throw bad('gluten_free_unavailable', GLUTEN_FREE_MESSAGE);
   /* The breakfast type picked for this morning, when the profile has several (client feedback REC-021). */
   const preference = input.preference || null;
   if (preference && !(profile.preferences || []).includes(preference)) throw bad('not_eligible', 'This breakfast is not available for your profile and morning. Please plan it again.');
@@ -206,6 +208,7 @@ export function buildBusinessDay(input) {
     const dietary = (Array.isArray(s.dietary) ? s.dietary : []).filter(x => ids(DIETARY).includes(x));
     const allergies = (Array.isArray(s.allergies) ? s.allergies : []).filter(x => ids(ALLERGENS).includes(x));
     if (!dietary.length && !allergies.length) throw bad('special_invalid', 'Each Special Breakfast needs at least one requirement.');
+    if (glutenFreeBlocked(dietary)) throw bad('gluten_free_unavailable', GLUTEN_FREE_MESSAGE);
     if (!Number.isInteger(s.qty) || s.qty < 1) throw bad('special_invalid', 'Each Special Breakfast needs a quantity.');
     const size = s.size || 'regular';
     if (!['light', 'regular', 'large'].includes(size)) throw bad('size_invalid', 'Choose a size for each Special Breakfast.');

@@ -723,13 +723,11 @@ export function EditMorning() {
 
         {!noSafe && <section className="card stack gap-12" style={{ padding: 20 }} aria-labelledby="ed-addr">
           <h2 id="ed-addr" className="h3" style={{ fontSize: 19 }}>Delivery address</h2>
+          <AreaField id="ed-ar" value={draft.address.area} onChange={v => setAddr('area', v)} />
           <div className="field"><label htmlFor="ed-b">Building / Tower</label>
             <input id="ed-b" className="input" value={draft.address.building} onChange={e => setAddr('building', e.target.value)} /></div>
-          <div className="grid-2">
-            <div className="field"><label htmlFor="ed-u">Office / Floor</label>
-              <input id="ed-u" className="input" value={draft.address.unit} onChange={e => setAddr('unit', e.target.value)} /></div>
-            <AreaField id="ed-ar" value={draft.address.area} onChange={v => setAddr('area', v)} />
-          </div>
+          <div className="field"><label htmlFor="ed-u">Office / Floor</label>
+            <input id="ed-u" className="input" value={draft.address.unit} onChange={e => setAddr('unit', e.target.value)} /></div>
           <div className="stack gap-8">
             <span className="label">Hand over at</span>
             <div className="chips">
