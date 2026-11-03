@@ -69,6 +69,9 @@ img { max-width: 100%; display: block; }
 .screen-main.tight { gap: 16px; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 8px; min-height: 72px; }
 .topbar-title { font-size: 14px; font-weight: 500; letter-spacing: .05em; color: var(--text-3); text-align: center; flex: 1; }
+/* Narrowest phones: titles stay on one line, and the header's area pill (also shown further down the homepage) gives way. */
+@media (max-width: 360px) { .topbar-title { font-size: 12.5px; letter-spacing: .02em; } }
+@media (max-width: 380px) { .home-area-pill { display: none; } }
 .footer { position: sticky; bottom: 0; z-index: 5; padding: 14px 20px calc(22px + var(--mb-inset-bottom)); display: flex; flex-direction: column; gap: 12px; background: linear-gradient(180deg, rgba(251, 247, 239, 0) 0, var(--ivory) 18px); }
 .footer.sheet { background: var(--white); border-radius: 28px 28px 0 0; box-shadow: var(--shadow-sheet); padding-top: 20px; }
 .footer.split { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
