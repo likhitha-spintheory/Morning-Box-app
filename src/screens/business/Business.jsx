@@ -866,7 +866,6 @@ export function BizDelivery() {
   const same = b.deliverySameForAll !== false || b.dates.length < 2;
   const digits = mobileDigits(dl.mobile || '');
   const errs = {
-    company: !dl.company.trim() && 'Enter the company name',
     building: !dl.building.trim() && 'Enter the building or tower',
     office: !dl.office.trim() && 'Enter the office, floor or unit',
     area: !areaChosen(dl.area) && 'Choose the delivery area',
@@ -922,7 +921,7 @@ export function BizDelivery() {
           </div>
         )}
         <section className="stack gap-12">
-          {field('company', 'Company name', 'e.g. Gulf Capital Partners', { autoComplete: 'organization' })}
+          {field('company', 'Company or group name (optional)', 'e.g. Gulf Capital Partners, or leave empty', { autoComplete: 'organization' })}
           <AreaField id="bd-area" value={dl.area} invalid={touched} onChange={v => upd(d => { d.delivery.area = v; })} />
           {field('building', 'Building / Tower', 'e.g. Gate Village, Building 3')}
           {field('office', 'Office / Floor / Unit', 'e.g. Level 4, Office 402')}
@@ -1005,8 +1004,10 @@ export function BizAccount() {
   const digits = mobileDigits(mobile);
   const nameOk = name.trim().length > 0;
   const mobileOk = /^5\d{8}$/.test(digits);
-  const companyOk = company.trim().length > 0;
+  /* Family & friends orders too: company name is optional; the order-update email is optional but must be valid
+     if given. Signing in by email still needs a valid email to receive the code. */
   const mailOk = emailOk(email);
+  const contactMailOk = !email.trim() || mailOk;
   const typeDigit = (i, v) => {
     const all = v.replace(/\D/g, '');
     if (all.length > 1) { // pasted or auto-filled code
@@ -1043,7 +1044,7 @@ export function BizAccount() {
   };
   const verify = () => {
     setTouched(true);
-    if ((needName && !nameOk) || !companyOk || !mailOk || code.join('').length < 6) return;
+    if ((needName && !nameOk) || !contactMailOk || code.join('').length < 6) return;
     setBusy(true); setError('');
     (async () => {
       try {
@@ -1061,7 +1062,7 @@ export function BizAccount() {
   };
   const continueSignedIn = () => {
     setTouched(true);
-    if (!companyOk || !mailOk) return;
+    if (!contactMailOk) return;
     run(saveAccount);
   };
 
@@ -1074,7 +1075,7 @@ export function BizAccount() {
           <span style={{ fontSize: 15 }}><b>{b.people} people · {b.dates.length} day{b.dates.length > 1 ? 's' : ''}</b> saved and ready</span>
         </div>
         <div className="stack gap-8">
-          <h1 className="h-display" style={{ fontSize: 34 }}>Save your business order</h1>
+          <h1 className="h-display" style={{ fontSize: 34 }}>Save your order</h1>
         </div>
         {signedIn ? (
           <section className="card list" aria-label="Signed in as">
@@ -1087,9 +1088,9 @@ export function BizAccount() {
           <>
             {byEmail ? (
               <div className="field">
-                <label htmlFor="ba-em">Business email</label>
+                <label htmlFor="ba-em">Email</label>
                 <input id="ba-em" type="email" inputMode="email" className={`input${touched && !mailOk ? ' invalid' : ''}`} value={email} autoComplete="email"
-                  placeholder="name@company.com" disabled={sent} onChange={e => setEmail(e.target.value)} />
+                  placeholder="you@example.com" disabled={sent} onChange={e => setEmail(e.target.value)} />
                 {touched && !mailOk && <Err>Enter a valid email, e.g. name@company.com</Err>}
               </div>
             ) : (
@@ -1142,15 +1143,14 @@ export function BizAccount() {
         {(signedIn || sent) && (
           <>
             <div className="field">
-              <label htmlFor="ba-co">Company name</label>
-              <input id="ba-co" className={`input${touched && !companyOk ? ' invalid' : ''}`} value={company} autoComplete="organization" onChange={e => setCompany(e.target.value)} />
-              {touched && !companyOk && <Err>Enter the company name</Err>}
+              <label htmlFor="ba-co">Company or group name <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
+              <input id="ba-co" className="input" value={company} autoComplete="organization" placeholder="Leave empty for family or friends" onChange={e => setCompany(e.target.value)} />
             </div>
             {(signedIn || !byEmail) && (
               <div className="field">
-                <label htmlFor="ba-em2">Business email</label>
-                <input id="ba-em2" type="email" className={`input${touched && !mailOk ? ' invalid' : ''}`} value={email} autoComplete="email" placeholder="name@company.com" onChange={e => setEmail(e.target.value)} />
-                {touched && !mailOk && <Err>Enter a valid email, e.g. name@company.com</Err>}
+                <label htmlFor="ba-em2">Email for order updates <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
+                <input id="ba-em2" type="email" className={`input${touched && !contactMailOk ? ' invalid' : ''}`} value={email} autoComplete="email" placeholder="you@example.com" onChange={e => setEmail(e.target.value)} />
+                {touched && !contactMailOk && <Err>Enter a valid email, or leave it empty</Err>}
               </div>
             )}
           </>

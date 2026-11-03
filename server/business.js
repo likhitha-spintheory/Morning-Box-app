@@ -35,13 +35,16 @@ const windowOk = w => DELIVERY_WINDOWS.some(x => x.id === w);
 const dayColumns = () => db.prepare("PRAGMA table_info('business_days')").all().map(c => c.name);
 const bakeryName = id => db.prepare('SELECT name FROM bakeries WHERE id = ?').get(id)?.name;
 
-/* MB-FLW-001 §16: First Name, Mobile + OTP (session), Company Name, Business Email. */
+/* MB-FLW-001 §16 asked for Company Name and Business Email. Since "Group & Business Breakfast" is also for family
+   and friends (client decision, Nov 2026), both are optional: an email, if given, must be valid, and without one the
+   confirmation goes to the email the customer signs in with. */
 businessRouter.post('/account', (req, res) => {
-  const { company, email } = req.body;
-  if (!plain(company, 120)) throw bad('company_required', 'Enter the company name.');
-  if (!emailOk(email)) throw bad('email_invalid', 'Enter a valid business email.');
+  const { company } = req.body;
+  const email = typeof req.body.email === 'string' ? req.body.email.trim() : '';
+  if (email && !emailOk(email)) throw bad('email_invalid', 'Enter a valid email, or leave it empty.');
+  const u = db.prepare('SELECT email, login_email FROM users WHERE id = ?').get(req.userId) || {};
   db.prepare(`INSERT INTO business_accounts (user_id, company, email) VALUES (?, ?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET company = excluded.company, email = excluded.email`).run(req.userId, plain(company, 120), email.trim());
+    ON CONFLICT(user_id) DO UPDATE SET company = excluded.company, email = excluded.email`).run(req.userId, plain(company, 120), email || u.login_email || u.email || '');
   res.json(userPayload(req.userId));
 });
 
@@ -119,7 +122,7 @@ function prepareBusinessOrder(userId, body) {
   const trn = String(inv.trn || '').replace(/\D/g, '');
   if (trn && trn.length !== 15) throw bad('trn_invalid', 'A UAE TRN has 15 digits. Check it or leave it empty.');
   const invoice = {
-    wanted: inv.wanted !== false, billingName: plain(inv.billingName, 120) || acct.company,
+    wanted: inv.wanted !== false, billingName: plain(inv.billingName, 120) || acct.company || plain(built[0]?.delivery?.contact, 120),
     address: plain(inv.address, 200), trn, po: plain(inv.po, 40), mode: body.mode === 'choose' ? 'choose' : 'mix'
   };
   const total = built.reduce((t, b) => t + b.total, 0);
@@ -167,7 +170,7 @@ businessRouter.post('/orders', (req, res, next) => {
   capacity();
   startCheckout(req, {
     kind: 'business_order', payload: { body: { ...req.body, idempotencyKey: undefined }, key }, amount: total, idempotencyKey: key,
-    email: acct.email, description: `Morning Box Business Breakfast · ${acct.company} · ${built.length} day${built.length > 1 ? 's' : ''}`
+    email: acct.email, description: `Morning Box Group & Business Breakfast${acct.company ? ` · ${acct.company}` : ''} · ${built.length} day${built.length > 1 ? 's' : ''}`
   }).then(r => (r.checkout
     ? res.status(202).json({ checkout: r.checkout })
     : res.status(201).json(serialize(db.prepare('SELECT * FROM business_orders WHERE id = ?').get(r.done))))).catch(next);

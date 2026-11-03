@@ -233,7 +233,7 @@ export function buildBusinessDay(input) {
 }
 
 export function validateBusinessDelivery(d) {
-  const need = ['company', 'building', 'office', 'contact', 'mobile'];
+  const need = ['building', 'office', 'contact', 'mobile'];   // company / group name is optional (family & friends orders)
   const missing = need.filter(k => !str(d?.[k]));
   if (missing.length) throw bad('delivery_invalid', 'Complete the delivery details.', { missing });
   if (!/^5\d{8}$/.test(String(d.mobile).replace(/\D/g, '').replace(/^00/, '').replace(/^971/, '').replace(/^0/, ''))) throw bad('delivery_invalid', 'Enter a valid UAE mobile number for the contact person.');

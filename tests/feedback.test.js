@@ -211,3 +211,22 @@ test('gluten-free is refused (personal and business) until switched on in Admin'
   assert.notEqual(q2.body.error, 'gluten_free_unavailable');
   await opsH('PUT', '/admin/gluten-free', { available: false });
 });
+
+/* Group & Business Breakfast is also for family and friends: no company name or business email is needed. */
+test('a family group order needs no company name or business email', async () => {
+  const email = 'family.breakfast@example.com';
+  const otp = await call('POST', '/auth/otp', { email });
+  const v = await call('POST', '/auth/verify', { email, code: otp.body.devCode, firstName: 'Mariam' });
+  const u = { token: v.body.token };
+  assert.equal((await call('POST', '/business/account', { company: '', email: 'not-an-email' }, u)).status, 400, 'a given email must be valid');
+  const acct = await call('POST', '/business/account', { company: '', email: '' }, u);
+  assert.equal(acct.status, 200, JSON.stringify(acct.body));
+  const o = await call('POST', '/business/orders', { days: [{ date: dates[6], window: 'w2', people: 4,
+    lines: [{ recipeId: 'savory.flexible.regular', size: 'regular', qty: 4 }], specials: [],
+    delivery: { company: '', building: 'Burj Views A', office: 'Apt 1203', contact: 'Mariam', mobile: '55 123 4567' } }] }, u);
+  assert.equal(o.status, 201, JSON.stringify(o.body));
+  const row = db.prepare('SELECT company, email, invoice FROM business_orders WHERE id = ?').get(o.body.id);
+  assert.equal(row.company, '');
+  assert.equal(row.email, email, 'confirmation goes to the sign-in email');
+  assert.equal(JSON.parse(row.invoice).billingName, 'Mariam', 'the receipt is in the contact’s name');
+});
