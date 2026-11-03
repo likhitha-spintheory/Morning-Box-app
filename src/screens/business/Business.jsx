@@ -296,6 +296,7 @@ export function BizWelcome() {
   const next = orders.flatMap(o => o.days.filter(d => !d.cancelled && d.date >= today).map(d => ({ o, d })))
     .sort((a, b) => a.d.date.localeCompare(b.d.date))[0];
   const last = orders[0];
+  const finished = orders.filter(o => !o.days.some(d => !d.cancelled && d.date >= today && d.stage < 3));
 
   /* FLW §18: previous company and delivery information is reused (still editable); boxes, dates and window start fresh. */
   const fresh = () => {
@@ -340,7 +341,6 @@ export function BizWelcome() {
       <TopBar back="/" close={null}><span className="topbar-title">Group &amp; Business Breakfast</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 12, gap: 22 }}>
         <div className="stack gap-8">
-          {user?.company && <span className="eyebrow">{user.company}</span>}
           <h1 className="h-display">{user ? `Welcome back, ${user.firstName}` : 'Group & Business Breakfast'}</h1>
         </div>
 
@@ -356,23 +356,24 @@ export function BizWelcome() {
         )}
 
         <div className="stack gap-10">
-          {last ? (
+          {finished.length ? (
             <>
               <span className="eyebrow grey">Reorder a Previous Order</span>
-              {orders.slice(0, 5).map(o => {
+              {/* Only finished orders: one still coming is shown above as the next delivery (or in Orders). */}
+              {finished.slice(0, 5).map(o => {
                 const live = o.days.filter(d => !d.cancelled);
-                const d = live[0] || o.days[0];
+                const d = live[live.length - 1] || o.days[o.days.length - 1];
                 return (
                   <button key={o.id} type="button" className="option" onClick={() => reorder('reorder', o.id)}>
                     <span className="ico"><Icon name="repeat" size={22} stroke={1.6} /></span>
-                    <span className="stack gap-4"><span style={{ fontWeight: 600, fontSize: 17 }}>Order {o.id}</span>
-                      <span className="sm">{live.length > 1 ? `${live.length} days · ` : ''}{d.people} people · {dateInfo(d.date).label}. You choose the dates.</span></span>
+                    <span className="stack gap-4"><span style={{ fontWeight: 600, fontSize: 17 }}>{typeLabel(o)}</span>
+                      <span className="sm">{live.length > 1 ? `${live.length} days · ` : ''}{d.people} people · last on {dateInfo(d.date).label}. Order again for new dates.</span></span>
                     <Icon name="chevron" size={20} stroke={1.8} style={{ marginLeft: 'auto' }} />
                   </button>
                 );
               })}
             </>
-          ) : <p className="sm" style={{ margin: 0 }}>Your past orders will appear here so you can reorder in a few taps.</p>}
+          ) : <p className="sm" style={{ margin: 0 }}>Once an order has been delivered, it will appear here so you can order it again in a few taps.</p>}
           {plans.map(pl => (
             <div key={pl.id} className="stack" style={{ gap: 2 }}>
               <button type="button" className="option" onClick={() => fromPlan(pl)}>

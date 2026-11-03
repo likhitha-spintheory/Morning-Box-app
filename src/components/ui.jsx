@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { get } from '../api.js';
+import { useStore } from '../state/store.jsx';
 import { ACTIVE_AREAS, SERVICE_AREAS, areaFor } from '../domain/standards.js';
 
 const PATHS = {
@@ -101,12 +103,37 @@ export function IconButton({ icon, label, to, onClick }) {
   );
 }
 
+/* Signed-in customers get the same navigation on every screen: the notifications bell in the top bar and the
+   bottom menu (AppNav). Not on the homepage, sign-in, payment return, or the operations and bakery consoles. */
+const NO_CHROME = /^\/($|ops|bakery|sign-in|pay\/)/;
+export function useCustomerChrome() {
+  const { state } = useStore();
+  const { pathname } = useLocation();
+  return !!(state.session && state.user) && !NO_CHROME.test(pathname);
+}
+/** Unread notifications, refreshed when the screen changes. */
+export function useUnreadCount(on) {
+  const [n, setN] = useState(0);
+  const { pathname } = useLocation();
+  useEffect(() => { if (on) get('/me/notifications').then(l => setN(Array.isArray(l) ? l.filter(x => !x.read).length : 0)).catch(() => {}); }, [on, pathname]);
+  return n;
+}
+function BellLink() {
+  const unread = useUnreadCount(true);
+  return (
+    <Link to="/notifications" className="icon-btn bell" aria-label={unread ? `Notifications, ${unread} new` : 'Notifications'}>
+      <Icon name="bell" size={20} />{unread > 0 && <i className="badge" />}
+    </Link>
+  );
+}
+
 export function TopBar({ back, close = '/', title, children }) {
+  const chrome = useCustomerChrome();
   return (
     <header className="topbar">
       {back !== undefined ? <IconButton icon="back" label="Back" to={back} /> : <span style={{ width: 44 }} />}
       {children || <span className="topbar-title">{title}</span>}
-      {close ? <IconButton icon="close" label="Close" to={close} /> : <span style={{ width: 44 }} />}
+      {chrome ? <BellLink /> : close ? <IconButton icon="close" label="Close" to={close} /> : <span style={{ width: 44 }} />}
     </header>
   );
 }
@@ -192,10 +219,10 @@ export function Note({ icon = 'info', children }) {
   );
 }
 
-export function TabBar({ active }) {
-  const tabs = [['/today', 'home', 'Today'], ['/start', 'cal', 'Plan'], ['/orders', 'box', 'Orders'], ['/me', 'user', 'Profile']];
+export function TabBar({ active, global = false }) {
+  const tabs = [['/today', 'home', 'Today'], ['/start', 'cal', 'Plan'], ['/business', 'brief', 'Group'], ['/orders', 'box', 'Orders'], ['/me', 'user', 'Profile']];
   return (
-    <nav className="tabbar" aria-label="Primary">
+    <nav className={`tabbar${global ? ' global' : ''}`} aria-label="Primary">
       {tabs.map(([to, icon, label]) => (
         <Link key={to} to={to} className={active === to ? 'active' : ''} aria-current={active === to ? 'page' : undefined}>
           <Icon name={icon} size={24} stroke={1.6} /><span>{label}</span>
@@ -400,4 +427,21 @@ export function PhotoPicker({ value, onChange }) {
       {err && <span className="xs" role="alert">{err}</span>}
     </div>
   );
+}
+
+/** The bottom menu on every customer screen (rendered once, in App). Its tab follows the current page. */
+export function AppNav() {
+  const chrome = useCustomerChrome();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    document.body.classList.toggle('has-tabbar', chrome);
+    return () => document.body.classList.remove('has-tabbar');
+  }, [chrome]);
+  if (!chrome) return null;
+  const active = /^\/today/.test(pathname) ? '/today'
+    : /^\/(start|plan|checkout|profile)/.test(pathname) ? '/start'
+    : /^\/business/.test(pathname) ? '/business'
+    : /^\/orders/.test(pathname) ? '/orders'
+    : /^\/me/.test(pathname) ? '/me' : null;
+  return <TabBar active={active} global />;
 }

@@ -1,3 +1,4 @@
+import { AppNav } from './components/ui.jsx';
 import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Home from './screens/Home.jsx';
@@ -85,6 +86,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
+      <AppNav />
     </ErrorBoundary>
   );
 }

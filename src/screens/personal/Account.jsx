@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { get, post, put, patch, del, setToken, goToPayment, signIn } from '../../api.js';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Screen, TopBar, Footer, Icon, Logo, TabBar, Switch, Qty, Money, Chip, PhoneField, InfoTip, PhotoPicker, AreaField, Ring } from '../../components/ui.jsx';
+import { Screen, TopBar, Footer, Icon, Logo, Switch, Qty, Money, Chip, PhoneField, InfoTip, PhotoPicker, AreaField, Ring } from '../../components/ui.jsx';
 import { download, shareText, ownerOf } from '../../api.js';
 import { useUnread } from '../Notifications.jsx';
 import { LEGAL_PAGES } from '../Legal.jsx';
@@ -32,6 +32,8 @@ function useOrders() {
     if (!state.session) return;
     get('/orders').then(o => set(s => { s.orders = o; }))
       .catch(e => { if (e.status !== 401) setError(e.message); });
+    /* Group & business orders belong on Today and Orders too, not only inside Group & Business Breakfast. */
+    get('/business/orders').then(o => { if (Array.isArray(o)) set(s => { s.businessOrders = o; }); }).catch(() => {});
   }, [state.session, set]);
   return error;
 }
@@ -47,6 +49,28 @@ const clock = iso => iso ? new Date(iso.replace(' ', 'T') + (iso.includes('Z') |
 
 function allDays(orders) {
   return orders.flatMap(o => o.days.map(d => ({ ...d, orderId: o.id, createdAt: o.createdAt })));
+}
+/** Days of group & business orders, shaped for the same lists (kind: 'group'). */
+function groupDays(orders = []) {
+  return orders.flatMap(o => o.days.map(d => ({ ...d, kind: 'group', orderId: o.id, orderType: o.orderType, company: o.company })));
+}
+const groupTitle = d => (d.orderType === 'family' ? 'Family & friends breakfast' : d.orderType === 'business' || d.company ? `Business breakfast${d.company ? ` · ${d.company}` : ''}` : 'Group breakfast');
+const groupStatus = d => (d.cancelled ? ['off', 'Cancelled · refunded'] : d.problem ? ['off', d.problem === 'Failed' ? 'Delivery missed' : 'Not prepared · refunded']
+  : d.stage >= 3 ? ['done', 'Delivered'] : d.stage === 2 ? ['prep', 'On its way'] : d.stage === 1 ? ['prep', 'Being prepared'] : ['ok', 'Confirmed']);
+/** A group or business morning in a list: opens its Manage page. */
+function GroupRow({ d, label }) {
+  const [tone, text] = groupStatus(d);
+  return (
+    <Link to={`/business/orders/${d.orderId}`} className="card row" style={{ textDecoration: 'none', alignItems: 'flex-start', gap: 16, padding: 18 }}>
+      <DateBox iso={d.date} />
+      <span className="stack" style={{ flex: 1, gap: 3, minWidth: 0 }}>
+        {label && <span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>{label}</span>}
+        <span className="strong" style={{ fontSize: 17 }}>{groupTitle(d)}</span>
+        <span className="help" style={{ fontSize: 15 }}>{d.people} people · {windowLabel(d.window)}{d.delivery?.building ? ` · ${shortPlace(d.delivery.building)}` : ''}</span>
+      </span>
+      <span className={`status ${tone}`}>{text}</span>
+    </Link>
+  );
 }
 
 function StatusPill({ day }) {
@@ -107,6 +131,8 @@ export function Today() {
   const toRate = allDays(state.orders).filter(d => trackingStage(d) === 3 && !d.feedback && d.date >= addDays(today, -7)).sort((a, b) => b.date.localeCompare(a.date))[0];
   const acceptTerms = () => post('/me/accept-terms').then(setMe).catch(() => {});
   const upcoming = allDays(state.orders).filter(d => !d.cancelled && d.date >= today && trackingStage(d) < 3).sort((a, b) => a.date.localeCompare(b.date));
+  const groupUpcoming = groupDays(state.businessOrders).filter(d => !d.cancelled && d.date >= today && d.stage < 3).sort((a, b) => a.date.localeCompare(b.date));
+  const nextGroup = groupUpcoming[0] || null;
   const next = upcoming[0];
   const lastOrder = state.orders[0];
   const hour = new Date().getHours();
@@ -155,7 +181,9 @@ export function Today() {
           <h1 className="h-display" style={{ fontSize: 40 }}>Hello, <em>{state.user.firstName}.</em></h1>
         </div>
 
-        {next ? (
+        {nextGroup && (!next || nextGroup.date < next.date) ? (
+          <GroupRow d={nextGroup} label={nextGroup.date === today ? 'Today' : 'Next breakfast'} />
+        ) : next ? (
           <Link to={`/orders/${next.orderId}/${next.date}`} className="card row" style={{ textDecoration: 'none', alignItems: 'flex-start', gap: 16, padding: 18 }}>
             <DateBox iso={next.date} />
             <span className="stack" style={{ flex: 1, gap: 3 }}>
@@ -168,6 +196,8 @@ export function Today() {
         ) : (
           <div className="card"><span className="strong">No mornings planned yet</span></div>
         )}
+        {/* The other group & business mornings coming up, so they are never only inside Group & Business. */}
+        {groupUpcoming.filter(d => d !== nextGroup || (next && next.date <= nextGroup.date)).slice(0, 3).map(d => <GroupRow key={`g${d.orderId}${d.date}`} d={d} />)}
         {next && editableDay(next) && <CutoffPanel iso={next.date} title={`${dateInfo(next.date).label} is still editable`} />}
 
         {toRate && (
@@ -253,7 +283,6 @@ export function Today() {
         )}
 
       </main>
-      <TabBar active="/today" />
     </Screen>
   );
 }
@@ -268,8 +297,8 @@ export function Orders() {
   if (guard) return guard;
   const tab = params.get('tab') || 'upcoming';
   const today = todayIso();
-  const days = allDays(state.orders);
-  const isPast = d => d.cancelled || d.date < today || trackingStage(d) === 3;
+  const days = [...allDays(state.orders), ...groupDays(state.businessOrders)];
+  const isPast = d => d.cancelled || d.date < today || (d.kind === 'group' ? d.stage >= 3 : trackingStage(d) === 3);
   const list = days.filter(d => (tab === 'past' ? isPast(d) : !isPast(d)))
     .sort((a, b) => (tab === 'past' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)));
 
@@ -292,7 +321,7 @@ export function Orders() {
             <Link to="/start" className="btn-secondary">Plan my mornings</Link>
           </div>
         )}
-        {list.map(d => (
+        {list.map(d => d.kind === 'group' ? <GroupRow key={`g${d.orderId}${d.date}`} d={d} /> : (
           <div key={d.orderId + d.date} className="card stack gap-12" style={{ padding: 18 }}>
             <Link to={`/orders/${d.orderId}/${d.date}`} className="row" style={{ textDecoration: 'none', alignItems: 'flex-start', gap: 16 }}>
               <DateBox iso={d.date} />
@@ -318,7 +347,6 @@ export function Orders() {
           </div>
         ))}
       </main>
-      <TabBar active="/orders" />
     </Screen>
   );
 }
@@ -526,7 +554,6 @@ export function OrderDay() {
         {whatsappLink() && <a href={whatsappLink(`Hi Morning Box, about order ${id} (${dayComma(date)}): `)} target="_blank" rel="noopener noreferrer" className="btn-text" style={{ alignSelf: 'center' }}>Chat with us on WhatsApp</a>}
         {SHOW_DEMO && !day.cancelled && st < 3 && <button className="btn-text" disabled={busy} style={{ alignSelf: 'center', fontSize: 13, color: 'var(--text-3)' }} onClick={advance}>Demo: advance delivery status</button>}
       </main>
-      <TabBar active="/orders" />
     </Screen>
   );
 }
@@ -1052,7 +1079,6 @@ export function Me() {
         )}
         <span className="xs center">Morning Box {typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : ''}</span>
       </main>
-      <TabBar active="/me" />
     </Screen>
   );
 }

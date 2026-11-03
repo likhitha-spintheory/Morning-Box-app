@@ -295,7 +295,7 @@ img { max-width: 100%; display: block; }
 .grab { width: 40px; height: 5px; border-radius: 4px; background: #DCD2C4; align-self: center; }
 
 /* ---------- Bottom navigation ---------- */
-.tabbar { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); padding: 10px 8px calc(14px + var(--mb-inset-bottom)); background: var(--ivory); z-index: 5; }
+.tabbar { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: 1px solid var(--line); padding: 10px 8px calc(14px + var(--mb-inset-bottom)); background: var(--ivory); z-index: 5; }
 .tabbar a { display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 56px; justify-content: center; text-decoration: none; font-size: 13px; font-weight: 500; color: var(--text-3); position: relative; }
 .tabbar a.active { color: var(--espresso); font-weight: 600; }
 .tabbar a.active svg { color: var(--gold); }
@@ -573,3 +573,11 @@ img { max-width: 100%; display: block; }
 .staff-problem summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-3); min-height: 36px; display: flex; align-items: center; }
 .staff-problem[open] { display: flex; flex-direction: column; gap: 8px; }
 .staff-problem[open] summary { color: var(--espresso); }
+
+/* The bottom menu on every customer screen: fixed at the bottom; screens leave room for it and any action bar
+   (Continue, Save, Pay) sits just above it. */
+:root { --tabbar-h: 82px; }
+.tabbar.global { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; max-width: var(--col); margin: 0 auto; }
+body.has-tabbar .screen { padding-bottom: calc(var(--tabbar-h) + var(--mb-inset-bottom)); }
+body.has-tabbar .footer { bottom: calc(var(--tabbar-h) + var(--mb-inset-bottom)); padding-bottom: 14px; }
+@media (max-width: 360px) { .tabbar a { font-size: 12px; } }
