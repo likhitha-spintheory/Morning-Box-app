@@ -78,7 +78,7 @@ export default function Home() {
             </Link>
             <Link to={state.businessUser ? '/business' : '/business/people'} className="entry plain">
               <Icon name="brief" size={24} stroke={1.6} />
-              <span style={{ flex: 1 }}><b>Business Breakfast</b><span className="d" style={{ color: 'var(--text-3)', opacity: 1 }}>For teams &amp; meetings</span></span>
+              <span style={{ flex: 1 }}><b>Group &amp; Business Breakfast</b><span className="d" style={{ color: 'var(--text-3)', opacity: 1 }}>For family, friends, teams &amp; meetings</span></span>
               <Icon name="arrow" size={22} stroke={1.8} />
             </Link>
           </div>
@@ -159,7 +159,7 @@ export default function Home() {
               <span style={{ flex: 1 }}><b>Create My Morning</b></span>
               <Icon name="arrow" size={22} stroke={1.8} />
             </Link>
-            <Link to={state.businessUser ? '/business' : '/business/people'} className="link-hit strong" style={{ textAlign: 'center', textDecorationColor: 'var(--gold)', textUnderlineOffset: 4 }}>Ordering for a team? Business Breakfast</Link>
+            <Link to={state.businessUser ? '/business' : '/business/people'} className="link-hit strong" style={{ textAlign: 'center', textDecorationColor: 'var(--gold)', textUnderlineOffset: 4 }}>Ordering for a group? Group &amp; Business Breakfast</Link>
           </div>
         </div>
       </section>

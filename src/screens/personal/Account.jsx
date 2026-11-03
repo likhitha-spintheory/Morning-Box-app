@@ -230,8 +230,8 @@ export function Today() {
         <Link to={state.businessUser ? '/business' : '/business/people'} className="option" style={{ textDecoration: 'none' }}>
           <span className="ico"><Icon name="brief" size={22} stroke={1.6} /></span>
           <span className="stack" style={{ flex: 1, gap: 2 }}>
-            <span style={{ fontWeight: 600, fontSize: 18 }}>Business Breakfast</span>
-            <span className="help" style={{ fontSize: 15 }}>{state.businessUser ? 'New order, reorder or a saved plan' : 'For teams & meetings'}</span>
+            <span style={{ fontWeight: 600, fontSize: 18 }}>Group &amp; Business Breakfast</span>
+            <span className="help" style={{ fontSize: 15 }}>{state.businessUser ? 'New order, reorder or a saved plan' : 'For family, friends, teams & meetings'}</span>
           </span>
           <Icon name="chevron" size={18} stroke={1.8} />
         </Link>

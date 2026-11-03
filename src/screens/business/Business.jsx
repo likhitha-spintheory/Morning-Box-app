@@ -178,7 +178,7 @@ const Err = ({ id, children }) => <span id={id} className="err-msg"><Icon name="
 function StepBar({ n, back }) {
   return (
     <>
-      <TopBar back={back} close="/"><span className="topbar-title">Business Breakfast · {n} of 5</span></TopBar>
+      <TopBar back={back} close="/"><span className="topbar-title">Group &amp; Business · {n} of 5</span></TopBar>
       <Progress step={n} />
     </>
   );
@@ -331,11 +331,11 @@ export function BizWelcome() {
 
   return (
     <Screen>
-      <TopBar back="/" close={null}><span className="topbar-title">Business Breakfast</span></TopBar>
+      <TopBar back="/" close={null}><span className="topbar-title">Group &amp; Business Breakfast</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 12, gap: 22 }}>
         <div className="stack gap-8">
           {user?.company && <span className="eyebrow">{user.company}</span>}
-          <h1 className="h-display">{user ? `Welcome back, ${user.firstName}` : 'Business Breakfast'}</h1>
+          <h1 className="h-display">{user ? `Welcome back, ${user.firstName}` : 'Group & Business Breakfast'}</h1>
         </div>
 
         {next && (
@@ -381,7 +381,7 @@ export function BizWelcome() {
         </div>
         <Note>Every order is one-off, never a subscription.</Note>
       </main>
-      <Footer><button className="btn" onClick={fresh}><Icon name="plus" size={18} stroke={2} />New Business Breakfast</button></Footer>
+      <Footer><button className="btn" onClick={fresh}><Icon name="plus" size={18} stroke={2} />New group or business order</button></Footer>
     </Screen>
   );
 }
@@ -404,7 +404,7 @@ export function People() {
       <StepBar n={1} back={state.businessUser || state.businessOrders?.length ? '/business' : '/'} />
       <main className="screen-main" style={{ paddingTop: 28 }}>
         <div className="stack gap-10">
-          <span className="eyebrow">Business Breakfast</span>
+          <span className="eyebrow">Group &amp; Business Breakfast</span>
           <h1 className="q">How many people are you ordering for? <InfoTip label="Who to include">Include everyone. You can add special breakfasts for dietary needs or allergies in the next step.</InfoTip></h1>
         </div>
         <div className="row" style={{ justifyContent: 'center', gap: 20, padding: '12px 0' }}>
@@ -665,7 +665,7 @@ export function ChooseBoxes() {
 
   return (
     <Screen>
-      <TopBar back="/business/selection" close="/"><span className="topbar-title">Business Breakfast · 3 of 5</span></TopBar>
+      <TopBar back="/business/selection" close="/"><span className="topbar-title">Group &amp; Business · 3 of 5</span></TopBar>
       <Progress step={3} />
       <main className="screen-main" style={{ paddingTop: 28 }}>
         <div className="stack gap-10">
@@ -1369,7 +1369,7 @@ export function BizManage() {
         {state.session && order.days.length > 1 && <CancelOrder order={order} set={set} />}
       </main>
       <Footer>
-        <Link to="/business" className="btn-text" style={{ alignSelf: 'center' }}>Back to Business Breakfast</Link>
+        <Link to="/business" className="btn-text" style={{ alignSelf: 'center' }}>Back to Group &amp; Business Breakfast</Link>
       </Footer>
     </Screen>
   );

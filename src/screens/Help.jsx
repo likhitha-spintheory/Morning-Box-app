@@ -15,7 +15,7 @@ const FAQ = [
   ['How do you handle allergies?', 'We never recommend, swap in or add anything containing an allergy or dietary requirement you’ve marked. Bakeries handle common allergens, so traces can’t be ruled out. See Allergen Information.'],
   ['What if my breakfast is late or wrong?', 'Open the morning from Orders and tap Report a problem. Our team reviews every report the same day.'],
   ['When will I get my refund?', 'Refunds go back to your original payment method. Most banks show them within 5–10 working days.'],
-  ['Can I order for my team?', 'Yes. Choose Business Breakfast on the home screen to order for meetings and teams, with a tax invoice.']
+  ['Can I order for a group or my team?', 'Yes. Choose Group & Business Breakfast on the home screen to order for family, friends, teams or meetings. Business orders can get a tax invoice.']
 ];
 const TOPICS = ['An order', 'Delivery', 'Allergies & ingredients', 'Payments & refunds', 'My account', 'Business orders', 'Feedback or idea', 'Something else'];
 
