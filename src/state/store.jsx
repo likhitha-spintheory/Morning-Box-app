@@ -7,6 +7,8 @@ const KEY = 'morningbox.app.v1';
 export const emptyPlan = () => ({ dates: [], days: {} });
 export const emptyBusiness = () => ({
   people: 20, hasSpecial: null, specials: [], mode: 'mix', lines: [],
+  /* 'family' (Family & friends: home address) or 'business' (company / office); chosen at the delivery step. */
+  orderType: null,
   dates: [], sameForAll: true, perDay: {},
   delivery: { company: '', building: '', office: '', area: '', contact: '', mobile: '', notes: '', window: null },
   invoice: { wanted: false, billingName: '', address: '', trn: '', po: '' }

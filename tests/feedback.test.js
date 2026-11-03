@@ -230,3 +230,24 @@ test('a family group order needs no company name or business email', async () =>
   assert.equal(row.email, email, 'confirmation goes to the sign-in email');
   assert.equal(JSON.parse(row.invoice).billingName, 'Mariam', 'the receipt is in the contact’s name');
 });
+
+/* Group & Business Breakfast: Family & friends (home address, receipt) vs Business / company (company required). */
+test('order type: family needs no company and gets a receipt; business needs the company name', async () => {
+  const u = await signIn('502220123');
+  await call('POST', '/business/account', { company: '', email: '' }, u);
+  const day = (delivery, date) => ({ date, window: 'w2', people: 4, lines: [{ recipeId: 'savory.flexible.regular', size: 'regular', qty: 4 }], specials: [], delivery });
+  const home = { type: 'family', company: 'Should be dropped', building: 'Villa 12, Arabian Ranches', office: 'Villa 12', contact: 'Mariam', mobile: '55 123 4567' };
+  const fam = await call('POST', '/business/orders', { orderType: 'family', invoice: { wanted: true }, days: [day(home, dates[7])] }, u);
+  assert.equal(fam.status, 201, JSON.stringify(fam.body));
+  assert.equal(fam.body.orderType, 'family');
+  assert.equal(fam.body.company, '');
+  assert.equal(fam.body.invoice.wanted, false, 'a family order gets a receipt, not a tax invoice');
+  assert.equal(fam.body.days[0].delivery.company, '');
+
+  const office = { type: 'business', company: '', building: 'Index Tower', office: 'Level 21', contact: 'Omar', mobile: '55 765 4321' };
+  const noCo = await call('POST', '/business/orders', { orderType: 'business', days: [day(office, dates[8])] }, u);
+  assert.equal(noCo.status, 400, 'business orders need the company name');
+  const biz = await call('POST', '/business/orders', { orderType: 'business', days: [day({ ...office, company: 'Gulf Capital' }, dates[8])] }, u);
+  assert.equal(biz.status, 201, JSON.stringify(biz.body));
+  assert.equal(biz.body.orderType, 'business');
+});

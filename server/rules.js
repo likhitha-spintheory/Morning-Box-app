@@ -233,11 +233,14 @@ export function buildBusinessDay(input) {
 }
 
 export function validateBusinessDelivery(d) {
-  const need = ['building', 'office', 'contact', 'mobile'];   // company / group name is optional (family & friends orders)
+  /* Family & friends: a home address, no company. Business / company: the company name is required.
+     (No type: an order from before the choice existed; company optional.) */
+  const type = d?.type === 'family' ? 'family' : d?.type === 'business' ? 'business' : null;
+  const need = ['building', 'office', 'contact', 'mobile', ...(type === 'business' ? ['company'] : [])];
   const missing = need.filter(k => !str(d?.[k]));
   if (missing.length) throw bad('delivery_invalid', 'Complete the delivery details.', { missing });
   if (!/^5\d{8}$/.test(String(d.mobile).replace(/\D/g, '').replace(/^00/, '').replace(/^971/, '').replace(/^0/, ''))) throw bad('delivery_invalid', 'Enter a valid UAE mobile number for the contact person.');
-  return { company: plain(d.company, 120), building: plain(d.building, 120), office: plain(d.office, 120), area: areaOrFail(d.area), contact: plain(d.contact, 120), mobile: plain(d.mobile, 30), notes: plain(d.notes, 200) };
+  return { ...(type ? { type } : {}), company: type === 'family' ? '' : plain(d.company, 120), building: plain(d.building, 120), office: plain(d.office, 120), area: areaOrFail(d.area), contact: plain(d.contact, 120), mobile: plain(d.mobile, 30), notes: plain(d.notes, 200) };
 }
 
 export const needsGlutenFreeHandling = (dietary = [], allergies = []) => dietary.includes('glutenFree') || allergies.includes('gluten');

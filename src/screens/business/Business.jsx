@@ -173,6 +173,12 @@ function useBiz() {
   return { state, set, b, upd };
 }
 
+/* Who the order is for (client feedback): changes the address fields, Review & Pay and the confirmation. */
+const ORDER_TYPES = [['family', 'Family & friends', 'A home, villa or apartment', 'home'], ['business', 'Business / company', 'An office or corporate delivery', 'brief']];
+const typeLabel = o => (o.orderType === 'family' ? 'Family & friends breakfast' : o.orderType === 'business' || o.company ? `Business breakfast${o.company ? ` · ${o.company}` : ''}` : 'Group breakfast');
+const placeFields = family => (family
+  ? { building: ['Building or villa', 'e.g. Burj Views A, or Villa 12, Arabian Ranches'], office: ['Apartment / villa number', 'e.g. Apartment 1203'] }
+  : { building: ['Building / Tower', 'e.g. Gate Village, Building 3'], office: ['Office / Floor / Unit', 'e.g. Level 4, Office 402'] });
 const Err = ({ id, children }) => <span id={id} className="err-msg"><Icon name="alert" size={14} stroke={2.2} />{children}</span>;
 
 function StepBar({ n, back }) {
@@ -865,9 +871,13 @@ export function BizDelivery() {
   const dl = b.delivery;
   const same = b.deliverySameForAll !== false || b.dates.length < 2;
   const digits = mobileDigits(dl.mobile || '');
+  const family = b.orderType === 'family';
+  const pf = placeFields(family);
   const errs = {
-    building: !dl.building.trim() && 'Enter the building or tower',
-    office: !dl.office.trim() && 'Enter the office, floor or unit',
+    type: !b.orderType && 'Choose who the breakfast is for',
+    company: b.orderType === 'business' && !dl.company.trim() && 'Enter the company name',
+    building: !dl.building.trim() && (family ? 'Enter the building or villa' : 'Enter the building or tower'),
+    office: !dl.office.trim() && (family ? 'Enter the apartment or villa number' : 'Enter the office, floor or unit'),
     area: !areaChosen(dl.area) && 'Choose the delivery area',
     contact: !dl.contact.trim() && 'Enter who will receive the delivery',
     mobile: !/^5\d{8}$/.test(digits) && 'Enter a UAE mobile number, e.g. 50 123 4567',
@@ -920,12 +930,28 @@ export function BizDelivery() {
             <button type="button" role="radio" aria-checked={!same} className={!same ? 'on' : ''} onClick={() => upd(d => { d.deliverySameForAll = false; d.dates.forEach(iso => { d.perDay[iso] = { ...(d.perDay[iso] || {}), window: d.perDay[iso]?.window || d.delivery.window }; }); })}>{!same && <Icon name="check" size={14} stroke={2.4} style={{ marginRight: 6 }} />}Set per day</button>
           </div>
         )}
-        <section className="stack gap-12">
-          {field('company', 'Company or group name (optional)', 'e.g. Gulf Capital Partners, or leave empty', { autoComplete: 'organization' })}
-          <AreaField id="bd-area" value={dl.area} invalid={touched} onChange={v => upd(d => { d.delivery.area = v; })} />
-          {field('building', 'Building / Tower', 'e.g. Gate Village, Building 3')}
-          {field('office', 'Office / Floor / Unit', 'e.g. Level 4, Office 402')}
+        <section className="stack gap-10" aria-labelledby="ot-q">
+          <h2 id="ot-q" className="h3">Who is this breakfast for?</h2>
+          <div className="grid-2" role="radiogroup" aria-labelledby="ot-q">
+            {ORDER_TYPES.map(([id, title, sub, icon]) => (
+              <button key={id} type="button" role="radio" aria-checked={b.orderType === id} className={`tile${b.orderType === id ? ' on' : ''}`}
+                onClick={() => upd(d => { d.orderType = id; if (id === 'family') d.delivery.company = ''; })}>
+                <Tick on={b.orderType === id} />
+                <span className="ico"><Icon name={icon} size={22} stroke={1.6} /></span>
+                <span className="stack" style={{ gap: 2, marginTop: 'auto' }}><span className="strong">{title}</span><span className="xs">{sub}</span></span>
+              </button>
+            ))}
+          </div>
+          {touched && errs.type && <Err>{errs.type}</Err>}
         </section>
+        {b.orderType && (
+          <section className="stack gap-12">
+            {!family && field('company', 'Company name', 'e.g. Gulf Capital Partners', { autoComplete: 'organization' })}
+            <AreaField id="bd-area" value={dl.area} invalid={touched} onChange={v => upd(d => { d.delivery.area = v; })} />
+            {field('building', pf.building[0], pf.building[1], family ? { autoComplete: 'address-line1' } : {})}
+            {field('office', pf.office[0], pf.office[1], family ? { autoComplete: 'address-line2' } : {})}
+          </section>
+        )}
         <hr className="divider" />
         <section className="stack gap-12">
           <h2 className="h3">Contact on the day</h2>
@@ -953,7 +979,7 @@ export function BizDelivery() {
             {own(iso) ? (
               <div className="card stack gap-10" style={{ padding: 16 }}>
                 <AreaField id={`bd-${iso}-area`} value={own(iso).area || dl.area} invalid={touched} onChange={v => setOwn(iso, { area: v })} />
-                {[['building', 'Building / Tower'], ['office', 'Office / Floor / Unit'], ['contact', 'Contact person'], ['mobile', 'Mobile number'], ['notes', 'Delivery notes (optional)']].map(([k, label]) => (
+                {[['building', pf.building[0]], ['office', pf.office[0]], ['contact', 'Contact person'], ['mobile', 'Mobile number'], ['notes', 'Delivery notes (optional)']].map(([k, label]) => (
                   <div key={k} className="field"><label htmlFor={`bd-${iso}-${k}`}>{label}</label>
                     <input id={`bd-${iso}-${k}`} className={`input${touched && k !== 'notes' && ownBad(iso) && !(own(iso)[k] || '').trim() ? ' invalid' : ''}`} inputMode={k === 'mobile' ? 'tel' : undefined} value={own(iso)[k] || ''} onChange={e => setOwn(iso, { [k]: e.target.value })} /></div>
                 ))}
@@ -965,7 +991,7 @@ export function BizDelivery() {
         ))}
         {touched && errs.window && <Err>{errs.window}</Err>}
         <div className="field"><label htmlFor="bd-notes">Delivery notes <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
-          <input id="bd-notes" className="input" placeholder="e.g. Ask for the office manager at reception" value={dl.notes} onChange={e => upd(d => { d.delivery.notes = e.target.value; })} /></div>
+          <input id="bd-notes" className="input" placeholder={family ? 'e.g. Ring the bell, gate code 1234' : 'e.g. Ask for the office manager at reception'} value={dl.notes} onChange={e => upd(d => { d.delivery.notes = e.target.value; })} /></div>
       </main>
       <Footer>
         <button className="btn" onClick={() => { setTouched(true); if (ok) nav(state.businessUser ? '/business/review' : '/business/account'); }}>Continue</button>
@@ -1142,10 +1168,10 @@ export function BizAccount() {
         )}
         {(signedIn || sent) && (
           <>
-            <div className="field">
-              <label htmlFor="ba-co">Company or group name <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
-              <input id="ba-co" className="input" value={company} autoComplete="organization" placeholder="Leave empty for family or friends" onChange={e => setCompany(e.target.value)} />
-            </div>
+            {b.orderType !== 'family' && <div className="field">
+              <label htmlFor="ba-co">{b.orderType === 'business' ? 'Company name' : <>Company or group name <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></>}</label>
+              <input id="ba-co" className="input" value={company} autoComplete="organization" placeholder={b.orderType === 'business' ? '' : 'Leave empty for family or friends'} onChange={e => setCompany(e.target.value)} />
+            </div>}
             {(signedIn || !byEmail) && (
               <div className="field">
                 <label htmlFor="ba-em2">Email for order updates <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
@@ -1201,13 +1227,13 @@ export function BizReview() {
     setTrnTouched(true);
     if (trnBad) return;
     setPaying(true); setError('');
-    const snap = { company: dl.company.trim(), building: dl.building.trim(), office: dl.office.trim(), area: areaFor(dl.area),
+    const snap = { ...(b.orderType ? { type: b.orderType } : {}), company: b.orderType === 'family' ? '' : dl.company.trim(), building: dl.building.trim(), office: dl.office.trim(), area: areaFor(dl.area),
       contact: dl.contact.trim(), mobile: fmtMobile(mobileDigits(dl.mobile)), notes: dl.notes.trim() };
     try {
       const order = await post('/business/orders', {
         idempotencyKey: idemKey, expectedTotal: payTotal,
-        mode: b.mode === 'choose' ? 'choose' : 'mix',
-        invoice: { wanted: inv.wanted, billingName: inv.billingName.trim() || snap.company, address: inv.address.trim(), trn: inv.trn.trim(), po: (inv.po || '').trim() },
+        mode: b.mode === 'choose' ? 'choose' : 'mix', orderType: b.orderType,
+        invoice: { wanted: b.orderType !== 'family' && inv.wanted, billingName: inv.billingName.trim() || snap.company, address: inv.address.trim(), trn: inv.trn.trim(), po: (inv.po || '').trim() },
         days: days.map(d => ({
           date: d.iso, window: d.window, people: d.people,
           lines: d.lines.filter(l => l.qty > 0).map(l => ({ recipeId: l.recipeId, size: l.size, qty: l.qty })),
@@ -1230,6 +1256,10 @@ export function BizReview() {
       <TopBar back="/business/delivery" close="/"><span className="topbar-title">Review &amp; pay</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 8 }}>
         <h1 className="h-display" style={{ fontSize: 34 }}>One last look</h1>
+        <div className="row" style={{ justifyContent: 'flex-start', gap: 10 }}>
+          <span className="tag"><Icon name={b.orderType === 'family' ? 'home' : 'brief'} size={14} stroke={1.8} style={{ verticalAlign: '-2px', marginRight: 6 }} />{typeLabel({ orderType: b.orderType, company: b.orderType === 'family' ? '' : dl.company.trim() })}</span>
+          <Link to="/business/delivery" className="link" style={{ fontSize: 14 }}>Change</Link>
+        </div>
         {days.map(d => (
           <section key={d.iso} className="card stack gap-8" aria-label={dateInfo(d.iso).label}>
             <div className="sr"><strong>{dateInfo(d.iso).label}</strong><Link to={b.sameForAll === false && b.dates.length > 1 ? '/business/dates' : '/business/selection'} className="link-hit" style={{ fontWeight: 600, fontSize: 14 }}>Edit</Link></div>
@@ -1250,7 +1280,7 @@ export function BizReview() {
           <hr className="divider" />
           <div className="sr total"><span>Final total</span><span>AED {payTotal}</span></div>
         </section>
-        <section className="stack gap-12">
+        {b.orderType === 'family' ? <p className="xs" style={{ margin: 0 }}>A receipt is available on your order after paying.</p> : <section className="stack gap-12">
           <div className="row">
             <span className="stack"><span className="strong">Tax invoice</span><span className="xs">Sent to {user.email}</span></span>
             <Switch checked={inv.wanted} label="Tax invoice" onChange={v => upd(d => { d.invoice.wanted = v; })} />
@@ -1269,7 +1299,7 @@ export function BizReview() {
                 <input id="bi-p" className="input" maxLength={40} value={inv.po || ''} onChange={e => upd(d => { d.invoice.po = e.target.value; })} /></div>
             </>
           )}
-        </section>
+        </section>}
         <p className="xs" style={{ margin: 0 }}>Free changes until 9:00 PM the night before.</p>
         {SHOW_DEMO && <span className="demo-note">Development build: no payment is taken.</span>}
       </main>
@@ -1293,7 +1323,7 @@ export function BizConfirmed() {
   const savePlan = () => {
     const d = order.days.find(x => !x.cancelled) || first;
     post('/business/plans', {
-      name: `${order.company} · ${d.people} people`.slice(0, 60),
+      name: `${order.company || (order.orderType === 'family' ? 'Family & friends' : 'Group')} · ${d.people} people`.slice(0, 60),
       plan: { people: d.people, mode: order.mode, lines: d.lines, specials: d.specials, delivery: { ...d.delivery, window: d.window } }
     }).then(() => setPlanSaved('Saved. Find it under Use a Saved Plan next time.')).catch(e => setPlanSaved(e.message));
   };
@@ -1301,6 +1331,7 @@ export function BizConfirmed() {
   const wins = [...new Set(order.days.map(d => windowLabel(d.window)))];
   const rows = [
     ['Order', order.id],
+    ['Order type', typeLabel(order)],
     ['Dates', order.days.map(d => dateInfo(d.date).label).join(' · ')],
     ['Headcount', heads.length > 1 ? `${Math.min(...heads)}–${Math.max(...heads)} people` : `${heads[0]} people`],
     ['Location', [first.delivery.building, first.delivery.office, first.delivery.area].filter(Boolean).join(', ')],
@@ -1312,8 +1343,8 @@ export function BizConfirmed() {
       <main className="screen-main" style={{ paddingTop: 56, gap: 22 }}>
         <div className="stack center" style={{ alignItems: 'center', gap: 14 }}>
           <span style={{ width: 80, height: 80, borderRadius: 999, background: 'var(--gold)', color: 'var(--on-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={38} stroke={2.4} /></span>
-          <h1 className="h-display">Breakfast is arranged for the team</h1>
-          <p className="help">{order.invoice?.wanted === false ? `Confirmation sent to ${order.email}` : `Confirmation and tax invoice sent to ${order.email}`}</p>
+          <h1 className="h-display">{order.orderType === 'family' ? 'Breakfast is arranged for your group' : 'Breakfast is arranged for the team'}</h1>
+          <p className="help">{!order.email ? 'Your order is confirmed.' : order.invoice?.wanted === false ? `Confirmation sent to ${order.email}` : `Confirmation and tax invoice sent to ${order.email}`}</p>
         </div>
         <section className="card list">
           {rows.map(([k, v], i) => (
@@ -1326,7 +1357,7 @@ export function BizConfirmed() {
       </main>
       <Footer>
         <Link to={`/business/orders/${order.id}`} className="btn">Manage Order</Link>
-        <button type="button" className="btn-secondary" onClick={() => getInvoice(order, !!state.session)}><Icon name="download" size={18} />Download Invoice</button>
+        <button type="button" className="btn-secondary" onClick={() => getInvoice(order, !!state.session)}><Icon name="download" size={18} />{order.invoice?.wanted === false ? 'Download receipt' : 'Download Invoice'}</button>
         {state.session && (planSaved
           ? <span className="hint" role="status" style={{ justifyContent: 'center', fontSize: 15 }}><Icon name="check" size={18} stroke={1.8} />{planSaved}</span>
           : <button type="button" className="btn-text" style={{ alignSelf: 'center' }} onClick={savePlan}>Save as a plan</button>)}

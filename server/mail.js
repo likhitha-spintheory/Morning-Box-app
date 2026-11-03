@@ -52,9 +52,10 @@ export function sendOrderEmail(order) {
 
 /** Business Breakfast confirmation (MB-B2B-001 §8: Order → Pay Online → Confirmation + Invoice). */
 export function sendBusinessOrderEmail(order) {
-  sendQuietly(order.email, `Business Breakfast order ${order.id} is confirmed`, [
-    `Thank you! Business Breakfast order ${order.id} for ${order.company} is confirmed and paid (AED ${order.total}).`,
-    'Your invoice is available on the order in the app. You can change headcount, boxes or cancel each day until 9:00 PM the evening before.'
+  const family = order.orderType === 'family';
+  sendQuietly(order.email, `${family ? 'Group breakfast' : 'Business Breakfast'} order ${order.id} is confirmed`, [
+    `Thank you! ${family ? 'Group breakfast' : 'Business Breakfast'} order ${order.id}${!family && order.company ? ` for ${order.company}` : ''} is confirmed and paid (AED ${order.total}).`,
+    `Your ${family ? 'receipt' : 'invoice'} is available on the order in the app. You can change headcount, boxes or cancel each day until 9:00 PM the evening before.`
   ], `/business/orders/${order.id}`);
 }
 

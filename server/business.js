@@ -57,7 +57,8 @@ function serialize(o) {
   const days = db.prepare('SELECT * FROM business_days WHERE order_id = ? ORDER BY date').all(o.id);
   const contact = parse(days[0]?.delivery) || {};
   return {
-    id: o.id, createdAt: o.created_at, company: o.company, email: o.email,
+    id: o.id, createdAt: o.created_at, company: parse(o.invoice)?.orderType === 'family' ? '' : o.company, email: o.email,
+    orderType: parse(o.invoice)?.orderType || (o.company ? 'business' : null),
     contact: { name: contact.contact, mobile: contact.mobile }, invoice: parse(o.invoice), mode: parse(o.invoice)?.mode || 'mix',
     total: days.filter(d => !d.cancelled).reduce((t, d) => t + d.total, 0), paid: o.total,
     days: days.map(d => ({
@@ -118,11 +119,14 @@ function prepareBusinessOrder(userId, body) {
     if (!windowOk(d.window)) throw bad('window_invalid', 'Choose a delivery window.');
     return { date: d.date, window: d.window, delivery: validateBusinessDelivery(d.delivery), ...buildBusinessDay(d) };
   });
+  const orderType = body.orderType === 'family' ? 'family' : body.orderType === 'business' ? 'business' : null;
   const inv = body.invoice || {};
   const trn = String(inv.trn || '').replace(/\D/g, '');
   if (trn && trn.length !== 15) throw bad('trn_invalid', 'A UAE TRN has 15 digits. Check it or leave it empty.');
   const invoice = {
-    wanted: inv.wanted !== false, billingName: plain(inv.billingName, 120) || acct.company || plain(built[0]?.delivery?.contact, 120),
+    /* A family order gets a receipt; a tax invoice is for business / company orders. */
+    wanted: orderType !== 'family' && inv.wanted !== false, orderType,
+    billingName: plain(inv.billingName, 120) || (orderType === 'family' ? '' : acct.company) || plain(built[0]?.delivery?.contact, 120),
     address: plain(inv.address, 200), trn, po: plain(inv.po, 40), mode: body.mode === 'choose' ? 'choose' : 'mix'
   };
   const total = built.reduce((t, b) => t + b.total, 0);
