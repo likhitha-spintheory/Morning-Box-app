@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import {
   Screen, TopBar, Progress, Footer, Icon, Tick, Note, Money, Qty, Chip, Switch, InfoTip, AreaField, PhotoPicker
 } from '../../components/ui.jsx';
-import { useStore, emptyBusiness } from '../../state/store.jsx';
+import { useStore, emptyBusiness, normalizeBusiness } from '../../state/store.jsx';
 import { get, post, patch, del, download, applySession, ownerOf, setToken, resetPersonal, newIdempotencyKey, track, goToPayment, signIn } from '../../api.js';
 import { pastedCode, enteredDigits, Agreement } from '../personal/Checkout.jsx';
 import { useConfig, closedOn } from '../../state/config.js';
@@ -62,6 +62,9 @@ function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
   const models = useMemo(() => businessModels('regular'), []);
   /* null | { recipeId, size } | { special: { dietary, allergies, size }, index? } — `index` edits an existing group (B2B §10 Update Special Breakfast). */
   const [adding, setAdding] = useState(null);
+  /* Client feedback (Manage Order, Add): tapping Add with no breakfast chosen explains why, instead of doing nothing. */
+  const [pickError, setPickError] = useState(false);
+  const pickRef = useRef(null);
   const set = (nextLines, nextSpecials) => onChange(nextLines.filter(l => l.qty > 0), nextSpecials.filter(x => x.qty > 0));
   const toggleNeed = (k, id) => setAdding(a => ({ ...a, special: { ...a.special, [k]: a.special[k].includes(id) ? a.special[k].filter(x => x !== id) : [...a.special[k], id] } }));
   const resolved = adding?.special && (adding.special.dietary.length + adding.special.allergies.length) ? resolveSpecial({ ...adding.special, qty: 1 }, 'regular') : null;
@@ -94,12 +97,14 @@ function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
       )}
       {adding && !adding.special && (
         <div className="card stack gap-8" style={{ padding: 14 }}>
-          <select className="input" aria-label="Breakfast" value={adding.recipeId} onChange={e => setAdding(a => ({ ...a, recipeId: e.target.value }))}>
+          <select ref={pickRef} className={`input${pickError ? ' invalid' : ''}`} aria-label="Breakfast" aria-invalid={pickError} aria-describedby={pickError ? 'pick-err' : undefined}
+            value={adding.recipeId} onChange={e => { setPickError(false); setAdding(a => ({ ...a, recipeId: e.target.value })); }}>
             <option value="">Choose a breakfast…</option>{models.map(m => <option key={m.recipe.id} value={m.recipe.id}>{modelName(m.recipe)} ({m.label})</option>)}</select>
+          {pickError && <span id="pick-err" className="err-msg" role="alert"><Icon name="alert" size={14} stroke={2.2} />Please choose a breakfast before adding.</span>}
           <SizeSeg value={adding.size} label="Size" onChange={sz => setAdding(a => ({ ...a, size: sz }))} />
-          <div className="row"><button type="button" className="link" onClick={() => setAdding(null)}>Cancel</button>
-            <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} disabled={!adding.recipeId}
-              onClick={() => { const at = lines.findIndex(l => l.recipeId === adding.recipeId && l.size === adding.size); set(at >= 0 ? lines.map((l, k) => (k === at ? { ...l, qty: l.qty + 1 } : l)) : [...lines, { recipeId: adding.recipeId, size: adding.size, qty: 1 }], specials); setAdding(null); }}>Add</button></div>
+          <div className="row"><button type="button" className="link" onClick={() => { setPickError(false); setAdding(null); }}>Cancel</button>
+            <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }}
+              onClick={() => { if (!adding.recipeId) { setPickError(true); pickRef.current?.focus(); return; } const at = lines.findIndex(l => l.recipeId === adding.recipeId && l.size === adding.size); set(at >= 0 ? lines.map((l, k) => (k === at ? { ...l, qty: l.qty + 1 } : l)) : [...lines, { recipeId: adding.recipeId, size: adding.size, qty: 1 }], specials); setAdding(null); }}>Add</button></div>
         </div>
       )}
       {adding?.special && (
@@ -158,9 +163,11 @@ function dayLines(b, iso, people = dayPeople(b, iso)) {
 const windowFor = (b, iso) => (b.deliverySameForAll === false ? (b.perDay?.[iso]?.window || b.delivery.window) : b.delivery.window);
 
 function useBiz() {
-  const { state, set } = useStore();
+  const { state, set: setStore } = useStore();
   const b = state.business;
-  const upd = fn => set(s => { fn(s.business); });
+  /* Every change leaves the draft well-formed (e.g. a draft started from a previous order with empty fields). */
+  const set = fn => setStore(s => { const out = fn(s) || s; out.business = normalizeBusiness(out.business); return out; });
+  const upd = fn => set(s => { s.business = normalizeBusiness(s.business); fn(s.business); });
   return { state, set, b, upd };
 }
 

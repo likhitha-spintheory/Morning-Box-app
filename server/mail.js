@@ -70,3 +70,13 @@ export function sendCodeEmail(to, code, ttlMinutes) {
 <p>It expires in ${ttlMinutes} minutes. If you didn’t ask for it, you can ignore this email.</p></div>`
   });
 }
+
+/** New Help & Support message → the team's inbox (SUPPORT_NOTIFY_EMAIL, e.g. info@morningbox.ae). The message itself
+    stays in the admin panel (Service → Support), where it is answered; this email is only the alert. */
+export function sendSupportAlert({ id, topic, orderRef, message, firstName, contact }) {
+  sendQuietly(process.env.SUPPORT_NOTIFY_EMAIL, `New Morning Box message: ${topic}${orderRef ? ` (${orderRef})` : ''}`, [
+    `${firstName || 'A customer'}${contact ? ` (${contact})` : ''} sent a message #${id} about "${topic}"${orderRef ? ` for order ${orderRef}` : ''}:`,
+    message,
+    'Reply from the admin panel: Service → Support. The customer sees the reply in the app.'
+  ], '/ops');
+}

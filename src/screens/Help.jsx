@@ -10,7 +10,8 @@ const FAQ = [
   ['How does Morning Box work?', 'Tell us how you like to eat once. For each morning you plan, we recommend a breakfast that fits your profile and your day, a partner bakery prepares it fresh, and we deliver it in the window you choose.'],
   ['When do I need to order?', 'Orders for a morning close at 9:00 PM (Dubai time) the evening before. You can plan up to four weeks ahead.'],
   ['Can I change or cancel?', 'Yes, until 9:00 PM the evening before. Open the morning from Orders and tap Edit or cancel. Cancelled mornings are refunded in full.'],
-  ['Where do you deliver?', 'Within DIFC, to your building’s reception or your door, in one of three morning windows.'],
+  /* Client wording: no area names here, so the FAQ stays right as areas are switched on in Admin. */
+  ['Where do you deliver?', 'Morning Box delivers to selected areas of Dubai. Available delivery locations are shown during the ordering process, and more areas will be added over time. We deliver to your building’s reception or your door, in one of three morning windows.'],
   ['How do you handle allergies?', 'We never recommend, swap in or add anything containing an allergy or dietary requirement you’ve marked. Bakeries handle common allergens, so traces can’t be ruled out. See Allergen Information.'],
   ['What if my breakfast is late or wrong?', 'Open the morning from Orders and tap Report a problem. Our team reviews every report the same day.'],
   ['When will I get my refund?', 'Refunds go back to your original payment method. Most banks show them within 5–10 working days.'],

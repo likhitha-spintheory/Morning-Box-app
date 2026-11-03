@@ -1,5 +1,6 @@
 import { Component, useEffect, useState } from 'react';
 import { Icon } from './ui.jsx';
+import { track } from '../api.js';
 
 /** Reload once (not in a loop) when the app was updated while it was open. */
 export function reloadForUpdate() {
@@ -17,6 +18,11 @@ export class ErrorBoundary extends Component {
   static getDerivedStateFromError() { return { failed: true }; }
   componentDidCatch(error) {
     console.error('[app]', error);
+    /* So a crash a customer sees can be traced: which screen, the error, and where in the code (no personal data). */
+    try {
+      const at = String(error?.stack || '').split(/\r?\n/).slice(1, 3).map(l => l.trim()).join(' | ').slice(0, 220);
+      track('client_error', { route: location.hash.split('?')[0], message: String(error?.message).slice(0, 200), at });
+    } catch { /* never let reporting fail the recovery screen */ }
     /* After an update the old screen files are gone: reload this screen once to pick up the new version. */
     if (/dynamically imported module|Importing a module script failed|error loading dynamically/i.test(String(error?.message))) reloadForUpdate();
   }

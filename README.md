@@ -53,6 +53,7 @@ Settings: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (webhook endpoint `<APP_U
 
 Invoices: `MB_LEGAL_NAME`, `MB_TRN` (supplier TRN — the invoice is titled "Tax Invoice" only once this is set),
 `MB_ADDRESS`, `VAT_RATE` (default `0.05`; prices are VAT-inclusive). Personal orders get the same receipt.
+New Help & Support messages are emailed to `SUPPORT_NOTIFY_EMAIL` (e.g. info@morningbox.ae) and answered in the admin panel (Service → Support).
 Help & legal: `MB_SUPPORT_EMAIL`, `MB_SUPPORT_PHONE`, `MB_SUPPORT_WHATSAPP`, `MB_SUPPORT_HOURS` (shown in Help when set),
 `MB_TERMS_VERSION` (bump when the Terms or Privacy Policy change; customers re-accept in the app). The Terms,
 Privacy, Refunds and Allergen pages are built in (`#/legal/...`); `VITE_TERMS_URL` / `VITE_PRIVACY_URL` replace

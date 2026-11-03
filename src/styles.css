@@ -258,6 +258,7 @@ img { max-width: 100%; display: block; }
 .status.prep { background: var(--gold-chip); color: var(--warn); }
 .status.done { background: #F1ECE4; color: #4A3A2C; }
 .status.off { background: var(--err-bg); color: var(--err); }
+.status.warn { background: var(--warn-bg); color: var(--warn); }
 .live { display: inline-flex; align-items: flex-start; gap: 10px; font-size: 15px; font-weight: 600; color: var(--ok); }
 .live i { width: 10px; height: 10px; border-radius: 999px; background: var(--ok-dot); box-shadow: 0 0 0 4px #DDEEDD; display: block; flex: none; margin-top: .45em; }
 .dark-band { border-radius: 24px; background: var(--espresso); color: var(--ivory); padding: 26px 22px; display: flex; flex-direction: column; gap: 12px; }
@@ -283,6 +284,7 @@ img { max-width: 100%; display: block; }
 .ts .time { font-size: 15px; color: var(--text-3); white-space: nowrap; }
 .route { position: relative; border-radius: 26px; background: #EFE4D2; overflow: hidden; }
 .route svg { display: block; width: 100%; height: auto; }
+.route.map iframe { display: block; width: 100%; height: 260px; border: 0; }
 
 /* ---------- Sheet ---------- */
 .scrim { position: fixed; inset: 0; background: rgba(42, 31, 22, .42); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }

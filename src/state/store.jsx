@@ -11,6 +11,27 @@ export const emptyBusiness = () => ({
   delivery: { company: '', building: '', office: '', area: 'DIFC', contact: '', mobile: '', notes: '', window: null },
   invoice: { wanted: false, billingName: '', address: '', trn: '', po: '' }
 });
+/** Any business draft (saved in the browser, or copied from a previous order) in the shape the screens expect:
+    text fields are text, lists are lists, so a missing or empty value can never crash a step. */
+const text = v => (typeof v === 'string' ? v : v == null ? '' : String(v));
+export const cleanDelivery = d => {
+  const base = emptyBusiness().delivery, src = d && typeof d === 'object' ? d : {};
+  const out = { ...base };
+  for (const k of Object.keys(base)) out[k] = k === 'window' ? (src.window || null) : text(src[k] ?? base[k]);
+  return out;
+};
+export function normalizeBusiness(b) {
+  const e = emptyBusiness(), src = b && typeof b === 'object' ? b : {};
+  return {
+    ...e, ...src,
+    specials: Array.isArray(src.specials) ? src.specials.map(s => ({ dietary: [], allergies: [], qty: 1, ...s })) : [],
+    lines: Array.isArray(src.lines) ? src.lines : [],
+    dates: Array.isArray(src.dates) ? src.dates : [],
+    perDay: src.perDay && typeof src.perDay === 'object' ? src.perDay : {},
+    delivery: cleanDelivery(src.delivery),
+    invoice: { ...e.invoice, ...(src.invoice || {}) }
+  };
+}
 export const emptyProfile = () => ({ eatingStyle: null, preferences: [], dietary: [], allergies: [], otherAllergies: '' });
 
 const initial = () => ({
@@ -47,7 +68,7 @@ function load() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return initial();
     const saved = JSON.parse(raw);
-    const s = { ...initial(), ...saved, profile: { ...emptyProfile(), ...(saved.profile || {}) } };
+    const s = { ...initial(), ...saved, profile: { ...emptyProfile(), ...(saved.profile || {}) }, business: normalizeBusiness(saved.business) };
     pruneExpired(s);
     return s;
   } catch {

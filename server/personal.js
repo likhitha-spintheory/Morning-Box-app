@@ -10,11 +10,12 @@ import {
 } from './rules.js';
 import { creditBalance, payBack, paidBackText, money as roundAed } from './fulfilment.js';
 import { startCheckout, registerCheckoutHandler, recordPayment } from './payments.js';
-import { sendOrderEmail, mailConfigured } from './mail.js';
+import { sendOrderEmail, sendSupportAlert, mailConfigured } from './mail.js';
 import { whatsappConfigured } from './whatsapp.js';
 import { DEV } from './env.js';
 import { assertAllocatable, personalUnits, reallocateProvisional, isFinal } from './allocation.js';
 import { activeBakeries, danishFlavours, cleanPhoto } from './rules.js';
+import { openSafetyCheck } from './days.js';
 import { pricingSnapshot } from '../src/domain/standards.js';
 import { LIBRARY_SETTINGS } from '../src/domain/library.js';
 import { menuSnapshot } from '../src/domain/menu.js';
@@ -59,19 +60,35 @@ function flagOtherAllergies(userId, profile, days) {
  * safety always overrides). Unsafe mornings are put on hold for the customer to
  * update or cancel; mornings already past cutoff go to operations as a safety exception.
  */
+/** A booked morning the customer can still change in the app (before the 9 PM cutoff, not started). */
+const editableDay = d => !d.cancelled && d.stage === 0 && isBeforeCutoff(d.date);
+
+/* After the allergies or dietary needs change (client feedback, Profile – Allergy Updates):
+   - past or delivered mornings are never touched;
+   - a morning the customer can still change is held as "Needs review" and they update or cancel it;
+   - a morning past the cutoff is not changed automatically: an urgent safety alert goes to operations
+     (which also blocks the bakery from preparing it until resolved) and the customer is told we'll contact them. */
 function reviewUpcoming(userId, profile) {
   const review = [];
+  /* Holds left on mornings that are now in the past mean nothing any more. */
+  db.prepare(`UPDATE order_days SET safety_hold = 0 WHERE safety_hold = 1 AND date < ? AND order_id IN (SELECT id FROM orders WHERE user_id = ?)`).run(dubaiTodayIso(), userId);
   for (const d of upcomingDays(userId)) {
     const unsafe = unsafeComponents(parse(d.cfg), profile);
-    if (unsafe.length) {
+    const ref = `${d.order_id}:${d.date}`;
+    if (unsafe.length && editableDay(d)) {
       if (!d.safety_hold) db.prepare('UPDATE order_days SET safety_hold = 1 WHERE id = ?').run(d.id);
       review.push({ orderId: d.order_id, date: d.date });
-      const ref = `${d.order_id}:${d.date}`;
       if (!alreadyNotified(userId, ref, 'safety_review')) {
         notify(userId, ref, 'safety_review', `Your ${prettyDate(d.date)} breakfast no longer matches your updated allergies or dietary needs. Please update or cancel it.`);
       }
-      if (!isBeforeCutoff(d.date) || d.stage > 0) {
-        raiseException({ ref: `personal:${d.id}`, kind: 'Dietary/Allergy Issue', note: `Profile changed after cutoff; unsafe items: ${unsafe.join(', ')}`, customerCategory: 'personal' });
+    } else if (unsafe.length) {
+      raiseException({
+        ref: `personal:${d.id}`, kind: 'Dietary/Allergy Issue',
+        note: `URGENT: the customer's allergies or dietary needs changed after the cutoff. Unsafe for them now: ${unsafe.map(componentName).join(', ')}.`,
+        action: 'Contact the customer and the bakery before production; replace or cancel the breakfast (refund if cancelled).', customerCategory: 'personal'
+      });
+      if (!alreadyNotified(userId, ref, 'safety_review')) {
+        notify(userId, ref, 'safety_review', `Your ${prettyDate(d.date)} breakfast can no longer be changed in the app and doesn't match your updated allergies. Our team has been alerted and will contact you before it is prepared.`);
       }
     } else if (d.safety_hold) {
       db.prepare('UPDATE order_days SET safety_hold = 0 WHERE id = ?').run(d.id);
@@ -92,11 +109,13 @@ personalRouter.get('/config', (_req, res) => {
   const flavours = [...new Set(activeBakeries().flatMap(danishFlavours))];
   res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: SUPPLIER, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples }, menu: menuSnapshot(), areas: [...ACTIVE_AREAS],
     /* Which sign-in codes can be delivered, so the app only offers those (development shows codes in the server log). */
-    signIn: { email: DEV || mailConfigured(), mobile: DEV || whatsappConfigured() } });
+    signIn: { email: DEV || mailConfigured(), mobile: DEV || whatsappConfigured() },
+    /* Real map on order tracking (Google Maps Embed API: free, key restricted to this site in Google Cloud). */
+    maps: process.env.GOOGLE_MAPS_EMBED_KEY ? { embedKey: process.env.GOOGLE_MAPS_EMBED_KEY } : null });
 });
 
 /** Product analytics (Master Plan §15): the app reports funnel steps and no-match results. */
-const EVENT_KINDS = ['visit', 'profile_completed', 'plan_started', 'recommendation_shown', 'another_option_viewed', 'no_match', 'summary_viewed', 'checkout_started', 'business_inquiry'];
+const EVENT_KINDS = ['visit', 'profile_completed', 'plan_started', 'recommendation_shown', 'another_option_viewed', 'no_match', 'summary_viewed', 'checkout_started', 'business_inquiry', 'client_error'];
 personalRouter.post('/events', (req, res) => {
   limitIp(req, 'events', 300);   // public endpoint: keeps the analytics table from being flooded
   const kind = req.body?.kind;
@@ -189,6 +208,8 @@ personalRouter.post('/support', requireUser, (req, res) => {
   const orderRef = typeof req.body.orderRef === 'string' && /^MB(-B)?-[0-9A-F]{8}$/.test(req.body.orderRef) ? req.body.orderRef : null;
   const r = db.prepare('INSERT INTO support_requests (user_id, topic, order_ref, message) VALUES (?, ?, ?, ?)').run(req.userId, topic, orderRef, message);
   if (topic === 'Allergies & ingredients') raiseException({ ref: `support:${r.lastInsertRowid}`, kind: 'Dietary/Allergy Issue', note: message, customerCategory: 'personal', dedupe: false });
+  const u = db.prepare('SELECT first_name, email, login_email, mobile FROM users WHERE id = ?').get(req.userId) || {};
+  sendSupportAlert({ id: r.lastInsertRowid, topic, orderRef, message, firstName: u.first_name, contact: [u.login_email || u.email, String(u.mobile || '').startsWith('+') ? u.mobile : ''].filter(Boolean).join(', ') });
   res.status(201).json(supportOut(db.prepare('SELECT * FROM support_requests WHERE id = ?').get(r.lastInsertRowid)));
 });
 
@@ -243,7 +264,9 @@ export function serializeOrders(orders) {
         problem: ['Failed', 'Not Fulfilled'].includes(d.delivery_state) && d.stage < 3 ? d.delivery_state : null, recoveryRefund: !d.cancelled ? d.refund || 0 : 0, lateNote: d.stage < 3 && !d.cancelled ? d.late_note || null : null, stage: d.cancelled ? -1 : d.stage,
         /* Prepared by [Partner Bakery] once the final allocation has been made (FLW §9, PRD §11). */
         bakery: d.bakery_id && isFinal(d.date) ? names[d.bakery_id] || null : null, deliveredAt: d.delivered_at, deliveryPoint: d.delivery_point,
-        safetyReview: !!d.safety_hold && !d.cancelled,
+        /* "Needs review" only while the customer can act on it; after the cutoff, operations handles it (safetyCheck). */
+        safetyReview: !!d.safety_hold && editableDay(d),
+        safetyCheck: !d.cancelled && d.stage < 3 && d.date >= dubaiTodayIso() && !editableDay(d) && (!!d.safety_hold || openSafetyCheck('personal', d.id)),
         issues: issues.filter(i => i.order_id === o.id && i.date === d.date).map(i => ({ reason: i.reason, createdAt: i.created_at })),
         events: events.filter(e => e.order_id === o.id && (e.date === d.date || e.date === null)).map(e => ({ kind: e.kind, message: e.message, createdAt: e.created_at }))
       }))

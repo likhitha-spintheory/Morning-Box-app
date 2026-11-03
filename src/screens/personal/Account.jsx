@@ -56,6 +56,7 @@ function StatusPill({ day }) {
   if (day.problem === 'Failed') return <span className="status off">Delivery missed</span>;
   if (st === 3) return <span className="status done">Delivered{day.feedback ? ` · ${day.feedback}` : ''}</span>;
   if (day.safetyReview) return <span className="status off">Needs review</span>;
+  if (day.safetyCheck) return <span className="status warn">Allergy check by our team</span>;
   if (st === 0) return <span className="status ok">Confirmed</span>;
   return <span className="status prep">{st === 1 ? 'Being prepared' : 'On its way'}</span>;
 }
@@ -338,11 +339,26 @@ function RouteCard({ stage, label }) {
   );
 }
 
+/* Client feedback (Order Tracking – Real Map, MVP): the delivery location on a real Google Map when a Maps Embed key
+   is configured; no live driver tracking. Without a key, the illustrated route is shown. */
+function DeliveryMap({ address, stage, label, embedKey }) {
+  const q = [address?.building, address?.area, 'Dubai', 'United Arab Emirates'].filter(Boolean).join(', ');
+  const status = stage <= 0 ? 'Confirmed' : stage === 1 ? 'Being prepared' : stage === 2 ? 'On its way' : 'Delivered';
+  return (
+    <div className="route map">
+      <iframe title={`Map of the delivery location: ${address?.building || ''}`} loading="lazy" referrerPolicy="no-referrer-when-downgrade" allowFullScreen
+        src={`https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(embedKey)}&q=${encodeURIComponent(q)}&zoom=16`} />
+      <span className="badge-float" style={{ top: 16, left: 16 }}><Icon name="map" size={18} stroke={1.6} />{label} · {status}</span>
+    </div>
+  );
+}
+
 export function OrderDay() {
   const { id, date } = useParams();
   const { state, set } = useStore();
   const guard = useSignedIn(`/orders/${id}/${date}`);
   const { order, loading } = useOrder(id);
+  const config = useConfig();
   const [busy, setBusy] = useState(false);
   const [updated, setUpdated] = useState(() => new Date());
   const [reporting, setReporting] = useState(false);
@@ -417,11 +433,19 @@ export function OrderDay() {
         {day.safetyReview && (
           <div className="banner-warn" role="alert">
             <Icon name="shield" size={18} stroke={2} color="var(--warn)" style={{ flex: 'none' }} />
-            <span>This breakfast no longer matches your allergies.{editable ? ' Please update or cancel it.' : ' Our team will contact you.'}</span>
+            <span>This breakfast no longer matches your updated allergies or dietary needs. Tap <b>Review this morning</b> to choose a safe breakfast or cancel it for a full refund.</span>
+          </div>
+        )}
+        {day.safetyCheck && (
+          <div className="banner-warn" role="status">
+            <Icon name="shield" size={18} stroke={2} color="var(--warn)" style={{ flex: 'none' }} />
+            <span>This breakfast doesn’t match your updated allergies or dietary needs, and it’s past the time it can be changed in the app. Our team has been alerted and won’t let it be prepared until they’ve contacted you.</span>
           </div>
         )}
 
-        {st >= 0 && <RouteCard stage={st} label={shortBuilding.length > 16 ? shortBuilding.slice(0, 15) + '…' : shortBuilding} />}
+        {st >= 0 && (config.maps?.embedKey
+          ? <DeliveryMap address={day.address} stage={st} label={shortBuilding.length > 16 ? shortBuilding.slice(0, 15) + '…' : shortBuilding} embedKey={config.maps.embedKey} />
+          : <RouteCard stage={st} label={shortBuilding.length > 16 ? shortBuilding.slice(0, 15) + '…' : shortBuilding} />)}
 
         {st >= 0 && (
           <section className="card track" style={{ padding: '6px 20px' }} aria-label="Delivery progress">

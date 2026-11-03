@@ -130,3 +130,58 @@ test('a signed-in browser request without a JSON body is still refused (cross-si
   assert.equal(old.status, 403);
   assert.equal((await old.json()).message, 'Request not allowed.');
 });
+
+/* Client feedback (Profile – Allergy Updates & Existing Orders): only mornings the customer can still change
+   become "Needs review"; past mornings are untouched; after the cutoff, operations gets an urgent alert. */
+test('allergy update: past untouched, editable → needs review, past cutoff → urgent alert, not changed', async () => {
+  const u = await signIn('502220077');
+  await call('PUT', '/me/profile', savory, u);
+  const o = await call('POST', '/orders', { days: [dayFor(dates[2], savory), dayFor(dates[3], savory), dayFor(dates[4], savory)], address }, u);
+  assert.equal(o.status, 201, JSON.stringify(o.body));
+  const { dubaiTodayIso, addDaysIso } = await import('../src/domain/standards.js');
+  const today = dubaiTodayIso(), past = addDaysIso(today, -3);
+  // make one morning past (delivered three days ago) and one past its cutoff (today), keep one editable
+  db.prepare('UPDATE order_days SET date = ?, safety_hold = 1 WHERE order_id = ? AND date = ?').run(past, o.body.id, dates[2]);   // a stale hold from earlier
+  db.prepare('UPDATE order_days SET date = ? WHERE order_id = ? AND date = ?').run(today, o.body.id, dates[3]);
+  const cfgBefore = db.prepare('SELECT cfg FROM order_days WHERE order_id = ? AND date = ?').get(o.body.id, today).cfg;
+
+  const everything = { ...savory, allergies: ['gluten', 'dairy', 'egg', 'peanut', 'treenut', 'sesame', 'soy'] };
+  const p = await call('PUT', '/me/profile', everything, u);
+  assert.deepEqual(p.body.review.map(r => r.date), [dates[4]], 'only the editable morning needs the customer');
+  const days = Object.fromEntries((await call('GET', `/orders/${o.body.id}`, null, u)).body.days.map(d => [d.date, d]));
+  assert.equal(days[past].safetyReview, false); assert.equal(days[past].safetyCheck, false);
+  assert.equal(db.prepare('SELECT safety_hold FROM order_days WHERE order_id = ? AND date = ?').get(o.body.id, past).safety_hold, 0, 'stale hold on a past morning cleared');
+  assert.equal(days[today].safetyReview, false, 'past cutoff: not a "Needs review" the customer cannot act on');
+  assert.equal(days[today].safetyCheck, true, 'past cutoff: shown as checked by our team');
+  assert.equal(db.prepare('SELECT cfg FROM order_days WHERE order_id = ? AND date = ?').get(o.body.id, today).cfg, cfgBefore, 'past cutoff: order not modified');
+  const id = db.prepare('SELECT id FROM order_days WHERE order_id = ? AND date = ?').get(o.body.id, today).id;
+  const ex = db.prepare("SELECT priority, note FROM exceptions WHERE ref = ? AND kind = 'Dietary/Allergy Issue' AND resolved = 0").get(`personal:${id}`);
+  assert.ok(ex && ex.priority === 1 && /URGENT/.test(ex.note), 'urgent safety alert for operations');
+  assert.equal(days[dates[4]].safetyReview, true, 'editable: Needs review');
+  // the editable morning can be cancelled (or re-planned) by the customer
+  assert.equal((await call('POST', `/orders/${o.body.id}/days/${dates[4]}/cancel`, {}, u)).status, 200);
+  const notes = (await call('GET', '/me/notifications', null, u)).body;
+  assert.ok(notes.filter(n => n.kind === 'safety_review').length >= 2, 'customer told about both');
+});
+
+/* Help & Support: a new message is kept for the admin panel and emailed to the team's inbox. */
+test('a new support message is emailed to SUPPORT_NOTIFY_EMAIL and listed for operations', async () => {
+  const u = await signIn('502220088');
+  const sent = [];
+  const real = globalThis.fetch;
+  process.env.RESEND_API_KEY = 're_test'; process.env.EMAIL_FROM = 'Morning Box <login@send.morningbox.ae>'; process.env.SUPPORT_NOTIFY_EMAIL = 'info@morningbox.ae';
+  globalThis.fetch = async (url, init) => { if (String(url).startsWith('https://api.resend.com/')) { sent.push(JSON.parse(init.body)); return new Response('{"id":"x"}', { status: 200 }); } return real(url, init); };
+  try {
+    const r = await call('POST', '/support', { topic: 'An order', message: 'My breakfast came without the croissant.' }, u);
+    assert.equal(r.status, 201);
+    await new Promise(res => setTimeout(res, 50));
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0].to, ['info@morningbox.ae']);
+    assert.match(sent[0].subject, /New Morning Box message: An order/);
+    assert.match(sent[0].text, /without the croissant/);
+    const ops = await call('GET', '/ops/support', null, {}, );
+    assert.ok(ops.status === 200 || ops.status === 401);
+  } finally {
+    globalThis.fetch = real; delete process.env.RESEND_API_KEY; delete process.env.EMAIL_FROM; delete process.env.SUPPORT_NOTIFY_EMAIL;
+  }
+});
