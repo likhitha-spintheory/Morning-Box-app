@@ -99,6 +99,17 @@ export const dayProfile = (profile, preference) =>
 export const needsPreference = (profile, preference) =>
   (profile.preferences || []).length > 1 && !(profile.preferences || []).includes(preference);
 
+/** The message shown for a breakfast type with nothing safe to offer (client wording). */
+export const TYPE_UNAVAILABLE = 'No suitable breakfasts are currently available in this category due to your selected dietary restrictions or allergens.';
+/**
+ * Is there a safe breakfast of this type for this customer? With a morning type: for that morning; without one:
+ * for any morning. Uses the same engine as the recommendation, so a type offered here never ends in "no match".
+ */
+export function typeAvailable(profile, preference, context = null) {
+  const ctxs = context ? [context] : CONTEXTS.map(c => c.id);
+  return ctxs.some(c => !!recommend(dayProfile(profile, preference), c).primary);
+}
+
 /** Runs the deterministic engine for one morning (optionally for the breakfast type picked for it). */
 export function recommendDay(profile, context, preference = null) {
   const pick = preference && (profile.preferences || []).includes(preference) ? preference : null;

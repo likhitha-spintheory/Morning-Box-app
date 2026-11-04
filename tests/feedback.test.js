@@ -251,3 +251,26 @@ test('order type: family needs no company and gets a receipt; business needs the
   assert.equal(biz.status, 201, JSON.stringify(biz.body));
   assert.equal(biz.body.orderType, 'business');
 });
+
+/* Client feedback (Dairy-Free): a breakfast type is offered only when a safe breakfast of that type exists. */
+test('breakfast types are available exactly when a safe breakfast exists (dairy-free and every other need)', async () => {
+  const { typeAvailable } = await import('../src/domain/app.js');
+  const { LIBRARY_SETTINGS, setLibrarySettings } = await import('../src/domain/library.js');
+  const before = { ...LIBRARY_SETTINGS };
+  setLibrarySettings({ samples: false });   // as on the dev server: approved products only
+  try {
+    const df = { eatingStyle: 'flexible', preferences: ['savory', 'bakery', 'fresh', 'sweet'], dietary: ['dairyFree'], allergies: [] };
+    assert.equal(typeAvailable(df, 'savory', 'regular'), true);
+    assert.equal(typeAvailable(df, 'bakery', 'regular'), false, 'no approved dairy-free pastry yet');
+    const needs = [[], ['dairyFree'], ['vegan'], ['glutenFree'], ['vegetarian'], ['halal']];
+    const allergies = [[], ['dairy'], ['egg'], ['gluten'], ['treenut', 'peanut']];
+    let checked = 0;
+    for (const eatingStyle of ['flexible', 'health']) for (const dietary of needs) for (const al of allergies)
+      for (const ctx of ['active', 'regular', 'busy', 'relaxed']) for (const t of ['savory', 'bakery', 'fresh', 'sweet']) {
+        const p = { eatingStyle, preferences: ['savory', 'bakery', 'fresh', 'sweet'], dietary, allergies: al };
+        assert.equal(typeAvailable(p, t, ctx), !recommendDay(p, ctx, t).none, `${eatingStyle} ${dietary} ${al} ${ctx} ${t}`);
+        checked++;
+      }
+    assert.equal(checked, 960);
+  } finally { setLibrarySettings(before); }
+});

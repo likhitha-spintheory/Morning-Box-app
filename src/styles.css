@@ -581,3 +581,9 @@ img { max-width: 100%; display: block; }
 body.has-tabbar .screen { padding-bottom: calc(var(--tabbar-h) + var(--mb-inset-bottom)); }
 body.has-tabbar .footer { bottom: calc(var(--tabbar-h) + var(--mb-inset-bottom)); padding-bottom: 14px; }
 @media (max-width: 360px) { .tabbar a { font-size: 12px; } }
+
+/* A breakfast type with nothing safe to offer: greyed out, still tappable to say why. */
+.tile.unavailable { opacity: .55; background: var(--grey-note); box-shadow: none; }
+.tile.unavailable .ico { filter: grayscale(1); }
+.tile-na { position: absolute; top: 12px; right: 12px; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-3); }
+.chip:disabled { opacity: .45; cursor: not-allowed; }

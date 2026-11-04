@@ -10,7 +10,7 @@ import { track } from '../../api.js';
 import {
   CONTEXTS, PREFERENCES, dateInfo, planningWeeks, recommendDay, hydrate, dayPrice, sizePrice, todayIso,
   canChooseSize, boxName, componentName, componentIcon, componentPortion, contextLabel, eatingLabel, prefLabel,
-  dietLabel, allergyLabel, sizeLabel, addonPrice, tomorrowIso as dubaiTomorrowIso, unsafeComponents, stillOffered, needsPreference, dubaiNote, boxPhoto, containsAllergens
+  dietLabel, allergyLabel, sizeLabel, addonPrice, tomorrowIso as dubaiTomorrowIso, unsafeComponents, stillOffered, needsPreference, typeAvailable, TYPE_UNAVAILABLE, dubaiNote, boxPhoto, containsAllergens
 } from '../../domain/app.js';
 import { usePruneExpired } from '../../state/orders.jsx';
 import { BoxEditor, FlavourPicker, LoafPicker, offeredPastries } from '../../components/BoxEditor.jsx';
@@ -224,6 +224,13 @@ export function DailyContext() {
   const types = state.profile.preferences || [];
   const askType = types.length > 1;
   const [pref, setPref] = useState(() => (types.includes(plan.days[iso]?.preference) ? plan.days[iso].preference : null));
+  /* Client feedback (Dairy-Free): a breakfast type with no safe breakfast for this customer and morning is greyed
+     out, never offered and then ending in "no match". Checked with the same engine as the recommendation. */
+  const [why, setWhy] = useState(null);
+  const open = Object.fromEntries(types.map(t => [t, typeAvailable(state.profile, t, ctx)]));
+  const anyOpen = types.some(t => open[t]);
+  const ctxOpen = !ctx || (askType ? anyOpen : !recommendDay(state.profile, ctx).none);
+  useEffect(() => { if (pref && !open[pref]) setPref(null); }, [ctx]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!plan.dates.includes(iso)) return <Navigate to="/plan/dates" replace />;
   const i = plan.dates.indexOf(iso);
   const firstRun = !!state.onboarding;
@@ -272,8 +279,10 @@ export function DailyContext() {
             </div>
             <div className="grid-2" style={{ gap: 16 }} role="radiogroup" aria-labelledby="pref-q">
               {PREFERENCES.filter(p => types.includes(p.id)).map(p => (
-                <button key={p.id} type="button" className={`tile${pref === p.id ? ' on' : ''}`} role="radio" aria-checked={pref === p.id} onClick={() => setPref(p.id)}>
-                  <Tick on={pref === p.id} />
+                <button key={p.id} type="button" className={`tile${pref === p.id ? ' on' : ''}${open[p.id] ? '' : ' unavailable'}`} role="radio" aria-checked={pref === p.id}
+                  aria-disabled={!open[p.id]} aria-describedby={why === p.id ? 'type-why' : undefined}
+                  onClick={() => { if (open[p.id]) { setPref(p.id); setWhy(null); } else setWhy(p.id); }}>
+                  {open[p.id] ? <Tick on={pref === p.id} /> : <span className="tile-na"><Icon name="info" size={14} stroke={2} />Not available</span>}
                   <span className="ico"><Icon name={PREF_ICON[p.id]} size={24} stroke={1.6} /></span>
                   <span className="stack" style={{ gap: 4, marginTop: 'auto' }}>
                     <span style={{ fontWeight: 600, fontSize: 18, lineHeight: 1.25 }}>{PREF_TITLE[p.id]}</span>
@@ -282,10 +291,15 @@ export function DailyContext() {
                 </button>
               ))}
             </div>
+            {why && <div id="type-why" className="note" role="status"><Icon name="info" size={18} stroke={1.8} style={{ flex: 'none' }} /><span><b>{PREF_TITLE[why]}:</b> {TYPE_UNAVAILABLE}</span></div>}
           </section>
         )}
+        {ctx && !ctxOpen && (
+          <div className="banner-warn" role="status"><Icon name="info" size={18} stroke={2} color="var(--warn)" style={{ flex: 'none' }} />
+            <span>No suitable breakfast is available for a {contextLabel(ctx)} with your dietary restrictions or allergens. Please choose another kind of morning, or <Link to="/me" className="link" style={{ color: 'inherit' }}>review your profile</Link>.</span></div>
+        )}
       </main>
-      <Footer><button className="btn" disabled={!ctx || (askType && !pref)} onClick={go}><Go>See my Morning Box</Go></button></Footer>
+      <Footer><button className="btn" disabled={!ctx || !ctxOpen || (askType && !pref)} onClick={go}><Go>See my Morning Box</Go></button></Footer>
     </Screen>
   );
 }

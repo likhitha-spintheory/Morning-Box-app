@@ -11,7 +11,7 @@ import {
   CONTEXTS, PREFERENCES, DELIVERY_WINDOWS, dateInfo, todayIso, boxName, sizeLabel, extrasText, windowLabel, contextLabel,
   eatingLabel, prefLabel, dietLabel, allergyLabel, componentName, componentIcon, trackingStage,
   isBeforeCutoff, cutoffLabel, timeLeft, dayPrice, sizePrice, canChooseSize, recommendDay, addonPrice, shortPlace, serverDateIso,
-  whatsappLink, containsAllergens, planningWeeks, tomorrowIso
+  whatsappLink, containsAllergens, planningWeeks, tomorrowIso, typeAvailable, TYPE_UNAVAILABLE
 } from '../../domain/app.js';
 import { BoxEditor, FlavourPicker, LoafPicker, offeredPastries } from '../../components/BoxEditor.jsx';
 import { addonGroups } from '../../domain/engine.js';
@@ -672,8 +672,9 @@ export function EditMorning() {
           {types.length > 1 && <>
             <h2 className="h3" style={{ fontSize: 19, marginTop: 6 }}>Breakfast type</h2>
             <div className="chips" aria-label="Breakfast type">
-              {types.map(p => <Chip key={p.id} on={draft.cfg.preference === p.id} onClick={() => changeContext(draft.cfg.context, p.id)}>{p.label}</Chip>)}
+              {types.map(p => <Chip key={p.id} on={draft.cfg.preference === p.id} disabled={!typeAvailable(state.profile, p.id, draft.cfg.context)} onClick={() => changeContext(draft.cfg.context, p.id)}>{p.label}</Chip>)}
             </div>
+            {types.some(p => !typeAvailable(state.profile, p.id, draft.cfg.context)) && <span className="xs">Greyed-out types: {TYPE_UNAVAILABLE.charAt(0).toLowerCase() + TYPE_UNAVAILABLE.slice(1)}</span>}
           </>}
           {ctxError && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />{ctxError}</span>}
         </section>}
