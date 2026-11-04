@@ -295,7 +295,7 @@ img { max-width: 100%; display: block; }
 .grab { width: 40px; height: 5px; border-radius: 4px; background: #DCD2C4; align-self: center; }
 
 /* ---------- Bottom navigation ---------- */
-.tabbar { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: 1px solid var(--line); padding: 10px 8px calc(14px + var(--mb-inset-bottom)); background: var(--ivory); z-index: 5; }
+.tabbar { position: sticky; bottom: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); padding: 10px 8px calc(14px + var(--mb-inset-bottom)); background: var(--ivory); z-index: 5; }
 .tabbar a { display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 56px; justify-content: center; text-decoration: none; font-size: 13px; font-weight: 500; color: var(--text-3); position: relative; }
 .tabbar a.active { color: var(--espresso); font-weight: 600; }
 .tabbar a.active svg { color: var(--gold); }
@@ -587,3 +587,16 @@ body.has-tabbar .footer { bottom: calc(var(--tabbar-h) + var(--mb-inset-bottom))
 .tile.unavailable .ico { filter: grayscale(1); }
 .tile-na { position: absolute; top: 12px; right: 12px; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-3); }
 .chip:disabled { opacity: .45; cursor: not-allowed; }
+
+/* One card for every morning (Today, Orders): the title gets the full width; status and cutoff sit underneath. */
+.mcard { background: var(--white); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow-card); overflow: hidden; }
+.mcard-main { display: flex; align-items: center; gap: 14px; padding: 16px; text-decoration: none; color: inherit; }
+.mcard .datebox { width: 56px; padding: 8px 0 6px; border-radius: 16px; }
+.mcard .datebox .dn { font-size: 22px; }
+.mcard-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.mcard-kind { font-size: 11.5px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--label); }
+.mcard-title { font-size: 17px; font-weight: 600; line-height: 1.25; color: var(--espresso); }
+.mcard-meta { font-size: 14.5px; color: var(--text-3); line-height: 1.35; }
+.mcard-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; }
+.mcard-foot .status { padding: 4px 10px; font-size: 12.5px; }
+.mcard-actions { display: flex; align-items: center; gap: 10px; padding: 10px 16px 14px; border-top: 1px solid var(--line-soft); }

@@ -220,7 +220,7 @@ export function Note({ icon = 'info', children }) {
 }
 
 export function TabBar({ active, global = false }) {
-  const tabs = [['/today', 'home', 'Today'], ['/start', 'cal', 'Plan'], ['/business', 'brief', 'Group'], ['/orders', 'box', 'Orders'], ['/me', 'user', 'Profile']];
+  const tabs = [['/today', 'home', 'Today'], ['/start', 'cal', 'Plan'], ['/orders', 'box', 'Orders'], ['/me', 'user', 'Profile']];
   return (
     <nav className={`tabbar${global ? ' global' : ''}`} aria-label="Primary">
       {tabs.map(([to, icon, label]) => (
@@ -439,9 +439,8 @@ export function AppNav() {
   }, [chrome]);
   if (!chrome) return null;
   const active = /^\/today/.test(pathname) ? '/today'
-    : /^\/(start|plan|checkout|profile)/.test(pathname) ? '/start'
-    : /^\/business/.test(pathname) ? '/business'
-    : /^\/orders/.test(pathname) ? '/orders'
+    : /^\/(orders|business\/orders)/.test(pathname) ? '/orders'
+    : /^\/(start|plan|checkout|profile|business)/.test(pathname) ? '/start'
     : /^\/me/.test(pathname) ? '/me' : null;
   return <TabBar active={active} global />;
 }

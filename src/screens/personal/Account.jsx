@@ -57,19 +57,30 @@ function groupDays(orders = []) {
 const groupTitle = d => (d.orderType === 'family' ? 'Family & friends breakfast' : d.orderType === 'business' || d.company ? `Business breakfast${d.company ? ` · ${d.company}` : ''}` : 'Group breakfast');
 const groupStatus = d => (d.cancelled ? ['off', 'Cancelled · refunded'] : d.problem ? ['off', d.problem === 'Failed' ? 'Delivery missed' : 'Not prepared · refunded']
   : d.stage >= 3 ? ['done', 'Delivered'] : d.stage === 2 ? ['prep', 'On its way'] : d.stage === 1 ? ['prep', 'Being prepared'] : ['ok', 'Confirmed']);
-/** A group or business morning in a list: opens its Manage page. */
-function GroupRow({ d, label }) {
-  const [tone, text] = groupStatus(d);
+/** One card for every morning, personal or group: date, title on its own line, details, then status. */
+function MorningCard({ d, showCutoff = true, children }) {
+  const group = d.kind === 'group';
+  const [tone, text] = group ? groupStatus(d) : [];
+  const editable = showCutoff && (group ? d.editable : editableDay(d)) && timeLeft(d.date);
   return (
-    <Link to={`/business/orders/${d.orderId}`} className="card row" style={{ textDecoration: 'none', alignItems: 'flex-start', gap: 16, padding: 18 }}>
-      <DateBox iso={d.date} />
-      <span className="stack" style={{ flex: 1, gap: 3, minWidth: 0 }}>
-        {label && <span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>{label}</span>}
-        <span className="strong" style={{ fontSize: 17 }}>{groupTitle(d)}</span>
-        <span className="help" style={{ fontSize: 15 }}>{d.people} people · {windowLabel(d.window)}{d.delivery?.building ? ` · ${shortPlace(d.delivery.building)}` : ''}</span>
-      </span>
-      <span className={`status ${tone}`}>{text}</span>
-    </Link>
+    <div className="mcard">
+      <Link to={group ? `/business/orders/${d.orderId}` : `/orders/${d.orderId}/${d.date}`} className="mcard-main">
+        <DateBox iso={d.date} />
+        <span className="mcard-body">
+          {group && <span className="mcard-kind">Group order</span>}
+          <span className="mcard-title">{group ? groupTitle(d) : boxName(d.cfg)}</span>
+          <span className="mcard-meta">{group
+            ? `${d.people} people · ${windowLabel(d.window)}${d.delivery?.building ? ` · ${shortPlace(d.delivery.building)}` : ''}`
+            : `${canChooseSize(d.cfg) ? sizeLabel(d.cfg.size) : 'Standard'} · ${windowLabel(d.window)}${d.address?.building ? ` · ${shortPlace(d.address.building)}` : ''}`}</span>
+          <span className="mcard-foot">
+            {group ? <span className={`status ${tone}`}>{text}</span> : <StatusPill day={d} />}
+            {editable && <span className="xs row" style={{ gap: 4 }}><Icon name="clock" size={13} stroke={1.8} />Changes close in {timeLeft(d.date)}</span>}
+          </span>
+        </span>
+        <Icon name="chevron" size={18} stroke={1.8} color="var(--text-4)" style={{ flex: 'none' }} />
+      </Link>
+      {children ? <div className="mcard-actions">{children}</div> : null}
+    </div>
   );
 }
 
@@ -133,6 +144,7 @@ export function Today() {
   const upcoming = allDays(state.orders).filter(d => !d.cancelled && d.date >= today && trackingStage(d) < 3).sort((a, b) => a.date.localeCompare(b.date));
   const groupUpcoming = groupDays(state.businessOrders).filter(d => !d.cancelled && d.date >= today && d.stage < 3).sort((a, b) => a.date.localeCompare(b.date));
   const nextGroup = groupUpcoming[0] || null;
+  const comingUp = [...upcoming, ...groupUpcoming].sort((a, b) => a.date.localeCompare(b.date));
   const next = upcoming[0];
   const lastOrder = state.orders[0];
   const hour = new Date().getHours();
@@ -181,37 +193,15 @@ export function Today() {
           <h1 className="h-display" style={{ fontSize: 40 }}>Hello, <em>{state.user.firstName}.</em></h1>
         </div>
 
-        {nextGroup && (!next || nextGroup.date < next.date) ? (
-          <GroupRow d={nextGroup} label={nextGroup.date === today ? 'Today' : 'Next breakfast'} />
-        ) : next ? (
-          <Link to={`/orders/${next.orderId}/${next.date}`} className="card row" style={{ textDecoration: 'none', alignItems: 'flex-start', gap: 16, padding: 18 }}>
-            <DateBox iso={next.date} />
-            <span className="stack" style={{ flex: 1, gap: 3 }}>
-              <span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>{next.date === today ? 'Today' : 'Next breakfast'}</span>
-              <span className="strong" style={{ fontSize: 18 }}>{boxName(next.cfg)}</span>
-              <span className="help" style={{ fontSize: 15 }}>{windowLabel(next.window)} · {shortPlace(next.address.building)}</span>
-            </span>
-            <StatusPill day={next} />
-          </Link>
-        ) : (
-          <div className="card"><span className="strong">No mornings planned yet</span></div>
-        )}
-        {/* The other group & business mornings coming up, so they are never only inside Group & Business. */}
-        {groupUpcoming.filter(d => d !== nextGroup || (next && next.date <= nextGroup.date)).slice(0, 3).map(d => <GroupRow key={`g${d.orderId}${d.date}`} d={d} />)}
-        {next && editableDay(next) && <CutoffPanel iso={next.date} title={`${dateInfo(next.date).label} is still editable`} />}
+        {/* Coming up: personal and group mornings together, newest first, in one card design. */}
+        <section className="stack gap-10" aria-label="Coming up">
+          <div className="row"><span className="eyebrow grey" style={{ letterSpacing: '.18em' }}>Coming up</span>
+            {comingUp.length > 0 && <Link to="/orders" className="link" style={{ fontSize: 14 }}>See all orders</Link>}</div>
+          {comingUp.length
+            ? comingUp.slice(0, 3).map(d => <MorningCard key={`${d.kind || 'p'}${d.orderId}${d.date}`} d={d} />)
+            : <div className="card stack gap-4"><span className="strong">No mornings planned yet</span><span className="help" style={{ fontSize: 15 }}>Plan one below, or from Plan.</span></div>}
+        </section>
 
-        {toRate && (
-          <section className="card stack gap-10" style={{ padding: 18 }} aria-label="Your feedback">
-            <span className="strong" style={{ fontSize: 17 }}>How was {boxName(toRate.cfg)}?</span>
-            <div className="grid-2">
-              {[['Loved it', 'heart'], ['Not for me', 'meh']].map(([v, icon]) => (
-                <Link key={v} to={`/orders/${toRate.orderId}/${toRate.date}/feedback?value=${encodeURIComponent(v)}`} className="btn-secondary"><Icon name={icon} size={20} stroke={1.6} />{v}</Link>
-              ))}
-            </div>
-          </section>
-        )}
-
-        <ErrorBanner>{loadError}</ErrorBanner>
         {review.length > 0 && (
           <Link to={`/orders/${review[0].orderId}/${review[0].date}`} className="note" style={{ textDecoration: 'none', color: 'inherit' }}>
             <Icon name="shield" size={20} stroke={1.6} style={{ flex: 'none' }} />
@@ -225,6 +215,18 @@ export function Today() {
           </Link>
         )}
 
+        {toRate && (
+          <section className="card stack gap-10" style={{ padding: 18 }} aria-label="Your feedback">
+            <span className="strong" style={{ fontSize: 17 }}>How was {boxName(toRate.cfg)}?</span>
+            <div className="grid-2">
+              {[['Loved it', 'heart'], ['Not for me', 'meh']].map(([v, icon]) => (
+                <Link key={v} to={`/orders/${toRate.orderId}/${toRate.date}/feedback?value=${encodeURIComponent(v)}`} className="btn-secondary"><Icon name={icon} size={20} stroke={1.6} />{v}</Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <ErrorBanner>{loadError}</ErrorBanner>
         {suggestion && !suggestion.none && !inProgress && (
           <section className="card stack gap-12" style={{ padding: 18 }} aria-label="Your Morning Box">
             <span className="eyebrow row" style={{ justifyContent: 'flex-start', gap: 8 }}><Icon name="sparkle" size={16} stroke={1.6} color="var(--espresso)" />Your Morning Box · {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</span>
@@ -243,45 +245,29 @@ export function Today() {
             </div>
           </section>
         )}
-        {quick && (
-          <Link to={`/plan/dates?reorder=${quick.orderId}:${quick.date}`} className={`entry ${hasSuggestion ? 'plain' : 'gold'}`}>
-            <Icon name="repeat" size={24} stroke={1.6} />
-            <span style={{ flex: 1 }}><b>Have it again</b>
-              <span className="d">{boxName(quick.cfg)}</span></span>
-            <Icon name="arrow" size={22} stroke={1.8} />
-          </Link>
-        )}
-        <Link to="/start" className={`entry ${quick || hasSuggestion ? 'plain' : 'gold'}`}>
-          <Icon name="sunny" size={24} stroke={1.6} />
-          <span style={{ flex: 1 }}><b>Plan my mornings</b></span>
-          <Icon name="arrow" size={22} stroke={1.8} />
-        </Link>
-        {/* FLW §1/§18: Business Breakfast stays reachable for signed-in customers (secondary). */}
-        <Link to={state.businessUser ? '/business' : '/business/people'} className="option" style={{ textDecoration: 'none' }}>
-          <span className="ico"><Icon name="brief" size={22} stroke={1.6} /></span>
-          <span className="stack" style={{ flex: 1, gap: 2 }}>
-            <span style={{ fontWeight: 600, fontSize: 18 }}>Group &amp; Business Breakfast</span>
-            <span className="help" style={{ fontSize: 15 }}>{state.businessUser ? 'New order, reorder or a saved plan' : 'For family, friends, teams & meetings'}</span>
-          </span>
-          <Icon name="chevron" size={18} stroke={1.8} />
-        </Link>
-
-        {lastOrder && (
-          <section className="stack gap-12">
-            <span className="eyebrow">Plan faster</span>
-            <Link to={`/plan/dates?reuse=${lastOrder.id}`} className="option" style={{ textDecoration: 'none' }}>
+        <section className="stack gap-10" aria-label="Order again">
+          <span className="eyebrow grey" style={{ letterSpacing: '.18em' }}>Order again</span>
+          {quick && (
+            <Link to={`/plan/dates?reorder=${quick.orderId}:${quick.date}`} className="option" style={{ textDecoration: 'none' }}>
               <span className="ico"><Icon name="repeat" size={22} stroke={1.6} /></span>
-              <span style={{ flex: 1, fontWeight: 600, fontSize: 18 }}>Use this plan again</span>
+              <span className="stack" style={{ flex: 1, gap: 2 }}><span style={{ fontWeight: 600, fontSize: 17 }}>Have it again</span><span className="help" style={{ fontSize: 14.5 }}>{boxName(quick.cfg)}</span></span>
               <Icon name="chevron" size={18} stroke={1.8} />
             </Link>
-            <Link to="/orders?tab=past" className="option" style={{ textDecoration: 'none' }}>
-              <span className="ico"><Icon name="box" size={22} stroke={1.6} /></span>
-              <span style={{ flex: 1, fontWeight: 600, fontSize: 18 }}>Reorder a previous morning</span>
+          )}
+          {lastOrder && lastOrder.days.filter(d => !d.cancelled).length > 1 && (
+            <Link to={`/plan/dates?reuse=${lastOrder.id}`} className="option" style={{ textDecoration: 'none' }}>
+              <span className="ico"><Icon name="cal" size={22} stroke={1.6} /></span>
+              <span className="stack" style={{ flex: 1, gap: 2 }}><span style={{ fontWeight: 600, fontSize: 17 }}>Use this plan again</span><span className="help" style={{ fontSize: 14.5 }}>Your last {lastOrder.days.filter(d => !d.cancelled).length} mornings, for new dates</span></span>
               <Icon name="chevron" size={18} stroke={1.8} />
             </Link>
-          </section>
-        )}
-
+          )}
+          {/* FLW §1/§18: Group & Business Breakfast stays one tap away for signed-in customers. */}
+          <Link to={state.businessUser ? '/business' : '/business/people'} className="option" style={{ textDecoration: 'none' }}>
+            <span className="ico"><Icon name="brief" size={22} stroke={1.6} /></span>
+            <span className="stack" style={{ flex: 1, gap: 2 }}><span style={{ fontWeight: 600, fontSize: 17 }}>Group &amp; Business Breakfast</span><span className="help" style={{ fontSize: 14.5 }}>For family, friends, teams &amp; meetings</span></span>
+            <Icon name="chevron" size={18} stroke={1.8} />
+          </Link>
+        </section>
       </main>
     </Screen>
   );
@@ -321,19 +307,10 @@ export function Orders() {
             <Link to="/start" className="btn-secondary">Plan my mornings</Link>
           </div>
         )}
-        {list.map(d => d.kind === 'group' ? <GroupRow key={`g${d.orderId}${d.date}`} d={d} /> : (
-          <div key={d.orderId + d.date} className="card stack gap-12" style={{ padding: 18 }}>
-            <Link to={`/orders/${d.orderId}/${d.date}`} className="row" style={{ textDecoration: 'none', alignItems: 'flex-start', gap: 16 }}>
-              <DateBox iso={d.date} />
-              <span className="stack" style={{ flex: 1, gap: 3, minWidth: 0 }}>
-                <span className="strong" style={{ fontSize: 17 }}>{boxName(d.cfg)}</span>
-                <span className="help" style={{ fontSize: 15 }}>{canChooseSize(d.cfg) ? sizeLabel(d.cfg.size) : 'Standard'} · {windowLabel(d.window)}</span>
-                {tab !== 'past' && editableDay(d) && timeLeft(d.date) && <span className="xs row" style={{ justifyContent: 'flex-start', gap: 6 }}><Icon name="clock" size={14} stroke={1.8} />Changes close in {timeLeft(d.date)}</span>}
-              </span>
-              <StatusPill day={d} />
-            </Link>
+        {list.map(d => d.kind === 'group' ? <MorningCard key={`g${d.orderId}${d.date}`} d={d} showCutoff={tab !== 'past'} /> : (
+          <MorningCard key={d.orderId + d.date} d={d} showCutoff={tab !== 'past'}>
             {tab === 'past' && !d.cancelled && (
-              <div className="row">
+              <div className="row" style={{ width: '100%' }}>
                 {trackingStage(d) === 3 && !d.feedback ? <Link to={`/orders/${d.orderId}/${d.date}/feedback`} className="link">Rate this morning</Link> : <span />}
                 <span className="row" style={{ gap: 8 }}>
                   {/* PER §3.2: any earlier multi-day plan can be reused for chosen dates. */}
@@ -344,7 +321,7 @@ export function Orders() {
                 </span>
               </div>
             )}
-          </div>
+          </MorningCard>
         ))}
       </main>
     </Screen>
