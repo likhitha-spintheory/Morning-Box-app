@@ -1,10 +1,13 @@
-import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { CONSENT } from '../../legal/documents.js';
 import { put, track } from '../../api.js';
-import { Screen, TopBar, Option, Chip, Footer, Icon, Tick, SunArc, Go, InfoTip } from '../../components/ui.jsx';
+import { Screen, TopBar, Option, Chip, Footer, Icon, Tick, SunArc, Go, InfoTip, goBack } from '../../components/ui.jsx';
 import { useStore } from '../../state/store.jsx';
 import { EATING_STYLES, PREFERENCES, DIETARY, ALLERGENS, allergyLabel, dietLabel } from '../../domain/app.js';
 import { glutenFreeBlocked, GLUTEN_FREE_MESSAGE } from '../../domain/standards.js';
+
+export const hasHealthData = p => !!(p.dietary?.length || p.allergies?.length || (p.otherAllergies || '').trim());
 
 const EATING_ICON = { health: 'leafy', flexible: 'sunny' };
 /* MB-PER-001 Q1 — the approved descriptions, word for word. */
@@ -32,26 +35,32 @@ function useStep(nextPath) {
   const [error, setError] = useState('');
   const profile = editing ? draft : state.profile;
   const update = fn => (editing ? setDraft(d => { const n = structuredClone(d); fn(n); return n; }) : set(s => { fn(s.profile); }));
-  const goNext = async (extra = s => s) => {
+  /* `fix` adjusts the profile being saved (e.g. drops allergy data the customer didn't agree to keep). */
+  const goNext = async (extra = s => s, fix = null) => {
+    const fixed = p => { const n = structuredClone(p); if (fix) fix(n); return n; };
     if (!editing) {
       if (nextPath === '/plan/dates') track('profile_completed');
+      const prof = fixed(state.profile);
       /* Finishing onboarding while signed in: save the profile to the account now. */
       if (state.session && nextPath === '/plan/dates') {
-        await put('/me/profile', state.profile).then(() => markProfileSynced(state.profile)).catch(() => {});
+        await put('/me/profile', prof).then(() => markProfileSynced(prof)).catch(() => {});
       }
-      set(s => { extra(s); }); nav(nextPath); return;
+      set(s => { s.profile = prof; extra(s); }); nav(nextPath); return;
     }
+    const saving = fixed(draft);
     let review = [];
     if (state.session && state.profileDone) {
       setBusy(true); setError('');
       try {
-        const r = await put('/me/profile', draft);
-        markProfileSynced(draft);
+        const r = await put('/me/profile', saving);
+        markProfileSynced(saving);
         review = r.review || [];
       } catch (e) { setBusy(false); setError(e.message); return; }
     }
-    set(s => { s.profile = draft; extra(s); });
-    nav(editing === 'plan' ? -1 : review.length ? `/me?review=${review.length}` : '/me');
+    set(s => { s.profile = saving; extra(s); });
+    const withdrawn = !saving.healthConsent && state.profile.healthConsent && !hasHealthData(saving);
+    if (editing === 'plan') { goBack(nav); return; }
+    nav(review.length ? `/me?review=${review.length}` : withdrawn ? '/me?withdrawn=1' : '/me');
   };
   return { editing, goNext, profile, update, busy, error };
 }
@@ -140,8 +149,19 @@ export function Dietary() {
     p[key] = a.includes(id) ? a.filter(x => x !== id) : [...a, id];
   });
   /* First-time profile: dates and daily context follow as steps 4 and 5 of the same flow. */
-  const finish = () => goNext(s => { if (!editing) s.onboarding = true; s.profileDone = true; });
-  const gfBlocked = glutenFreeBlocked(dietary);   // client feedback PRD-004
+  const done = s => { if (!editing) s.onboarding = true; s.profileDone = true; };
+  /* Legal pack B1: allergy and dietary details are kept only with the customer's explicit, unticked-by-default consent. */
+  const hasData = hasHealthData(profile);
+  const consent = !!profile.healthConsent;
+  const [asking, setAsking] = useState(false);
+  /* The question sits below the fold: bring it (and the "Continue without" choice) into view. */
+  useEffect(() => { if (asking) document.getElementById('hc-ask')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, [asking]);
+  const finish = () => {
+    if (hasData && !consent) { setAsking(true); return; }
+    goNext(done, p => { if (!hasHealthData(p)) p.healthConsent = false; });
+  };
+  const withoutData = () => goNext(done, p => { p.dietary = []; p.allergies = []; p.otherAllergies = ''; p.healthConsent = false; });
+  const gfBlocked = consent && glutenFreeBlocked(dietary);   // client feedback PRD-004
   const safetyText = allergies.length
     ? `We’ll leave out anything with ${allergies.map(a => allergyLabel(a).split(' /')[0].toLowerCase()).join(', ')}.`
     : other.trim() ? 'We’ll check your other allergies with the bakery.'
@@ -170,7 +190,24 @@ export function Dietary() {
             onChange={e => update(p => { p.otherAllergies = e.target.value; })} />
         </div>
       </section>
-      {safetyText && (
+      {(hasData || consent) && (
+        <section className="card stack gap-10" style={{ padding: 18, borderColor: asking ? 'var(--warn)' : undefined }} aria-labelledby="hc">
+          <h2 id="hc" className="h3" style={{ fontSize: 17 }}>{CONSENT.healthTitle}</h2>
+          <p className="help" style={{ margin: 0, fontSize: 15 }}>{CONSENT.health} <Link to="/legal/privacy" className="link">Privacy Policy</Link></p>
+          <label className="row" style={{ gap: 10, justifyContent: 'flex-start', cursor: 'pointer', minHeight: 44 }}>
+            <input type="checkbox" checked={consent} style={{ width: 22, height: 22, accentColor: 'var(--espresso)' }}
+              onChange={e => { setAsking(false); update(p => { p.healthConsent = e.target.checked; }); }} />
+            <span className="strong">{CONSENT.healthAgree}</span>
+          </label>
+        </section>
+      )}
+      {asking && (
+        <div id="hc-ask" className="banner-warn" role="alert" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+          <span>Without your agreement we can’t keep these details. {CONSENT.healthOff}</span>
+          <button type="button" className="btn-secondary" onClick={withoutData}>Continue without saving them</button>
+        </div>
+      )}
+      {safetyText && consent && (
         <div className="note" role="status" aria-live="polite">
           <Icon name="shield" size={22} stroke={1.6} style={{ flex: 'none' }} />
           <span>{safetyText}</span>

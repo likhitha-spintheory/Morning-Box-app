@@ -1,8 +1,13 @@
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
 import { db, json, parse, tx, logEvent } from './db.js';
-import { SUPPLIER, VAT_RATE, SUPPORT, TERMS_VERSION } from './company.js';
-import { requireUser, userPayload, cleanName, SESSION_COOKIE, sessionUserId, limitIp, normaliseMobile } from './auth.js';
+import { invoiceParties } from './invoice.js';
+import { SUPPLIER, VAT_RATE, SUPPORT, TERMS_VERSION, LEGAL } from './company.js';
+import { logConsent, setMarketing } from './consent.js';
+import { geoCheck, checkCoordinates } from './geo.js';
+import { placeProblem, areaMessage } from '../src/domain/places.js';
+import { CONSENT_VERSION } from '../src/legal/documents.js';
+import { requireUser, userPayload, cleanName, SESSION_COOKIE, sessionUserId, cookieToken, limitIp, normaliseMobile } from './auth.js';
 import {
   ApiError, bad, validateProfile, assertOrderable, assertEditable, assertCapacity, availability,
   buildPersonalDay, validateAddress, unsafeComponents, inHorizon, emailOk, plain, raiseException,
@@ -19,7 +24,7 @@ import { openSafetyCheck } from './days.js';
 import { pricingSnapshot } from '../src/domain/standards.js';
 import { LIBRARY_SETTINGS } from '../src/domain/library.js';
 import { menuSnapshot } from '../src/domain/menu.js';
-import { ACTIVE_AREAS, GLUTEN_FREE } from '../src/domain/standards.js';
+import { ACTIVE_AREAS, GLUTEN_FREE, areaFor } from '../src/domain/standards.js';
 import { notify, listNotifications, markRead, alreadyNotified } from './notify.js';
 import { recommend } from '../src/domain/engine.js';
 import { boxName, componentName, sizeLabel, windowLabel, extrasText } from '../src/domain/app.js';
@@ -37,9 +42,14 @@ export function newOrderId(prefix, table) {
 }
 const idemKey = v => (typeof v === 'string' && /^[\w-]{8,64}$/.test(v) ? v : null);
 
+/* Legal pack B1: allergy and dietary data is stored and used only with the customer's explicit consent. */
+const hasHealthData = p => !!(p.dietary?.length || p.allergies?.length || (p.otherAllergies || '').trim());
+const CONSENT_REQUIRED = 'To use your allergy and dietary information, tick “I agree” in your Morning Profile, or remove it.';
+
 function loadProfile(userId) {
   const p = userPayload(userId).profile;
   if (!p) throw bad('profile_missing', 'Complete your Morning Profile first.');
+  if (hasHealthData(p) && !p.healthConsent) throw bad('consent_required', CONSENT_REQUIRED);
   return p;
 }
 
@@ -107,7 +117,7 @@ personalRouter.get('/availability', (req, res) => {
 personalRouter.get('/config', (_req, res) => {
   /* Prices set in Admin, and the Fruit Danish variants partner bakeries can make (MB-PRO-001 §14.2). */
   const flavours = [...new Set(activeBakeries().flatMap(danishFlavours))];
-  res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: SUPPLIER, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples }, menu: menuSnapshot(), areas: [...ACTIVE_AREAS],
+  res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: { name: SUPPLIER.name, address: SUPPLIER.address, licence: SUPPLIER.licence }, legal: LEGAL, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples }, menu: menuSnapshot(), areas: [...ACTIVE_AREAS],
     /* Which sign-in codes can be delivered, so the app only offers those (development shows codes in the server log). */
     signIn: { email: DEV || mailConfigured(), mobile: DEV || whatsappConfigured() },
     /* Real map on order tracking (Google Maps Embed API: free, key restricted to this site in Google Cloud). */
@@ -141,11 +151,22 @@ personalRouter.get('/me', requireUser, (req, res) => res.json({ ...userPayload(r
 
 personalRouter.put('/me/profile', requireUser, (req, res) => {
   const p = validateProfile(req.body);
-  const before = db.prepare('SELECT other_allergies FROM profiles WHERE user_id = ?').get(req.userId)?.other_allergies || '';
+  const health = hasHealthData(p);
+  if (health && req.body.healthConsent !== true) throw bad('consent_required', CONSENT_REQUIRED);
+  const prior = db.prepare('SELECT other_allergies, health_consent_at, dietary, allergies FROM profiles WHERE user_id = ?').get(req.userId);
+  const before = prior?.other_allergies || '';
   db.prepare(`INSERT INTO profiles (user_id, eating_style, preferences, dietary, allergies, other_allergies) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id) DO UPDATE SET eating_style = excluded.eating_style, preferences = excluded.preferences,
     dietary = excluded.dietary, allergies = excluded.allergies, other_allergies = excluded.other_allergies, updated_at = datetime('now')`)
     .run(req.userId, p.eatingStyle, json(p.preferences), json(p.dietary), json(p.allergies), p.otherAllergies || null);
+  if (health && !prior?.health_consent_at) {
+    db.prepare("UPDATE profiles SET health_consent_at = datetime('now'), health_consent_version = ? WHERE user_id = ?").run(CONSENT_VERSION, req.userId);
+    logConsent(req.userId, 'health', 'granted');
+  } else if (!health && req.body.healthConsent === false && prior?.health_consent_at) {
+    /* Withdrawal (B6): the saved details are already cleared above; future orders carry no allergy notes. */
+    db.prepare('UPDATE profiles SET health_consent_at = NULL, health_consent_version = NULL WHERE user_id = ?').run(req.userId);
+    logConsent(req.userId, 'health', 'withdrawn');
+  }
   const review = reviewUpcoming(req.userId, p);
   if (p.otherAllergies && p.otherAllergies !== before) flagOtherAllergies(req.userId, p, upcomingDays(req.userId));
   res.json({ ...userPayload(req.userId), review });
@@ -153,7 +174,7 @@ personalRouter.put('/me/profile', requireUser, (req, res) => {
 
 personalRouter.put('/me/settings', requireUser, (req, res) => {
   const { coffeeReminder, email, firstName, offers } = req.body;
-  if (typeof offers === 'boolean') db.prepare('UPDATE users SET marketing_opt_in = ? WHERE id = ?').run(offers ? 1 : 0, req.userId);
+  if (typeof offers === 'boolean') setMarketing(req.userId, offers);
   if (typeof coffeeReminder === 'boolean') {
     db.prepare(`INSERT INTO profiles (user_id, coffee_reminder) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET coffee_reminder = excluded.coffee_reminder`)
       .run(req.userId, coffeeReminder ? 1 : 0);
@@ -177,18 +198,44 @@ personalRouter.post('/me/notifications/read', requireUser, (req, res) => {
 /** Accept the current Terms & Privacy Policy (after they change). */
 personalRouter.post('/me/accept-terms', requireUser, (req, res) => {
   db.prepare("UPDATE users SET terms_version = ?, terms_accepted_at = datetime('now') WHERE id = ?").run(TERMS_VERSION, req.userId);
+  logConsent(req.userId, 'terms', 'accepted', TERMS_VERSION);
   res.json(userPayload(req.userId));
+});
+
+/** Delivery area check for the Delivery step (client feedback FLW-023): the same rules the order goes through.
+    Body { address } or { addresses: [...] } ({ building, unit|office, area }). 200 { ok: true } or 400 with the reason. */
+personalRouter.post('/address/check', (req, res, next) => {
+  limitIp(req, 'address-check', 300);
+  const list = (Array.isArray(req.body?.addresses) ? req.body.addresses : [req.body?.address]).slice(0, 40);
+  if (!list.length || list.some(a => !a || typeof a !== 'object')) return next(bad('address_invalid', 'Add your building and area.'));
+  for (const a of list) {
+    if (!areaFor(a.area)) return next(bad('area_unavailable', areaMessage()));
+    const problem = placeProblem({ ...a, area: areaFor(a.area) });
+    if (problem) return next(bad(problem.code, problem.message));
+  }
+  Promise.all(list.map(a => checkCoordinates({ ...a, area: areaFor(a.area) }))).then(() => res.json({ ok: true }), next);
+});
+
+/** Device storage choice from the cookie banner (legal pack B5), signed in or not. */
+personalRouter.post('/consents', (req, res) => {
+  limitIp(req, 'consents', 60);
+  const analytics = req.body?.analytics;
+  if (typeof analytics !== 'boolean') throw bad('consent_invalid', 'Choose whether to allow analytics.');
+  const token = (req.get('authorization') || '').replace(/^Bearer /, '');
+  logConsent(sessionUserId(token) || sessionUserId(cookieToken(req)), 'cookies', analytics ? 'analytics:on' : 'analytics:off');
+  res.status(204).end();
 });
 
 /** Everything we hold about me, as JSON (UAE PDPL right of access). */
 personalRouter.get('/me/export', requireUser, (req, res) => {
-  const user = db.prepare('SELECT mobile, first_name, email, login_email, created_at, terms_version, terms_accepted_at, marketing_opt_in FROM users WHERE id = ?').get(req.userId);
+  const user = db.prepare('SELECT mobile, first_name, email, login_email, created_at, terms_version, terms_accepted_at, marketing_opt_in, marketing_opt_in_at FROM users WHERE id = ?').get(req.userId);
   if (!user.mobile.startsWith('+')) user.mobile = null;   // email-only account
   const orders = serializeOrders(db.prepare('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at').all(req.userId));
   res.set('Content-Disposition', 'attachment; filename="morning-box-my-data.json"').json({
     exportedAt: new Date().toISOString(), account: user, ...userPayload(req.userId), orders,
     support: db.prepare('SELECT topic, order_ref, message, status, reply, created_at, replied_at FROM support_requests WHERE user_id = ?').all(req.userId),
-    notifications: listNotifications(req.userId, 500)
+    notifications: listNotifications(req.userId, 500),
+    consents: db.prepare('SELECT kind, value, version, created_at FROM consent_log WHERE user_id = ? ORDER BY id').all(req.userId)
   });
 });
 
@@ -386,7 +433,7 @@ registerCheckoutHandler('personal_order', (userId, payload, payment) => createPe
  * Response: 201 with the order when nothing is left to pay by card (or in demo mode), otherwise
  * 202 { checkout: { id, url } } — the app opens `url` and comes back to #/pay/<id> (server/payments.js).
  */
-personalRouter.post('/orders', requireUser, (req, res, next) => {
+personalRouter.post('/orders', requireUser, geoCheck, (req, res, next) => {
   const key = idemKey(req.body.idempotencyKey);
   if (key) {
     const existing = db.prepare('SELECT * FROM orders WHERE user_id = ? AND idempotency_key = ?').get(req.userId, key);
@@ -467,7 +514,7 @@ function editPersonalDay(userId, orderId, date, body, payment = null) {
       if (b.price !== day.price) db.prepare('INSERT INTO payment_adjustments (order_day_id, amount) VALUES (?, ?)').run(day.id, roundAed(b.price - day.price));
       if (due > 0) recordPayment('personal', order.id, payment);
       /* A lower price is paid back the same way as a refund: card first up to what it paid, the rest as credit. */
-      if (b.price < day.price) payBack(order.id, userId, roundAed(day.price - b.price), `price change ${day.date}`);
+      if (b.price < day.price) payBack(order.id, userId, roundAed(day.price - b.price), `price change ${day.date}`, day.date);
     } else {
       db.prepare('UPDATE order_days SET window = ? WHERE id = ?').run(window, day.id);
     }
@@ -480,7 +527,7 @@ function editPersonalDay(userId, orderId, date, body, payment = null) {
 registerCheckoutHandler('personal_change', (userId, p, payment) => { editPersonalDay(userId, p.orderId, p.date, p.body, payment); return p.orderId; });
 
 /** Response: the order, or 202 { checkout } when the change costs more and must be paid first. */
-personalRouter.patch('/orders/:id/days/:date', requireUser, (req, res, next) => {
+personalRouter.patch('/orders/:id/days/:date', requireUser, geoCheck, (req, res, next) => {
   const r = editPersonalDay(req.userId, req.params.id, req.params.date, req.body);
   if (r.order) return res.json(serializeOrder(r.order));
   const p = { orderId: req.params.id, date: req.params.date, body: req.body };
@@ -499,7 +546,7 @@ personalRouter.post('/orders/:id/days/:date/cancel', requireUser, (req, res) => 
     const due = Math.max(0, roundAed(day.price - (day.refund || 0)));
     const back = tx(() => {
       db.prepare('UPDATE order_days SET cancelled = 1, refund = ?, safety_hold = 0 WHERE id = ?').run(roundAed((day.refund || 0) + due), day.id);
-      return due > 0 ? payBack(order.id, req.userId, due, `cancelled ${day.date}`) : { card: 0, credit: 0 };
+      return due > 0 ? payBack(order.id, req.userId, due, `cancelled ${day.date}`, day.date) : { card: 0, credit: 0 };
     });
     logEvent(order.id, day.date, 'cancelled', `You cancelled this morning · ${paidBackText(back)}`);
     notify(req.userId, `${order.id}:${day.date}`, 'refund', `Your ${prettyDate(day.date)} morning is cancelled. ${paidBackText(back)}.`);
@@ -570,21 +617,22 @@ const money = n => (Math.round(n * 100) / 100).toFixed(2);
 /** VAT receipt for a personal order (HTML). Prices include VAT; it is a "Tax Invoice" once MB_TRN is set. */
 personalRouter.get('/orders/:id/receipt', requireUser, (req, res) => {
   const o = serializeOrder(ownOrder(req.userId, req.params.id));
+  const parties = invoiceParties(db.prepare('SELECT * FROM order_days WHERE order_id = ? ORDER BY date').all(o.id));
   const u = db.prepare('SELECT first_name FROM users WHERE id = ?').get(req.userId);
   const vat = o.total - o.total / (1 + VAT_RATE);
   const refunded = o.days.filter(d => d.cancelled).reduce((t, d) => t + (d.refund || d.price), 0);
-  const rows = o.days.map(d => `<tr><td>${esc(d.date)}</td><td>${esc(boxName(d.cfg))} · ${esc(sizeLabel(d.cfg.size))}${d.cfg.addons.length ? `<br><small>+ ${esc(extrasText(d.cfg.addons))}</small>` : ''}${d.cancelled ? '<br><small>Cancelled and refunded</small>' : ''}</td><td>${esc(windowLabel(d.window))}</td><td style="text-align:right">${d.cancelled ? '0.00' : money(d.price)}</td></tr>`).join('');
+  const rows = o.days.map(d => `<tr><td>${esc(d.date)}</td><td>${esc(boxName(d.cfg))} · ${esc(sizeLabel(d.cfg.size))}${d.cfg.addons.length ? `<br><small>+ ${esc(extrasText(d.cfg.addons))}</small>` : ''}${d.cancelled ? '<br><small>Cancelled and refunded</small>' : ''}${parties.multiple && !d.cancelled ? `<br><small>Seller: ${esc(parties.sellerOf(d.date))}</small>` : ''}</td><td>${esc(windowLabel(d.window))}</td><td style="text-align:right">${d.cancelled ? '0.00' : money(d.price)}</td></tr>`).join('');
   res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Receipt ${esc(o.id)}</title>
 <style>body{font-family:Inter,Arial,sans-serif;color:#3B2D22;max-width:720px;margin:32px auto;padding:0 20px}h1{font-family:Georgia,serif;font-weight:400}table{width:100%;border-collapse:collapse;font-size:14px}td,th{border-bottom:1px solid #EADCC1;padding:8px;text-align:left;vertical-align:top}.r{text-align:right}</style>
-<h1>${esc(SUPPLIER.name)} ${SUPPLIER.trn ? 'Tax Invoice' : 'Receipt'}</h1>
-<p>${SUPPLIER.trn ? 'Invoice' : 'Receipt'} ${esc(o.id)} · ${esc(o.createdAt)} UTC</p>
-<p><b>From:</b> ${esc(SUPPLIER.name)}<br>${esc(SUPPLIER.address)}${SUPPLIER.trn ? `<br>TRN ${esc(SUPPLIER.trn)}` : ''}</p>
-<p><b>Customer:</b> ${esc(u?.first_name)}${o.email ? `<br>${esc(o.email)}` : ''}</p>
+<h1>Morning Box ${parties.taxReady ? 'Tax Invoice' : 'Receipt'}</h1>
+<p>${parties.taxReady ? 'Invoice' : 'Receipt'} ${esc(o.id)} · ${esc(o.createdAt)} UTC</p>
+${parties.html}
+<p><b>Billed to:</b> ${esc(u?.first_name)}${o.email ? `<br>${esc(o.email)}` : ''}</p>
 <table><tr><th>Date</th><th>Breakfast</th><th>Delivery</th><th class="r">AED</th></tr>${rows}</table>
 <p class="r">Delivery: included<br>Total excluding VAT: AED ${money(o.total - vat)}<br>VAT ${Math.round(VAT_RATE * 100)}%: AED ${money(vat)}</p>
 <p class="r" style="font-size:18px"><b>Total AED ${money(o.total)}</b></p>
 ${refunded ? `<p class="r">Refunded for cancelled mornings: AED ${money(refunded)}</p>` : ''}
-<p style="font-size:12px">${o.creditUsed ? `Paid with Morning Box credit: AED ${money(o.creditUsed)}. Paid by ${o.method === 'apple' ? 'Apple Pay' : 'card'}: AED ${money(o.total - o.creditUsed)}.` : `Paid by ${o.method === 'apple' ? 'Apple Pay' : 'card'}.`} Prices include VAT.</p>`);
+<p style="font-size:12px">${o.creditUsed ? `Paid with Morning Box credit: AED ${money(o.creditUsed)}. Paid online: AED ${money(o.total - o.creditUsed)}.` : 'Paid online.'} Prices include VAT.</p>`);
 });
 
 /** Add the order's mornings to a calendar (.ics). Times are Dubai local (UTC+4, no daylight saving). */
@@ -597,7 +645,7 @@ personalRouter.get('/orders/:id/calendar', requireUser, (req, res) => {
     const w = DELIVERY_WINDOWS.find(x => x.id === d.window);
     const [from, to] = (w?.label || '8:00 – 9:00 AM').replace(/\s*AM/g, '').split(/\s*[–-]\s*/).map(t => (t.length === 4 ? `0${t}` : t));
     return ['BEGIN:VEVENT', `UID:${o.id}-${d.date}@morningbox`, `DTSTAMP:${stamp}`, `DTSTART:${at(d.date, from)}`, `DTEND:${at(d.date, to)}`,
-      `SUMMARY:${line(`Morning Box · ${boxName(d.cfg)}`)}`, `LOCATION:${line(`${d.address.building}, ${d.address.unit}, DIFC`)}`,
+      `SUMMARY:${line(`Morning Box · ${boxName(d.cfg)}`)}`, `LOCATION:${line(`${d.address.building}, ${d.address.unit}, ${d.address.area || 'DIFC'}, Dubai`)}`,
       `DESCRIPTION:${line(`Order ${o.id}. Delivered to ${d.address.handover === 'door' ? 'your door' : 'reception'}.`)}`, 'END:VEVENT'].join('\r\n');
   });
   res.type('text/calendar').send(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Morning Box//EN', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].join('\r\n'));

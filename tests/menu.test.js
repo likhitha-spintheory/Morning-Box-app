@@ -46,7 +46,7 @@ test('rejects unsafe or inconsistent rules', async () => {
 });
 
 test('a saved change applies to the next recommendation and is recorded', async () => {
-  const profile = { eatingStyle: 'health', preferences: ['savory', 'fresh'], dietary: [], allergies: [] };
+  const profile = { healthConsent: true, eatingStyle: 'health', preferences: ['savory', 'fresh'], dietary: [], allergies: [] };
   assert.equal(recommendDay(profile, 'busy').primary.recipeId, 'savory.health.busy');
   const { menu } = (await ops('GET', '/admin/menu')).body;
   const next = clone(menu);
@@ -77,9 +77,9 @@ test('adds a food item and uses it in a breakfast', async () => {
   const withIt = clone(r.body.menu);
   withIt.breakfasts['bakery.flexible.regular'].components[0] = id;
   assert.equal((await ops('PUT', '/admin/menu', withIt)).status, 200);
-  const pick = recommendDay({ eatingStyle: 'flexible', preferences: ['bakery'], dietary: [], allergies: [] }, 'regular');
+  const pick = recommendDay({ healthConsent: true, eatingStyle: 'flexible', preferences: ['bakery'], dietary: [], allergies: [] }, 'regular');
   assert.ok(pick.primary.components.includes(id));
-  const blocked = recommendDay({ eatingStyle: 'flexible', preferences: ['bakery'], dietary: [], allergies: ['sesame'] }, 'regular');
+  const blocked = recommendDay({ healthConsent: true, eatingStyle: 'flexible', preferences: ['bakery'], dietary: [], allergies: ['sesame'] }, 'regular');
   assert.ok(!blocked.primary?.components.includes(id), 'allergen filter applies to the new item');
 });
 
@@ -89,7 +89,7 @@ test('reset brings back the approved menu', async () => {
   assert.deepEqual(r.body.menu.priority.busy, ['bakery', 'savory', 'sweet', 'fresh']);
   assert.deepEqual(r.body.menu.items.avocado.allergens, []);
   assert.ok(!Object.values(r.body.menu.items).some(i => i.custom), 'added items removed');
-  assert.equal(recommendDay({ eatingStyle: 'health', preferences: ['savory', 'fresh'], dietary: [], allergies: [] }, 'busy').primary.recipeId, 'savory.health.busy');
+  assert.equal(recommendDay({ healthConsent: true, eatingStyle: 'health', preferences: ['savory', 'fresh'], dietary: [], allergies: [] }, 'busy').primary.recipeId, 'savory.health.busy');
 });
 
 test('staff codes: a device is blocked after 20 wrong codes in an hour', async () => {
@@ -99,7 +99,7 @@ test('staff codes: a device is blocked after 20 wrong codes in an hour', async (
 });
 
 test('try-it shows the approved build used for an allergy', async () => {
-  const r = await ops('POST', '/admin/menu/try', { eatingStyle: 'health', preferences: ['fresh'], allergies: ['dairy'], context: 'busy' });
+  const r = await ops('POST', '/admin/menu/try', { healthConsent: true, eatingStyle: 'health', preferences: ['fresh'], allergies: ['dairy'], context: 'busy' });
   assert.ok(r.body.primary.names.some(n => /Coconut yogurt/.test(n)), JSON.stringify(r.body.primary.names));
   assert.ok(!r.body.primary.names.includes('Greek Yogurt'));
 });

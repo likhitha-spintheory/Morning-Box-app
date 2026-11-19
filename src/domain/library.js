@@ -128,7 +128,7 @@ export const COMPONENTS = {
   feta: c('feta', 'Feta', 'Dairy & Cheese',
     { light: '30 g', regular: '45 g', large: '60 g' }, ['dairy'], DY, 'savoryDairy', { note: 'Plain.' }),
   /* SAMPLE (testing only) — plant-based alternative in the savory dairy role. */
-  hummus: c('hummus', 'Hummus', 'Dairy & Cheese',
+  hummus: c('hummus', 'Hummus', 'Spreads',   /* client feedback: a chickpea spread, not dairy */
     { light: '50 g', regular: '75 g', large: '100 g' }, ['sesame'], V, 'savoryDairy',
     { sample: true, note: 'SAMPLE item for testing. Chickpea and tahini; vegan.' }),
 

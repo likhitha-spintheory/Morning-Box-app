@@ -28,7 +28,7 @@ async function signIn(mobile) {
   return (await call('POST', '/auth/verify', { mobile, code: devCode, firstName: 'Lina' })).body.token;
 }
 const dates = orderableDates(new Date(), 14).map(isoDate);
-const profile = { eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
+const profile = { healthConsent: true, eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
 const address = { building: 'Gate Village, Building 3', unit: 'Level 4', handover: 'reception' };
 async function personal(mobile, date, window = 'w2') {
   const t = await signIn(mobile);

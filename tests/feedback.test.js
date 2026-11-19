@@ -32,7 +32,7 @@ async function signIn(mobile) {
 }
 const dates = orderableDates(new Date(), 14).map(isoDate);
 const address = { building: 'Gate Village, Building 3', unit: 'Level 4' };
-const savory = { eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
+const savory = { healthConsent: true, eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
 const sweet = { ...savory, preferences: ['sweet'] };
 const dayFor = (date, p) => {
   const r = recommendDay(p, 'regular');
@@ -60,7 +60,7 @@ test('checkout names the morning the server refuses, so only that day is planned
 
 /* REC-021 / FLW-011: with several breakfast types, the morning's chosen type decides the recommendation. */
 test('a morning planned for one of several breakfast types is accepted only with that type', async () => {
-  const both = { eatingStyle: 'flexible', preferences: ['savory', 'sweet'], dietary: [], allergies: [] };
+  const both = { healthConsent: true, eatingStyle: 'flexible', preferences: ['savory', 'sweet'], dietary: [], allergies: [] };
   const all = recommendDay(both, 'regular');
   assert.ok(all.primary.recipeId.startsWith('savory'), 'context priority puts Savory first for a workday');
   const sweetDay = recommendDay(both, 'regular', 'sweet');
@@ -194,7 +194,7 @@ test('gluten-free is refused (personal and business) until switched on in Admin'
   assert.equal(cfg.body.glutenFree, false);
 
   const u = await signIn('502220099');
-  const gf = { eatingStyle: 'flexible', preferences: ['bakery'], dietary: ['glutenFree'], allergies: [] };
+  const gf = { healthConsent: true, eatingStyle: 'flexible', preferences: ['bakery'], dietary: ['glutenFree'], allergies: [] };
   await call('PUT', '/me/profile', gf, u);
   const r = recommendDay(gf, 'regular');
   if (!r.none) {
@@ -223,7 +223,7 @@ test('a family group order needs no company name or business email', async () =>
   assert.equal(acct.status, 200, JSON.stringify(acct.body));
   const o = await call('POST', '/business/orders', { days: [{ date: dates[6], window: 'w2', people: 4,
     lines: [{ recipeId: 'savory.flexible.regular', size: 'regular', qty: 4 }], specials: [],
-    delivery: { company: '', building: 'Burj Views A', office: 'Apt 1203', contact: 'Mariam', mobile: '55 123 4567' } }] }, u);
+    delivery: { company: '', building: 'Sky Gardens', office: 'Apt 1203', contact: 'Mariam', mobile: '55 123 4567' } }] }, u);
   assert.equal(o.status, 201, JSON.stringify(o.body));
   const row = db.prepare('SELECT company, email, invoice FROM business_orders WHERE id = ?').get(o.body.id);
   assert.equal(row.company, '');
@@ -236,7 +236,7 @@ test('order type: family needs no company and gets a receipt; business needs the
   const u = await signIn('502220123');
   await call('POST', '/business/account', { company: '', email: '' }, u);
   const day = (delivery, date) => ({ date, window: 'w2', people: 4, lines: [{ recipeId: 'savory.flexible.regular', size: 'regular', qty: 4 }], specials: [], delivery });
-  const home = { type: 'family', company: 'Should be dropped', building: 'Villa 12, Arabian Ranches', office: 'Villa 12', contact: 'Mariam', mobile: '55 123 4567' };
+  const home = { type: 'family', company: 'Should be dropped', building: 'Index Tower', office: 'Apartment 2301', contact: 'Mariam', mobile: '55 123 4567' };
   const fam = await call('POST', '/business/orders', { orderType: 'family', invoice: { wanted: true }, days: [day(home, dates[7])] }, u);
   assert.equal(fam.status, 201, JSON.stringify(fam.body));
   assert.equal(fam.body.orderType, 'family');
@@ -259,7 +259,7 @@ test('breakfast types are available exactly when a safe breakfast exists (dairy-
   const before = { ...LIBRARY_SETTINGS };
   setLibrarySettings({ samples: false });   // as on the dev server: approved products only
   try {
-    const df = { eatingStyle: 'flexible', preferences: ['savory', 'bakery', 'fresh', 'sweet'], dietary: ['dairyFree'], allergies: [] };
+    const df = { healthConsent: true, eatingStyle: 'flexible', preferences: ['savory', 'bakery', 'fresh', 'sweet'], dietary: ['dairyFree'], allergies: [] };
     assert.equal(typeAvailable(df, 'savory', 'regular'), true);
     assert.equal(typeAvailable(df, 'bakery', 'regular'), false, 'no approved dairy-free pastry yet');
     const needs = [[], ['dairyFree'], ['vegan'], ['glutenFree'], ['vegetarian'], ['halal']];

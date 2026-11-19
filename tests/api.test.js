@@ -22,7 +22,7 @@ const call = async (method, path, body, token, headers = {}) => {
   return { status: res.status, body: text.startsWith('{') || text.startsWith('[') ? JSON.parse(text) : text };
 };
 const dates = orderableDates(new Date(), 14).map(isoDate);
-const profile = { eatingStyle: 'health', preferences: ['savory', 'fresh'], dietary: ['vegetarian'], allergies: ['sesame'] };
+const profile = { healthConsent: true, eatingStyle: 'health', preferences: ['savory', 'fresh'], dietary: ['vegetarian'], allergies: ['sesame'] };
 
 async function signIn(mobile = '501234567', firstName = 'Sara') {
   const otp = await call('POST', '/auth/otp', { mobile });
@@ -125,10 +125,10 @@ test('business: headcount must match boxes; capacity is checked before payment',
   assert.equal(av.body[dates[4]].w1.remaining, 5);
   /* With the SAMPLE gluten-free / vegan items in library.js every special has a safe match.
      When the approved menu replaces them, restore a 'special_no_match' check here if any combination is uncovered. */
-  const special = await call('POST', '/business/quote', { days: [{ date: dates[5], people: 1, lines: [], specials: [{ dietary: ['vegan'], allergies: ['gluten'], qty: 1 }] }] }, token);
+  const special = await call('POST', '/business/quote', { days: [{ date: dates[5], people: 2, lines: [], specials: [{ dietary: ['vegan'], allergies: ['gluten'], qty: 2 }] }] }, token);
   assert.equal(special.status, 200, JSON.stringify(special.body));
   const inv = await call('GET', `/business/orders/${ok.body.id}/invoice`, null, token);
-  assert.match(inv.body, /Tax Invoice/);
+  assert.match(inv.body, /Supplier \/ Seller/); assert.match(inv.body, /Platform Operator/);
 });
 
 test('ops: key required, allocation and forward-only status', async () => {

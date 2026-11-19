@@ -29,7 +29,7 @@ async function signIn(mobile) {
 }
 const H = { 'x-ops-key': 'dev-ops-key' };
 const dates = orderableDates(new Date(), 14).map(isoDate);
-const profile = { eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
+const profile = { healthConsent: true, eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
 const day = date => { const r = recommendDay(profile, 'regular'); return { date, context: 'regular', recipeId: r.primary.recipeId, components: r.primary.components, size: 'regular', addons: [], window: 'w2' }; };
 async function customerWithOrder(mobile, n = 1) {
   const a = await signIn(mobile);

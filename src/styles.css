@@ -489,7 +489,7 @@ img { max-width: 100%; display: block; }
 .dash-clip { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .dash-chart { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); align-items: end; gap: 10px; height: 160px; }
 .dash-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; height: 100%; }
-.dash-col i { display: block; width: 100%; max-width: 36px; border-radius: 8px 8px 4px 4px; background: linear-gradient(180deg, var(--gold-top), var(--gold-bottom)); }
+.dash-col i { display: block; width: 100%; max-width: 36px; border-radius: 8px 8px 4px 4px; background: var(--espresso); }
 .dash-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
 .dash-stats > span { display: flex; flex-direction: column; gap: 2px; }
 .dash-stats b { font-size: 17px; color: var(--espresso); }
@@ -600,3 +600,10 @@ body.has-tabbar .footer { bottom: calc(var(--tabbar-h) + var(--mb-inset-bottom))
 .mcard-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; }
 .mcard-foot .status { padding: 4px 10px; font-size: 12.5px; }
 .mcard-actions { display: flex; align-items: center; gap: 10px; padding: 10px 16px 14px; border-top: 1px solid var(--line-soft); }
+
+/* Device storage banner (legal pack B5): above the bottom navigation, never covering the whole screen. */
+.cookie-banner { position: fixed; left: 0; right: 0; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 60; display: flex; justify-content: center; padding: 0 16px; pointer-events: none; }
+.cookie-banner > .card { width: 100%; max-width: 520px; pointer-events: auto; }
+/* The three choices stay the same size: side by side where they fit, stacked full width on phones. */
+.cookie-actions { display: flex; gap: 8px; }
+@media (max-width: 480px) { .cookie-actions { flex-direction: column; } .cookie-actions > button { flex: none !important; width: 100%; } }

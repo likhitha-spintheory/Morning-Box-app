@@ -15,7 +15,8 @@
     "apk": "node scripts/apk.mjs",
     "apk:release": "node scripts/apk.mjs --release",
     "backup": "node scripts/backup.mjs",
-    "seed": "node scripts/seed.mjs"
+    "seed": "node scripts/seed.mjs",
+    "legal:static": "node --import ./scripts/dev-env.mjs scripts/legal-static.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.3",

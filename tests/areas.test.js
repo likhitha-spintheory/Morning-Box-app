@@ -15,7 +15,7 @@ const call = async (method, path, body, token, headers = {}) => {
   return { status: res.status, body: await res.json() };
 };
 const ops = (m, p, b) => call(m, `/ops${p}`, b, null, { 'x-ops-key': 'dev-ops-key' });
-const profile = { eatingStyle: 'flexible', preferences: ['bakery'], dietary: [], allergies: [] };
+const profile = { healthConsent: true, eatingStyle: 'flexible', preferences: ['bakery'], dietary: [], allergies: [] };
 const date = orderableDates(new Date(), 14).map(isoDate)[2];
 const day = () => { const r = recommendDay(profile, 'regular'); return { date, context: 'regular', recipeId: r.primary.recipeId, components: r.primary.components, size: 'regular', addons: [], window: 'w2' }; };
 
@@ -26,10 +26,12 @@ test('service areas: DIFC only at launch; Phase 2 area accepted once switched on
   assert.deepEqual((await call('GET', '/config')).body.areas, ['DIFC']);
   assert.equal((await ops('GET', '/admin/areas')).body.areas.find(a => a.id === 'Downtown Dubai').active, false);
   const downtown = { building: 'Boulevard Plaza', unit: 'Tower 1, 12', area: 'Downtown Dubai', handover: 'reception' };
-  /* With one area live, any address is stored as that area. */
+  /* Client feedback FLW-023: an area that isn't active is refused, never stored as another area. */
   const one = await call('POST', '/orders', { days: [day()], address: downtown }, token);
-  assert.equal(one.status, 201, JSON.stringify(one.body));
-  assert.equal(one.body.days[0].address.area, 'DIFC');
+  assert.equal(one.body.error, 'area_unavailable', JSON.stringify(one.body));
+  const noArea = await call('POST', '/orders', { days: [day()], address: { building: 'Gate Village 4', unit: '2', handover: 'reception' } }, token);
+  assert.equal(noArea.status, 201, 'an address without an area (older app) is the only active area');
+  assert.equal(noArea.body.days[0].address.area, 'DIFC');
   assert.equal((await ops('PUT', '/admin/areas', { active: [] })).status, 400, 'at least one area stays on');
   assert.equal((await ops('PUT', '/admin/areas', { active: ['DIFC', 'Downtown Dubai'] })).status, 200);
   assert.deepEqual((await call('GET', '/config')).body.areas, ['DIFC', 'Downtown Dubai']);

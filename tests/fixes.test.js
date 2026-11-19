@@ -35,7 +35,7 @@ async function signIn(mobile, firstName = 'Test') {
 }
 const dates = orderableDates(new Date(), 14).map(isoDate);
 const address = { building: 'Gate Village, Building 3', unit: 'Level 4' };
-const profile = { eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
+const profile = { healthConsent: true, eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
 const dayFor = (date, p = profile, extra = {}) => {
   const r = recommendDay(p, 'regular');
   return { date, context: 'regular', recipeId: r.primary.recipeId, components: r.primary.components, size: 'regular', addons: [], window: 'w2', ...extra };

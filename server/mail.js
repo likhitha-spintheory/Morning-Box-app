@@ -29,6 +29,12 @@ export async function sendMail({ to, subject, text, html }) {
 }
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const appBase = () => (process.env.APP_URL || '').replace(/\/+$/, '');
+/* Client feedback: the Morning Box logo at the top of every email (served by the app: public/assets). */
+const header = () => (appBase()
+  ? `<div style="background:#FEFCF7;padding:20px 24px;text-align:center;border-radius:12px 12px 0 0"><img src="${esc(appBase())}/assets/morningbox-email-logo.jpg" width="180" height="91" alt="Morning Box" style="display:inline-block;border:0;max-width:180px;height:auto"></div>`
+  : '');
+const frame = (body, width = 480) => `<div style="font-family:Arial,sans-serif;max-width:${width}px;margin:auto;color:#2b2118">${header()}<div style="padding:8px 24px 24px">${body}</div></div>`;
 const appLink = path => (process.env.APP_URL ? `${process.env.APP_URL.replace(/\/+$/, '')}/#${path}` : '');
 
 /** Fire-and-forget email: skipped when email isn't configured or there's no address; a failure never affects the order. */
@@ -38,7 +44,7 @@ function sendQuietly(to, subject, lines, linkPath) {
   sendMail({
     to, subject,
     text: [...lines, ...(link ? ['', link] : [])].join('\n'),
-    html: `<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;color:#2b2118">${lines.map(l => `<p>${esc(l)}</p>`).join('')}${link ? `<p><a href="${esc(link)}">Open in Morning Box</a></p>` : ''}</div>`
+    html: frame(`${lines.map(l => `<p>${esc(l)}</p>`).join('')}${link ? `<p><a href="${esc(link)}" style="display:inline-block;background:#D99A12;color:#2b2118;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:999px">Open in Morning Box</a></p>` : ''}`)
   }).catch(() => { /* logged in sendMail */ });
 }
 
@@ -52,10 +58,13 @@ export function sendOrderEmail(order) {
 
 /** Business Breakfast confirmation (MB-B2B-001 §8: Order → Pay Online → Confirmation + Invoice). */
 export function sendBusinessOrderEmail(order) {
-  const family = order.orderType === 'family';
+  /* The order type and invoice choice are kept in the order's invoice details (a JSON column on the stored order). */
+  let inv = order.invoice || {};
+  if (typeof inv === 'string') { try { inv = JSON.parse(inv) || {}; } catch { inv = {}; } }
+  const family = (order.orderType || inv.orderType) === 'family';
   sendQuietly(order.email, `${family ? 'Group breakfast' : 'Business Breakfast'} order ${order.id} is confirmed`, [
     `Thank you! ${family ? 'Group breakfast' : 'Business Breakfast'} order ${order.id}${!family && order.company ? ` for ${order.company}` : ''} is confirmed and paid (AED ${order.total}).`,
-    `Your ${family ? 'receipt' : 'invoice'} is available on the order in the app. You can change headcount, boxes or cancel each day until 9:00 PM the evening before.`
+    `Your ${inv.wanted ? 'invoice' : 'receipt'} is available on the order in the app. You can change headcount, boxes or cancel each day until 9:00 PM the evening before.`
   ], `/business/orders/${order.id}`);
 }
 
@@ -65,10 +74,9 @@ export function sendCodeEmail(to, code, ttlMinutes) {
     to,
     subject: `${code} is your Morning Box code`,
     text: `Your Morning Box sign-in code is ${code}.\n\nIt expires in ${ttlMinutes} minutes. If you didn’t ask for it, you can ignore this email.`,
-    html: `<div style="font-family:Arial,sans-serif;max-width:420px;margin:auto;color:#2b2118">
-<p>Your Morning Box sign-in code:</p>
+    html: frame(`<p>Your Morning Box sign-in code:</p>
 <p style="font-size:32px;font-weight:bold;letter-spacing:6px;margin:16px 0">${code}</p>
-<p>It expires in ${ttlMinutes} minutes. If you didn’t ask for it, you can ignore this email.</p></div>`
+<p>It expires in ${ttlMinutes} minutes. If you didn’t ask for it, you can ignore this email.</p>`, 420)
   });
 }
 

@@ -23,7 +23,7 @@ export function Live({ data, meta, busy, act, call }) {
           <span className="strong">{data.rows.length} deliveries · {boxes} boxes</span>
           <span className="row" style={{ gap: 10 }}>
             <span className="xs">{data.allocated ? `${data.allocated.final ? 'Final' : 'Provisional'} allocation ${new Date(data.allocated.at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}${data.allocated.failed ? ` · ${data.allocated.failed} not allocated` : ''}${data.allocated.final ? '' : ' · final runs at 9:00 PM the evening before'}` : 'Final allocation runs automatically at 9:00 PM the evening before'}</span>
-            <button type="button" className="btn-secondary" style={small} disabled={busy || !data.rows.length} onClick={() => act('POST', '/allocate', { date: data.date })}>{data.allocated?.final ? 'Re-run allocation' : 'Allocate now'}</button>
+            <button type="button" className="btn-secondary" style={small} disabled={busy || !data.rows.length} onClick={() => (!data.allocated?.final || window.confirm('Re-run the final allocation? Orders not yet started may move to another bakery, and bakeries will need to confirm again.')) && act('POST', '/allocate', { date: data.date })}>{data.allocated?.final ? 'Re-run allocation' : 'Allocate now'}</button>
           </span>
         </div>
         <table className="ops-table">
@@ -116,8 +116,8 @@ function Actions({ r, meta, busy, act, call, names = {} }) {
           {split && <select className="input" style={{ ...input, width: 200 }} aria-label="Which bakery’s part can’t be fulfilled" value={f.failPart} onChange={set('failPart')}>
             <option value="">Which bakery’s part?</option>
             {parts.map(p => <option key={p.bakeryId} value={p.bakeryId}>{names[p.bakeryId] || `#${p.bakeryId}`} ×{p.boxes}</option>)}</select>}
-          <button type="button" className="btn-text" disabled={busy || (split && !f.failPart)} onClick={() => act('POST', `${path}/bakery-state`, { state: 'Unable to Fulfil', reason: f.reason, ...(split ? { bakeryId: Number(f.failPart) } : {}) })}>Can’t fulfil</button>
-          <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `${path}/reallocate`)}>Reallocate to next bakery</button>
+          <button type="button" className="btn-text" disabled={busy || (split && !f.failPart)} onClick={() => window.confirm('Mark this order as unable to fulfil? It moves to the next bakery, or, if none can make it, the customer is refunded in full and told.') && act('POST', `${path}/bakery-state`, { state: 'Unable to Fulfil', reason: f.reason, ...(split ? { bakeryId: Number(f.failPart) } : {}) })}>Can’t fulfil</button>
+          <button type="button" className="btn-text" disabled={busy} onClick={() => window.confirm('Move this order to the next eligible bakery?') && act('POST', `${path}/reallocate`)}>Reallocate to next bakery</button>
         </div>
       )}
       {!leftBakery && !done && r.bakeryState !== 'Ready' && (
@@ -154,7 +154,7 @@ function Actions({ r, meta, busy, act, call, names = {} }) {
           {meta.points[r.kind].map(p => <button key={p} type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `${path}/delivered`, { deliveryPoint: p })}>{p[0].toUpperCase() + p.slice(1)}{p === 'your door' && r.address.handover === 'door' ? ' (asked)' : ''}</button>)}
           <span style={{ width: 16 }} />
           <select className="input" style={{ ...input, width: 220 }} aria-label="Why delivery failed" value={f.fail} onChange={set('fail')}>{meta.failureReasons.map(x => <option key={x}>{x}</option>)}</select>
-          <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', `${path}/failed`, { reason: f.fail })}>Delivery failed</button>
+          <button type="button" className="btn-text" disabled={busy} onClick={() => window.confirm(`Record a failed delivery (${f.fail})? The customer is told.`) && act('POST', `${path}/failed`, { reason: f.fail })}>Delivery failed</button>
         </div>
       )}
       {!done && (
@@ -169,7 +169,7 @@ function Actions({ r, meta, busy, act, call, names = {} }) {
         <select className="input" style={{ ...input, width: 190 }} aria-label="Remedy" value={f.remedy} onChange={set('remedy')}>{meta.remedies.map(x => <option key={x}>{x}</option>)}</select>
         {['Credit', 'Partial Refund'].includes(f.remedy) && <input className="input" style={{ ...input, width: 100 }} inputMode="decimal" placeholder="AED" aria-label="Amount" value={f.amount} onChange={set('amount')} />}
         <input className="input" style={{ ...input, width: 240 }} placeholder="Reason (shown to the customer)" aria-label="Reason" value={f.why} onChange={set('why')} />
-        <button type="button" className="btn-text" disabled={busy || !f.why.trim()} onClick={() => act('POST', `${path}/remedy`, { type: f.remedy, amount: Number(f.amount), reason: f.why.trim() })}>Apply</button>
+        <button type="button" className="btn-text" disabled={busy || !f.why.trim()} onClick={() => window.confirm(`Apply ${f.remedy}${/Refund|Credit/.test(f.remedy) && f.amount ? ` of AED ${f.amount}` : ''}? Money moves straight away and the customer is told.`) && act('POST', `${path}/remedy`, { type: f.remedy, amount: Number(f.amount), reason: f.why.trim() })}>Apply</button>
       </div>
     </div>
   );

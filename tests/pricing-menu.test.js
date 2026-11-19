@@ -25,7 +25,7 @@ const call = async (method, path, body, token, headers = {}) => {
 };
 const ops = (method, path, body) => call(method, `/ops${path}`, body, null, { 'x-ops-key': 'dev-ops-key' });
 const dates = orderableDates(new Date(), 14).map(isoDate);
-const profile = { eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
+const profile = { healthConsent: true, eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
 const day = (date, extra = {}) => { const r = recommendDay(profile, 'regular'); return { date, context: 'regular', recipeId: r.primary.recipeId, components: r.primary.components, size: 'regular', addons: [], window: 'w2', ...extra }; };
 const address = { building: 'Gate Village, Building 3', unit: 'Level 4' };
 let n = 0;

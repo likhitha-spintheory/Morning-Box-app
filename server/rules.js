@@ -1,6 +1,7 @@
 /* Server-side rules. The browser is never trusted for safety, eligibility,
    price, cutoff or capacity: every order is re-validated and re-priced here
    with the same locked engine the app uses. */
+import { placeProblem, areaMessage } from '../src/domain/places.js';
 import {
   recommend, configure, swapOptions, applySwap, applyUserSwaps, hasSizeSelector, addonGroups, priceBox, traceRecord,
   businessModels, resolveSpecial, priceBusinessDay
@@ -161,18 +162,20 @@ export function buildPersonalDay(input, profile) {
 }
 
 /* Deliveries only to active service areas (MB-PRD-001 §3). */
-function areaOrFail(requested) {
+function areaOrFail(requested, address) {
   const area = areaFor(requested);
   /* Client wording (Requirements Matrix FLW-023), listing whichever areas are active in Admin. */
-  const list = ACTIVE_AREAS.length > 1 ? `${ACTIVE_AREAS.slice(0, -1).join(', ')} and ${ACTIVE_AREAS[ACTIVE_AREAS.length - 1]}` : ACTIVE_AREAS[0];
-  if (!area) throw bad('area_unavailable', `Sorry, Morning Box is currently available for delivery in ${list} only. More areas are coming soon!`);
+  if (!area) throw bad('area_unavailable', areaMessage());
+  /* The chosen area isn't proof: the building must not name a place elsewhere (src/domain/places.js). */
+  const problem = placeProblem({ ...address, area });
+  if (problem) throw bad(problem.code, problem.message);
   return area;
 }
 
 export function validateAddress(a) {
   if (!a || !str(a.building) || !str(a.unit)) throw bad('address_invalid', 'Add your building and floor or unit.');
   return {
-    building: plain(a.building, 120), unit: plain(a.unit, 120), area: areaOrFail(a.area),
+    building: plain(a.building, 120), unit: plain(a.unit, 120), area: areaOrFail(a.area, a),
     handover: a.handover === 'door' ? 'door' : 'reception',
     notes: plain(a.notes, 200)
   };
@@ -189,7 +192,9 @@ export function modelFor(recipeId) {
 export function buildBusinessDay(input) {
   const people = Number(input.people);
   /* No fixed maximum headcount (MB-DLV-001 §8); window and bakery capacity are checked before payment. */
-  if (!Number.isInteger(people) || people < 1 || people > 999) throw bad('people_invalid', 'Enter the number of people.');
+  if (!Number.isInteger(people) || people > 999) throw bad('people_invalid', 'Enter the number of people.');
+  /* Client feedback USR-006: group orders are for 2 or more people; one person orders through Create My Morning. */
+  if (people < 2) throw bad('people_min', 'Group & Business Breakfast is for 2 or more people. For one person, use Create My Morning.');
   if (!Array.isArray(input.lines ?? []) || !Array.isArray(input.specials ?? [])) throw bad('lines_invalid', 'Invalid breakfast selection.');
   /* The same model and size listed twice is merged into one line. */
   const merged = new Map();
@@ -240,7 +245,7 @@ export function validateBusinessDelivery(d) {
   const missing = need.filter(k => !str(d?.[k]));
   if (missing.length) throw bad('delivery_invalid', 'Complete the delivery details.', { missing });
   if (!/^5\d{8}$/.test(String(d.mobile).replace(/\D/g, '').replace(/^00/, '').replace(/^971/, '').replace(/^0/, ''))) throw bad('delivery_invalid', 'Enter a valid UAE mobile number for the contact person.');
-  return { ...(type ? { type } : {}), company: type === 'family' ? '' : plain(d.company, 120), building: plain(d.building, 120), office: plain(d.office, 120), area: areaOrFail(d.area), contact: plain(d.contact, 120), mobile: plain(d.mobile, 30), notes: plain(d.notes, 200) };
+  return { ...(type ? { type } : {}), company: type === 'family' ? '' : plain(d.company, 120), building: plain(d.building, 120), office: plain(d.office, 120), area: areaOrFail(d.area, d), contact: plain(d.contact, 120), mobile: plain(d.mobile, 30), notes: plain(d.notes, 200) };
 }
 
 export const needsGlutenFreeHandling = (dietary = [], allergies = []) => dietary.includes('glutenFree') || allergies.includes('gluten');

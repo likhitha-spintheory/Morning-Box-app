@@ -34,7 +34,7 @@ async function signIn(mobile) {
   return { token: v.body.token, userId: v.body.id };
 }
 const dates = orderableDates(new Date(), 14).map(isoDate);
-const profile = { eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
+const profile = { healthConsent: true, eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
 async function order(a, date) {
   await call('PUT', '/me/profile', profile, a);
   const r = recommendDay(profile, 'regular');

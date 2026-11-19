@@ -166,6 +166,21 @@ addColumns('users', { terms_version: 'TEXT', terms_accepted_at: 'TEXT', marketin
 /* Sign-in by email: login_email is only ever set by a verified email code (users.email is the
    unverified contact address). Accounts created by email have no mobile; theirs is 'none:<random>'. */
 addColumns('users', { login_email: 'TEXT' });
+/* Legal pack Part B: explicit consent to store allergy and dietary data (B1) and the time of the marketing choice (B2). */
+addColumns('profiles', { health_consent_at: 'TEXT', health_consent_version: 'TEXT' });
+addColumns('users', { marketing_opt_in_at: 'TEXT' });
+/* Every consent choice with its version, date and time (legal pack Part B: "Record the version, date and time of each choice").
+   user_id is null for a device storage choice made before signing in. */
+db.exec(`CREATE TABLE IF NOT EXISTS consent_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  kind TEXT NOT NULL,
+  value TEXT NOT NULL,
+  version TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+/* The partner bakery is the seller on a customer's food invoice (client feedback FLW-044). */
+addColumns('bakeries', { legal_name: 'TEXT', trn: 'TEXT', legal_address: 'TEXT' });
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_login_email ON users(login_email)');
 addColumns('order_days', { rating: 'INTEGER', feedback_tags: 'TEXT', late_note: 'TEXT' });
 addColumns('business_days', { late_note: 'TEXT' });
@@ -366,16 +381,17 @@ const PLACEHOLDER_CAPS = {
   'Partner Bakery C': caps(['glutenFree', 'dairyFree', 'eggFree', 'vegan', 'sesameFree', 'soyFree'])
 };
 for (const b of db.prepare('SELECT id, name, gluten_free_certified FROM bakeries WHERE capabilities IS NULL').all()) {
-  const c = PLACEHOLDER_CAPS[b.name] || caps(b.gluten_free_certified ? ['glutenFree'] : []);
+  /* Placeholder capabilities only in development and tests; a real bakery's capabilities are entered in Admin. */
+  const c = (DEV && PLACEHOLDER_CAPS[b.name]) || caps(b.gluten_free_certified ? ['glutenFree'] : []);
   db.prepare('UPDATE bakeries SET capabilities = ? WHERE id = ?').run(JSON.stringify(c), b.id);
 }
 
 /* Placeholder onboarding facts for the launch partners until real records are entered in Admin. */
-db.prepare("UPDATE bakeries SET bakes_own_bread = 1, licence_no = COALESCE(licence_no, 'PENDING') WHERE name IN ('Partner Bakery A', 'Partner Bakery B', 'Partner Bakery C') AND bakes_own_bread = 0").run();
+if (DEV) db.prepare("UPDATE bakeries SET bakes_own_bread = 1, licence_no = COALESCE(licence_no, 'PENDING') WHERE name IN ('Partner Bakery A', 'Partner Bakery B', 'Partner Bakery C') AND bakes_own_bread = 0").run();
 /* Placeholder Fruit Danish variants for the launch partners (MB-PRO-001 §14.2) until confirmed in Admin. */
 const PLACEHOLDER_DANISH = { 'Partner Bakery A': ['Apple', 'Berry', 'Apricot'], 'Partner Bakery B': ['Apple', 'Berry'], 'Partner Bakery C': ['Apricot'] };
 for (const b of db.prepare('SELECT id, name FROM bakeries WHERE danish_flavours IS NULL').all()) {
-  db.prepare('UPDATE bakeries SET danish_flavours = ? WHERE id = ?').run(JSON.stringify(PLACEHOLDER_DANISH[b.name] || []), b.id);
+  db.prepare('UPDATE bakeries SET danish_flavours = ? WHERE id = ?').run(JSON.stringify((DEV && PLACEHOLDER_DANISH[b.name]) || []), b.id);
 }
 
 export const json = v => JSON.stringify(v ?? null);

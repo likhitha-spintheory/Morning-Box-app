@@ -9,15 +9,18 @@ import {
 } from '../../domain/app.js';
 import { useOrder, Loading, usePruneExpired } from '../../state/orders.jsx';
 import { PRICING, areaFor } from '../../domain/standards.js';
+import { CONSENT } from '../../legal/documents.js';
+import { placeProblem } from '../../domain/places.js';
 
 const emailValid = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e.trim());
 const union = (a = [], b = []) => [...new Set([...a, ...b])];
 /** The plan's profile with the account's allergies and dietary needs added: safety never weakens. */
 const withAccountSafety = (local, account) => ({
   ...local, dietary: union(local.dietary, account.dietary), allergies: union(local.allergies, account.allergies),
-  otherAllergies: [...new Set([local.otherAllergies, account.otherAllergies].map(x => (x || '').trim()).filter(Boolean))].join(', ').slice(0, 120)
+  otherAllergies: [...new Set([local.otherAllergies, account.otherAllergies].map(x => (x || '').trim()).filter(Boolean))].join(', ').slice(0, 120),
+  healthConsent: !!(local.healthConsent || account.healthConsent)
 });
-const profileText = p => JSON.stringify([p.eatingStyle, [...(p.preferences || [])].sort(), [...(p.dietary || [])].sort(), [...(p.allergies || [])].sort(), (p.otherAllergies || '').trim()]);
+const profileText = p => JSON.stringify([p.eatingStyle, [...(p.preferences || [])].sort(), [...(p.dietary || [])].sort(), [...(p.allergies || [])].sort(), (p.otherAllergies || '').trim(), !!p.healthConsent]);
 /** Saved mornings the server would refuse for this profile (unsafe, or no longer offered). */
 const mornings = (plan, profile) => plan.dates.filter(iso => plan.days[iso]?.saved && (unsafeComponents(plan.days[iso].cfg, profile).length || !stillOffered(plan.days[iso].cfg, profile)));
 /** Re-plan one morning for the profile: the customer checks it again from the summary. */
@@ -30,7 +33,19 @@ const TERMS_URL = import.meta.env.VITE_TERMS_URL || '';
 const PRIVACY_URL = import.meta.env.VITE_PRIVACY_URL || '';
 export function Agreement({ className = 'help center', style }) {
   const a = (url, to, label) => (url ? <a href={url} target="_blank" rel="noopener noreferrer">{label}</a> : <Link to={to} className="link-hit" style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3 }}>{label}</Link>);
-  return <p className={className} style={{ margin: 0, fontSize: 15, ...style }}>By continuing you agree to the {a(TERMS_URL, '/legal/terms', 'Terms')} &amp; {a(PRIVACY_URL, '/legal/privacy', 'Privacy Policy')}.</p>;
+  /* Legal pack B3, word for word. */
+  return <p className={className} style={{ margin: 0, fontSize: 15, ...style }}>By continuing, you agree to the {a(TERMS_URL, '/legal/terms', 'Terms of Service')} and {a('', '/legal/refunds', 'Refunds, Cancellations & Delivery Policy')}, and confirm you are 18 or older. Read how we use your data in our {a(PRIVACY_URL, '/legal/privacy', 'Privacy Policy')}.</p>;
+}
+/** Legal pack B2: optional marketing consent when creating an account; never pre-ticked. */
+export function OffersOptIn({ checked, onChange }) {
+  return (
+    <label className="card row" style={{ gap: 12, padding: 14, alignItems: 'flex-start', justifyContent: 'flex-start', cursor: 'pointer' }}>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} style={{ width: 22, height: 22, flex: 'none', marginTop: 2, accentColor: 'var(--espresso)' }} />
+      <span className="stack gap-4"><span className="strong" style={{ fontSize: 15.5 }}>{CONSENT.marketingTitle}</span>
+        <span className="help" style={{ margin: 0, fontSize: 14.5 }}>{CONSENT.marketing}</span>
+        <span className="strong" style={{ fontSize: 14.5 }}>{CONSENT.marketingAgree}</span></span>
+    </label>
+  );
 }
 /** Fill all six code boxes from a pasted or auto-filled code. */
 /** Digits just entered in a code box: what was typed, pasted or autofilled (`data`), never what the box already held
@@ -64,6 +79,7 @@ export function SignIn() {
   const [error, setError] = useState('');
   const [wait, setWait] = useState(0);
   const [needName, setNeedName] = useState(false);
+  const [offers, setOffers] = useState(false);
   const refs = useRef([]);
   const digits = mobile.replace(/\D/g, '').replace(/^(00)?971/, '').replace(/^0/, '');
   const mobileOk = /^5\d{8}$/.test(digits);
@@ -105,7 +121,7 @@ export function SignIn() {
     if (needName && !nameOk) { setTouched(true); setError('Enter your first name to create your account.'); return; }
     setBusy(true); setError('');
     try {
-      const r = await post('/auth/verify', { ...target, code: code.join(''), firstName: nameOk ? name.trim() : undefined });
+      const r = await post('/auth/verify', { ...target, code: code.join(''), firstName: nameOk ? name.trim() : undefined, offers: needName && offers });
       setToken(null);
       const switching = !!state.owner && state.owner !== ownerOf(r.user);
       /* MB-FLW-001 §6–7: the plan built before sign-in is kept, with the profile it was
@@ -171,6 +187,7 @@ export function SignIn() {
               <input id="fn2" className={`input${touched && !nameOk ? ' invalid' : ''}`} value={name} autoComplete="given-name" onChange={e => setName(e.target.value)} />
             </div>
           )}
+          {needName && <OffersOptIn checked={offers} onChange={setOffers} />}
           {byEmail && <p className="help" style={{ fontSize: 15 }}>Can’t find it? Check your spam or junk folder.</p>}
           <ErrorBanner>{error}</ErrorBanner>
         </main>
@@ -236,6 +253,8 @@ const WINDOW_ICON = { w1: 'sunrise', w2: 'sunny', w3: 'sunny' };
 export function Delivery() {
   const { state, set } = useStore();
   const nav = useNavigate();
+  const [checking, setChecking] = useState(false);
+  const [areaFail, setAreaFail] = useState(null);
   const [touched, setTouched] = useState(false);
   const plan = state.plan;
   const dates = plan.dates.filter(d => plan.days[d]?.saved);
@@ -269,6 +288,27 @@ export function Delivery() {
   const needsMobile = !state.user?.mobile;
   const contactDigits = (dl.contactMobile || '').replace(/\D/g, '').replace(/^(00)?971/, '').replace(/^0/, '');
   const mobileOk = !needsMobile || /^5\d{8}$/.test(contactDigits);
+
+  /* Client feedback FLW-023: the area chosen must match the address. Instant check by place name; the server
+     also checks the address (and its location, where configured) before Review, and again before payment. */
+  const addresses = sameForAll ? [a] : dates.map(addrFor);
+  const areaProblem = addrOk ? addresses.map(placeProblem).find(Boolean) : null;
+  const addrKey = JSON.stringify(addresses.map(x => [x.building, x.unit, x.area]));
+  const areaError = areaFail?.key === addrKey ? areaFail.message : '';   // shown until the address is changed
+  const review = async () => {
+    setTouched(true);
+    if (!answered) return;
+    if (!addrOk) { setEditing(true); return; }
+    if (!windowsOk || !mobileOk || areaProblem) return;
+    setChecking(true); setAreaFail(null);
+    try {
+      await post('/address/check', { addresses: addresses.map(x => ({ building: x.building, unit: x.unit, area: x.area })) });
+      nav('/checkout/review');
+    } catch (e) {
+      if (e.code === 'offline') nav('/checkout/review');   // checked again by the server before payment
+      else { setAreaFail({ key: addrKey, message: e.message }); setEditing(true); }
+    } finally { setChecking(false); }
+  };
 
   const WindowCards = ({ iso }) => (
     <div className="stack gap-12" role="radiogroup" aria-label={`Delivery window${iso ? ` for ${dateInfo(iso).label}` : ''}`}>
@@ -378,8 +418,9 @@ export function Delivery() {
 
         {touched && !windowsOk && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Choose an available delivery window{sameForAll ? '' : ' for each morning'}</span>}
         </>}
+        {(areaProblem || areaError) && <div className="banner-err" role="alert"><Icon name="alert" size={18} stroke={2} />{areaProblem?.message || areaError}</div>}
       </main>
-      <Footer><button className="btn" onClick={() => { setTouched(true); if (!answered) return; if (addrOk && windowsOk && mobileOk) nav('/checkout/review'); else if (!addrOk) setEditing(true); }}><Go>Review my order</Go></button></Footer>
+      <Footer><button className="btn" disabled={checking} onClick={review}>{checking ? 'Checking address…' : <Go>Review my order</Go>}</button></Footer>
     </Screen>
   );
 }
@@ -478,6 +519,10 @@ export function ReviewPay() {
       <main className="screen-main" style={{ paddingTop: 8, gap: 16 }}>
         <h1 className="h-display" style={{ fontSize: 34 }}>Review your mornings</h1>
         {expiredNote && <div className="note" role="status"><Icon name="clock" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{expiredNote}</span></div>}
+        {/* Legal pack B4: pre-order allergy reminder when the customer has declared allergies. */}
+        {state.profile.healthConsent && (state.profile.allergies.length > 0 || !!(state.profile.otherAllergies || '').trim()) && (
+          <div className="note" role="note"><Icon name="shield" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{CONSENT.allergyReminder} <Link to="/help" className="link">Contact support</Link></span></div>
+        )}
         <section className="card list" style={{ padding: '4px 20px' }}>
           {dates.map((iso, k) => {
             const c = plan.days[iso].cfg;
@@ -520,7 +565,8 @@ export function ReviewPay() {
             aria-invalid={emailTouched && emailBad} onBlur={() => setEmailTouched(true)} onChange={e => setEmail(e.target.value)} />
           {emailTouched && emailBad && <span className="err-msg"><Icon name="alert" size={14} stroke={2.2} />Enter a valid email, e.g. name@company.com, or leave it empty</span>}</div>
         <div className="grid-2" role="radiogroup" aria-label="Payment method">
-          {[['apple', 'apple', 'Apple Pay'], ['card', 'card', 'Card']].map(([id, icon, label]) => (
+          {/* Apple Pay only where the device supports it; elsewhere both choices would open the same card page. */}
+          {[...(typeof window !== 'undefined' && window.ApplePaySession ? [['apple', 'apple', 'Apple Pay']] : []), ['card', 'card', 'Card']].map(([id, icon, label]) => (
             <button key={id} type="button" className={`win${method === id ? ' on' : ''}`} role="radio" aria-checked={method === id} onClick={() => setMethod(id)} style={{ padding: '0 16px', minHeight: 60, gap: 10 }}>
               <Icon name={icon} size={22} stroke={1.6} /><span style={{ fontSize: 17, fontWeight: 600, whiteSpace: 'nowrap' }}>{label}</span>
               {method === id && <span className="dot"><Icon name="check" size={15} stroke={2.2} /></span>}

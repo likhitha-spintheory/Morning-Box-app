@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto
 import { db, parse } from './db.js';
 import { ApiError, bad, emailOk } from './rules.js';
 import { TERMS_VERSION } from './company.js';
+import { logConsent, setMarketing } from './consent.js';
 import { ACTIVE_AREAS } from '../src/domain/standards.js';
 import { DEV } from './env.js';
 import { mailConfigured, sendCodeEmail } from './mail.js';
@@ -96,7 +97,9 @@ export function userPayload(userId) {
     user: { firstName: u.first_name, mobile: prettyMobile(u.mobile), email: u.email || '', loginEmail: u.login_email || '' },
     profile: p?.eating_style ? {
       eatingStyle: p.eating_style, preferences: parse(p.preferences), dietary: parse(p.dietary), allergies: parse(p.allergies),
-      otherAllergies: p.other_allergies || ''
+      otherAllergies: p.other_allergies || '',
+      /* Legal pack B1: allergy and dietary data is used only with explicit consent. */
+      healthConsent: !!p.health_consent_at
     } : null,
     settings: { coffeeReminder: p ? !!p.coffee_reminder : true, offers: !!u.marketing_opt_in },
     termsAccepted: u.terms_version === TERMS_VERSION,
@@ -106,7 +109,7 @@ export function userPayload(userId) {
   };
 }
 
-function cookieToken(req) {
+export function cookieToken(req) {
   const raw = req.get('cookie') || '';
   for (const part of raw.split(';')) {
     const [k, ...v] = part.trim().split('=');
@@ -235,10 +238,14 @@ authRouter.post('/verify', (req, res) => {
       : db.prepare('INSERT INTO users (mobile, first_name, email, login_email) VALUES (?, ?, ?, ?)')
         .run(`none:${randomBytes(8).toString('hex')}`, firstName, target.email, target.email);
     user = { id: Number(r.lastInsertRowid) };
+    /* Optional, never pre-ticked: "Breakfast offers and news" at sign-up (legal pack B2). */
+    if (req.body.offers === true) setMarketing(user.id, true);
   }
   consumeCode(target.key);
   /* Signing in confirms the Terms and Privacy Policy shown on the sign-in screen (current version). */
+  const accepted = db.prepare('SELECT terms_version FROM users WHERE id = ?').get(user.id).terms_version;
   db.prepare("UPDATE users SET terms_version = ?, terms_accepted_at = datetime('now') WHERE id = ?").run(TERMS_VERSION, user.id);
+  if (accepted !== TERMS_VERSION) logConsent(user.id, 'terms', 'accepted', TERMS_VERSION);
   const token = randomBytes(24).toString('hex');
   db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(tokenHash(token), user.id, Date.now() + SESSION_TTL_MS);
   setSessionCookie(res, token);

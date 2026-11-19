@@ -3,8 +3,10 @@ import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { Icon, Logo, Ring } from '../components/ui.jsx';
 import { useStore } from '../state/store.jsx';
 import { get, track } from '../api.js';
+import { analyticsAllowed, openCookieSettings } from '../state/consent.js';
 import { planningWeeks, timeLeft, tomorrowIso, fromPrice, dubaiNote } from '../domain/app.js';
-import { cutoffFor, areasText, SERVICE_AREAS, ACTIVE_AREAS } from '../domain/standards.js';
+import { cutoffFor, areasText, SERVICE_AREAS, ACTIVE_AREAS, DELIVERY_WINDOWS } from '../domain/standards.js';
+import { useConfig, closedOn } from '../state/config.js';
 
 
 function greeting() {
@@ -14,14 +16,16 @@ function greeting() {
 
 export default function Home() {
   const { state } = useStore();
-  const first = planningWeeks()[0][0];
+  const config = useConfig();
+  /* The next morning that can be ordered: closed days (public holidays, set in Admin) are skipped. */
+  const first = planningWeeks().flat().find(d => !closedOn(config, d.iso)) || planningWeeks()[0][0];
   const left = timeLeft(first.iso);
   const hoursLeft = Math.max(0, (cutoffFor(first.iso) - new Date()) / 3.6e6);
   const signedIn = !!(state.session && state.user);
   const [open, setOpen] = useState(null);
   const [params] = useSearchParams();
   /* Demand KPI (Master Plan §15): one visit per app session. */
-  useEffect(() => { try { if (!sessionStorage.getItem('mb.visit')) { sessionStorage.setItem('mb.visit', '1'); track('visit'); } } catch { /* storage blocked */ } }, []);
+  useEffect(() => { if (!analyticsAllowed()) return; try { if (!sessionStorage.getItem('mb.visit')) { sessionStorage.setItem('mb.visit', '1'); track('visit'); } } catch { /* storage blocked */ } }, []);
 
   /* Live delivery-window availability for the next orderable morning (MB-DLV-001 §8). */
   useEffect(() => {
@@ -66,7 +70,7 @@ export default function Home() {
         <div className="home-hero-actions stack gap-16">
           {open !== null && open < 3 && (
             <span className="live" style={{ fontWeight: 500 }}><i />
-              <span><b>Live</b> <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>{open ? `${open} of 3 windows left` : 'Fully booked'} for {first.iso === tomorrowIso() ? 'tomorrow' : first.label}</span></span>
+              <span><b>Live</b> <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>{open ? `${open} of ${DELIVERY_WINDOWS.length} windows left` : 'Fully booked'} for {first.iso === tomorrowIso() ? 'tomorrow' : first.label}</span></span>
             </span>
           )}
 
@@ -166,10 +170,13 @@ export default function Home() {
 
       <footer className="home-wide"><div className="home-footer">
         <Logo width={110} />
-        <nav className="row xs" aria-label="Help and policies" style={{ gap: 18 }}>
+        <nav className="row xs" aria-label="Help and policies" style={{ gap: '4px 18px', flexWrap: 'wrap', justifyContent: 'center' }}>
           <Link to="/help" className="link-hit" style={{ color: 'inherit' }}>Help</Link>
           <Link to="/legal/terms" className="link-hit" style={{ color: 'inherit' }}>Terms</Link>
+          <Link to="/legal/refunds" className="link-hit" style={{ color: 'inherit' }}>Refunds</Link>
           <Link to="/legal/privacy" className="link-hit" style={{ color: 'inherit' }}>Privacy</Link>
+          <Link to="/legal/cookies" className="link-hit" style={{ color: 'inherit' }}>Cookies</Link>
+          <button type="button" className="link-hit" style={{ color: 'inherit', background: 'none', border: 0, padding: 0, font: 'inherit', cursor: 'pointer' }} onClick={openCookieSettings}>Cookie settings</button>
         </nav>
       </div></footer>
     </div>

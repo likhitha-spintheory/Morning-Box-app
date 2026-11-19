@@ -28,7 +28,7 @@ Data is stored in `data/morningbox.db` (override with `DB_FILE`). Other settings
 `WINDOW_CAPACITY` (boxes per delivery window per morning, default 120),
 `OPS_KEY` (operations API key; `dev-ops-key` in development only — in production the operations API stays
 disabled until a real key is set), `NODE_ENV=production` (hides the development OTP code and the demo status
-endpoint, marks the session cookie Secure, sends HSTS), `TRUST_PROXY` (set behind a load balancer, e.g. `1`, so
+endpoint, marks the session cookie Secure, sends HSTS), `TRUST_PROXY` (required in production, e.g. `1` behind Caddy, so
 sign-in rate limits see the real client IP).
 Settings can also go in a `.env` file beside `package.json` (git-ignored; the API reads it at start-up).
 
@@ -55,9 +55,29 @@ Invoices: `MB_LEGAL_NAME`, `MB_TRN` (supplier TRN — the invoice is titled "Tax
 `MB_ADDRESS`, `VAT_RATE` (default `0.05`; prices are VAT-inclusive). Personal orders get the same receipt.
 New Help & Support messages are emailed to `SUPPORT_NOTIFY_EMAIL` (e.g. info@morningbox.ae) and answered in the admin panel (Service → Support).
 Help & legal: `MB_SUPPORT_EMAIL`, `MB_SUPPORT_PHONE`, `MB_SUPPORT_WHATSAPP`, `MB_SUPPORT_HOURS` (shown in Help when set),
-`MB_TERMS_VERSION` (bump when the Terms or Privacy Policy change; customers re-accept in the app). The Terms,
-Privacy, Refunds and Allergen pages are built in (`#/legal/...`); `VITE_TERMS_URL` / `VITE_PRIVACY_URL` replace
-them with hosted versions. Have the legal text reviewed before launch.
+`MB_TERMS_VERSION` (defaults to the legal pack's date; bump when the Terms or Privacy Policy change, customers re-accept).
+
+**Legal (UAE legal pack, 2 Nov 2026).** One source, `src/legal/documents.js`: Terms of Service, Refunds, Cancellations &
+Delivery Policy, Privacy Policy, Cookie & Device Storage Notice, and Allergen Information. They appear in the app
+(`#/legal/<id>`, Help, Profile, home footer), as public pages on the app server (`/terms`, `/refunds`, `/privacy`,
+`/cookies`, `/allergens`), and as static pages for morningbox.ae (`npm run legal:static` writes `coming-soon/<id>.html`).
+The in-app consent texts (Part B) are used word for word: allergy & dietary consent before any such data is kept
+(B1, recorded with version and time; withdrawal in Profile deletes the data, B6), optional offers opt-in at sign-up
+(B2), terms acceptance at sign-in (B3), the allergy reminder at Review & Pay (B4) and the device storage banner (B5;
+app analytics run only after "Accept all"). Every choice is kept in `consent_log` and included in "Download my data".
+Operator and contacts: `MB_LEGAL_NAME` (default Studio Nest L.L.C-FZ), `MB_ADDRESS`, `MB_LICENCE_NO`, `MB_PRIVACY_EMAIL`,
+`MB_DPO`, `MB_HOSTING_PROVIDER`. What was filled in or reworded for counsel to confirm: `docs/LEGAL-NOTES.md`.
+The Internal Data Protection Policy (05) is for staff and partners only and is not published.
+
+**Invoices.** The partner bakery is the seller (client feedback FLW-044): Admin → Bakeries → legal name, registered address
+and TRN. Morning Box is shown as the platform and `MB_LEGAL_NAME` as platform operator, collecting payment as the
+bakery's agent. A document is titled "Tax Invoice" only once every bakery on it is final and has a TRN.
+
+**Delivery areas (FLW-023).** The Area chosen is checked against the address: a building that names a place in another
+part of Dubai (e.g. "Azizi Riviera" with Area = DIFC) is refused with the client's message, on the Delivery step and
+again on the server before payment (`src/domain/places.js`). With `GOOGLE_MAPS_SERVER_KEY` (Geocoding API, restricted to
+the server's IP) the address is also geocoded and must fall inside an active area (boundaries in `places.js`).
+Areas are switched on and off in Admin → Company.
 
 Operations console: open `#/ops` and enter `OPS_KEY` — deliveries and status, bakery allocation, printable kitchen
 prep list and box labels, support inbox, Loved it / Not for me feedback, exceptions, and closed days (public holidays).
@@ -66,6 +86,7 @@ Confirm / Report an issue, In Preparation → Ready, delays and temporary condit
 orders (there is no courier): it counts the boxes out for delivery, sees the drop-off point (never the customer's name
 or email), records the handover point, and reports running late or a failed delivery.
 Backups: `npm run backup` writes a consistent copy to `data/backups/` (keeps 14; `MB_BACKUP_DIR`, `MB_BACKUP_KEEP`).
+Schedule it on the server, e.g. a daily cron for the `morningbox` user: `15 3 * * * cd /opt/morningbox/app && npm run backup`.
 The full product review and roadmap is in `docs/IMPROVEMENTS.md`.
 
 Sign-in: one code per number every 30 s and 5 per hour; 5 tries per code and 10 failed tries per hour per number;
@@ -122,7 +143,7 @@ morningbox.ae, www.morningbox.ae {
 	root * /var/www/morningbox-coming-soon
 	encode gzip
 	file_server
-	try_files {path} /index.html
+	try_files {path} {path}.html /index.html
 }
 
 dev.morningbox.ae {
@@ -141,7 +162,8 @@ dev.morningbox.ae {
 | Planning | `GET /api/availability?dates=…` · `POST /api/recommendations` |
 | Personal orders | `GET/POST /api/orders` · `GET /api/orders/:id` · `PATCH /api/orders/:id/days/:date` · `POST …/cancel` · `POST …/feedback` · `POST …/issue` |
 | Business (MB-B2B-001) | `POST /api/business/account` · `POST /api/business/quote` · `GET/POST /api/business/orders` · `PATCH …/days/:date` · `POST …/cancel` · `GET …/invoice` |
-| Operations (`x-ops-key`) | `GET /api/ops/days?date=` · `POST /api/ops/allocate` · `POST /api/ops/days/:kind/:id/stage` · `GET/POST /api/ops/exceptions` · `GET /api/ops/bakeries` |
+| Operations (`x-ops-key`) | `GET /api/ops/dashboard?date=` · `GET /api/ops/days?date=` · `POST /api/ops/allocate` · `POST /api/ops/days/:kind/:id/{bakery-state,handover,out,delivered,failed,late,remedy,reallocate}` · `GET/POST /api/ops/exceptions` · `GET /api/ops/report` · `/api/ops/admin/*` |
+| Legal & privacy | `GET /terms` `/refunds` `/privacy` `/cookies` `/allergens` · `POST /api/consents` · `POST /api/address/check` · `GET /api/me/export` |
 
 The server never trusts the browser: every order is re-run through the locked recommendation engine
 (eligibility, allergens, swaps, add-ons), re-priced, checked against the 9:00 PM cutoff and delivery

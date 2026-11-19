@@ -31,7 +31,7 @@ async function signIn(mobile) {
   return { token: v.body.token };
 }
 const dates = orderableDates(new Date(), 14).map(isoDate);
-const profile = { eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
+const profile = { healthConsent: true, eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
 const day = (date, extra = {}) => { const r = recommendDay(profile, 'regular'); return { date, context: 'regular', recipeId: r.primary.recipeId, components: r.primary.components, size: 'regular', addons: [], window: 'w2', ...extra }; };
 const address = { building: 'Gate Village, Building 3', unit: 'Level 4' };
 async function order(mobile, date, extra) {
@@ -262,14 +262,14 @@ test('when no bakery can take an order it is refunded in full and the customer i
 });
 
 test('SAMPLE items can be switched off; Fruit Danish in the box gets an approved flavour', async () => {
-  const vegan = { eatingStyle: 'flexible', preferences: ['bakery', 'sweet', 'fresh', 'savory'], dietary: ['vegan'], allergies: [] };
+  const vegan = { healthConsent: true, eatingStyle: 'flexible', preferences: ['bakery', 'sweet', 'fresh', 'savory'], dietary: ['vegan'], allergies: [] };
   const withSamples = JSON.stringify(recommendDay(vegan, 'relaxed'));
   assert.equal((await ops('PUT', '/admin/library', { samples: false })).status, 200);
   const without = recommendDay(vegan, 'relaxed');
   assert.ok(!JSON.stringify(without).match(/plantButter|coconutYogurt|glutenFreeBread/), 'no SAMPLE items offered');
   assert.notEqual(JSON.stringify(without), withSamples);
   await ops('PUT', '/admin/library', { samples: true });
-  const flex = { eatingStyle: 'flexible', preferences: ['sweet'], dietary: [], allergies: [] };
+  const flex = { healthConsent: true, eatingStyle: 'flexible', preferences: ['sweet'], dietary: [], allergies: [] };
   const r = recommendDay(flex, 'relaxed');
   assert.ok(r.primary.components.includes('fruitDanish'));
   const a = await signIn('509100014'); await call('PUT', '/me/profile', flex, a);

@@ -11,6 +11,7 @@ import Legal from './screens/Legal.jsx';
 import Help from './screens/Help.jsx';
 import Notifications from './screens/Notifications.jsx';
 import { ErrorBoundary, OfflineBanner, UpdateBanner } from './components/Safety.jsx';
+import CookieBanner from './components/CookieBanner.jsx';
 
 /* Business Breakfast loads on demand, so personal customers download less. */
 const biz = name => lazy(() => import('./screens/business/Business.jsx').then(m => ({ default: m[name] })));
@@ -87,6 +88,7 @@ export default function App() {
       </Routes>
       </Suspense>
       <AppNav />
+      <CookieBanner />
     </ErrorBoundary>
   );
 }

@@ -31,9 +31,12 @@ const digest = s => createHash('sha256').update(String(s)).digest();
 export const opsRouter = Router();
 opsRouter.use((req, _res, next) => {
   if (!OPS_KEY || (!DEV && OPS_KEY === 'dev-ops-key')) return next(new ApiError(503, 'ops_disabled', 'Operations API is not configured.'));
-  const ok = timingSafeEqual(digest(req.get('x-ops-key') || ''), digest(OPS_KEY));
+  const given = req.get('x-ops-key') || '';
+  const ok = timingSafeEqual(digest(given), digest(OPS_KEY));
+  /* A request with no key at all (signed out) is refused without counting towards the lockout. */
+  if (!given) return next(new ApiError(401, 'unauthorised', 'Enter the operations key.'));
   try { checkStaffCode(req, 'ops', ok); } catch (e) { return next(e); }
-  if (!ok) return next(new ApiError(401, 'unauthorised', 'Operations key required.'));
+  if (!ok) return next(new ApiError(401, 'unauthorised', 'That operations key isn’t right.'));
   next();
 });
 opsRouter.use('/admin/menu', menuRouter);
@@ -309,13 +312,15 @@ opsRouter.post('/support/:id/close', (req, res) => {
 });
 
 /* ---------- Closed days ---------- */
-opsRouter.get('/closed-dates', (_req, res) => res.json(db.prepare('SELECT date, reason FROM closed_dates ORDER BY date').all()));
+/* Each closed day with the orders still booked for it (they are not cancelled automatically). */
+const bookedOn = date => db.prepare('SELECT COUNT(*) AS n FROM order_days WHERE date = ? AND cancelled = 0').get(date).n
+  + db.prepare('SELECT COUNT(*) AS n FROM business_days WHERE date = ? AND cancelled = 0').get(date).n;
+opsRouter.get('/closed-dates', (_req, res) => res.json(db.prepare('SELECT date, reason FROM closed_dates ORDER BY date').all().map(c => ({ ...c, booked: bookedOn(c.date) }))));
 opsRouter.post('/closed-dates', (req, res) => {
   const date = requireDate(req.body.date);
   const reason = String(req.body.reason || 'Closed').trim().slice(0, 60) || 'Closed';
   db.prepare('INSERT INTO closed_dates (date, reason) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET reason = excluded.reason').run(date, reason);
-  const booked = db.prepare('SELECT COUNT(*) AS n FROM order_days WHERE date = ? AND cancelled = 0').get(date).n
-    + db.prepare('SELECT COUNT(*) AS n FROM business_days WHERE date = ? AND cancelled = 0').get(date).n;
+  const booked = bookedOn(date);
   res.status(201).json({ ok: true, alreadyBooked: booked });
 });
 opsRouter.delete('/closed-dates/:date', (req, res) => {

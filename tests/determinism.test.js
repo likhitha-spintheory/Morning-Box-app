@@ -14,7 +14,7 @@ const safety = [{ dietary: [], allergies: [] }, ...DIETARY.map(d => ({ dietary: 
 
 const cases = [];
 for (const e of EATING_STYLES) for (const c of CONTEXTS) for (const preferences of prefSets) for (const s of safety)
-  cases.push({ profile: { eatingStyle: e.id, preferences, ...s }, context: c.id });
+  cases.push({ profile: { healthConsent: true, eatingStyle: e.id, preferences, ...s }, context: c.id });
 
 test(`engine matrix: ${cases.length} profiles`, () => {
   let matched = 0;

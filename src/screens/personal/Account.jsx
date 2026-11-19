@@ -5,6 +5,9 @@ import { Screen, TopBar, Footer, Icon, Logo, Switch, Qty, Money, Chip, PhoneFiel
 import { download, shareText, ownerOf } from '../../api.js';
 import { useUnread } from '../Notifications.jsx';
 import { LEGAL_PAGES } from '../Legal.jsx';
+import { CONSENT } from '../../legal/documents.js';
+import { openCookieSettings } from '../../state/consent.js';
+import { hasHealthData } from './Profile.jsx';
 import { useStore } from '../../state/store.jsx';
 import { useConfig, closedOn } from '../../state/config.js';
 import {
@@ -528,7 +531,7 @@ export function OrderDay() {
           {!day.cancelled && <button type="button" className="btn-text" onClick={() => shareText(`My Morning Box for ${dayComma(date)}: ${boxName(day.cfg)}, ${windowLabel(day.window)} at ${shortBuilding}. Order ${id}.`).catch(() => {})}><Icon name="share" size={16} /> Share</button>}
           <Link to={`/help?order=${id}`} className="btn-text"><Icon name="help" size={16} /> Get help</Link>
         </div>
-        {whatsappLink() && <a href={whatsappLink(`Hi Morning Box, about order ${id} (${dayComma(date)}): `)} target="_blank" rel="noopener noreferrer" className="btn-text" style={{ alignSelf: 'center' }}>Chat with us on WhatsApp</a>}
+        {whatsappLink('', config.support?.whatsapp) && <a href={whatsappLink(`Hi Morning Box, about order ${id} (${dayComma(date)}): `, config.support?.whatsapp)} target="_blank" rel="noopener noreferrer" className="btn-text" style={{ alignSelf: 'center' }}>Chat with us on WhatsApp</a>}
         {SHOW_DEMO && !day.cancelled && st < 3 && <button className="btn-text" disabled={busy} style={{ alignSelf: 'center', fontSize: 13, color: 'var(--text-3)' }} onClick={advance}>Demo: advance delivery status</button>}
       </main>
     </Screen>
@@ -803,6 +806,8 @@ export function Feedback() {
   if (guard) return guard;
   if (loading) return <Loading />;
   if (!day) return <Navigate to="/orders" replace />;
+  /* Feedback opens after delivery (the server refuses it before): an old or typed link goes to the order instead. */
+  if (trackingStage(day) !== 3 && !day.feedback) return <Navigate to={`/orders/${id}/${date}`} replace />;
   /* Feedback can be changed for 7 days after delivery (the server enforces the limit). */
   const sent = !!day.feedback && !editing;
   /* PRD §12: one short predefined reason. */
@@ -930,6 +935,18 @@ export function Me() {
     nav('/');
   };
   const rowButton = { color: 'var(--espresso)' };
+  /* Legal pack B1/B6: allergy filtering is on only with consent; turning it off deletes the saved details. */
+  const healthData = hasHealthData(p);
+  const filtering = healthData && p.healthConsent;
+  const withdrawn = params.get('withdrawn') === '1';
+  const saveHealth = (consent) => run(async () => {
+    const next = consent ? { ...p, healthConsent: true } : { ...p, dietary: [], allergies: [], otherAllergies: '', healthConsent: false };
+    const r = await put('/me/profile', next);
+    set(s => { s.profile = next; });
+    setConfirm(null);
+    if (!consent) nav('/me?withdrawn=1', { replace: true });
+    else if (r.review?.length) nav(`/me?review=${r.review.length}`, { replace: true });
+  });
   const deleteAccount = () => run(async () => { await del('/me'); setToken(null); reset(); nav('/'); });
 
   return (
@@ -977,6 +994,15 @@ export function Me() {
             </div>
           </section>
         )}
+        {withdrawn && <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2} />{CONSENT.withdrawn}</div>}
+        {healthData && !p.healthConsent && (
+          <section className="card stack gap-10" style={{ padding: 18, borderColor: 'var(--warn)' }} aria-labelledby="hc-me">
+            <strong id="hc-me" style={{ fontSize: 17 }}>{CONSENT.healthTitle}</strong>
+            <p className="help" style={{ margin: 0, fontSize: 15 }}>{CONSENT.health} <Link to="/legal/privacy" className="link">Privacy Policy</Link></p>
+            <div className="grid-2"><button type="button" className="btn-secondary" disabled={busy} onClick={() => saveHealth(false)}>Remove them</button>
+              <button type="button" className="btn" disabled={busy} onClick={() => saveHealth(true)}>{CONSENT.healthAgree}</button></div>
+          </section>
+        )}
         {reviewCount > 0 && (
           <Link to="/orders" className="note" style={{ textDecoration: 'none', color: 'inherit' }}>
             <Icon name="shield" size={20} stroke={1.6} style={{ flex: 'none' }} />
@@ -989,7 +1015,22 @@ export function Me() {
             <Row label="Eating style" to="/profile/eating?edit=me"><span className="strong" style={{ fontSize: 17 }}>{eatingLabel(p.eatingStyle) || 'Not set'}</span></Row>
             <Row label="Breakfast I enjoy" to="/profile/preferences?edit=me">{tags(p.preferences.map(prefLabel))}</Row>
             <Row label="Dietary & allergies" to="/profile/dietary?edit=me">{tags([...p.dietary.map(dietLabel), ...p.allergies.map(x => `${allergyLabel(x)} allergy`), ...(p.otherAllergies ? [p.otherAllergies] : [])])}</Row>
+            <div className="list-row" style={{ minHeight: 64 }}>
+              <span className="stack gap-4" style={{ flex: 1 }}><span className="strong">Allergy filtering</span>
+                <span className="xs">{filtering ? 'On, with your consent' : 'Off'}</span></span>
+              {filtering
+                ? <button type="button" className="link" onClick={() => setConfirm('health')}>Turn off</button>
+                : <Link to="/profile/dietary?edit=me" className="link">Turn on</Link>}
+            </div>
           </div>
+          {confirm === 'health' && (
+            <div className="card stack gap-12" role="alertdialog" aria-labelledby="hc-off">
+              <strong id="hc-off" style={{ fontSize: 17 }}>Turn off allergy filtering?</strong>
+              <span className="help" style={{ fontSize: 15.5 }}>This deletes your saved allergies and dietary requirements. Breakfasts will no longer be filtered for them, and bakeries won’t receive allergy notes for future orders.</span>
+              <div className="grid-2"><button type="button" className="btn-secondary" onClick={() => setConfirm(null)}>Keep it on</button>
+                <button type="button" className="btn-danger" disabled={busy} onClick={() => saveHealth(false)}>Turn off</button></div>
+            </div>
+          )}
         </section>
         {a.building && (
           <section className="stack gap-12">
@@ -1019,8 +1060,9 @@ export function Me() {
             <Link to="/notifications" className="list-row"><Icon name="bell" size={20} /><span className="strong" style={{ flex: 1 }}>Notifications</span><Icon name="chevron" size={18} stroke={1.8} /></Link>
             <div className="list-row"><Icon name="coffee" size={20} /><span className="strong" style={{ flex: 1 }}>Reminder the night before</span>
               <Switch checked={state.settings.coffeeReminder} label="Reminder the night before" onChange={v => set(s => { s.settings.coffeeReminder = v; })} /></div>
-            <div className="list-row"><Icon name="sparkle" size={20} /><span className="strong" style={{ flex: 1 }}>Offers &amp; news</span>
-              <Switch checked={!!state.settings.offers} label="Offers and news" onChange={setOffers} /></div>
+            <div className="list-row" style={{ alignItems: 'flex-start', paddingTop: 14, paddingBottom: 14 }}><Icon name="sparkle" size={20} />
+              <span className="stack gap-4" style={{ flex: 1 }}><span className="strong">{CONSENT.marketingTitle}</span><span className="xs">{CONSENT.marketing}</span></span>
+              <Switch checked={!!state.settings.offers} label={CONSENT.marketingTitle} onChange={setOffers} /></div>
           </div>
         </section>
 
@@ -1033,10 +1075,18 @@ export function Me() {
         </section>
 
         <section className="stack gap-12">
-          <span className="eyebrow">Account</span>
+          <span className="eyebrow">Privacy &amp; data</span>
           <div className="card list">
             <button type="button" className="list-row" style={rowButton} onClick={() => run(() => download('/me/export', 'morning-box-my-data.json', 'application/json'))}>
               <Icon name="download" size={20} /><span className="strong" style={{ flex: 1 }}>Download my data</span><Icon name="chevron" size={18} stroke={1.8} /></button>
+            <button type="button" className="list-row" style={rowButton} onClick={openCookieSettings}>
+              <Icon name="lock" size={20} /><span className="strong" style={{ flex: 1 }}>Cookie settings</span><Icon name="chevron" size={18} stroke={1.8} /></button>
+          </div>
+        </section>
+
+        <section className="stack gap-12">
+          <span className="eyebrow">Account</span>
+          <div className="card list">
             <button type="button" className="list-row" style={rowButton} onClick={() => signOut(false)}>
               <Icon name="logout" size={20} /><span className="strong" style={{ flex: 1 }}>Sign out</span></button>
             <button type="button" className="list-row" style={rowButton} onClick={() => signOut(true)}>
@@ -1046,7 +1096,7 @@ export function Me() {
           </div>
         </section>
         <ErrorBanner>{error}</ErrorBanner>
-        {confirm && (
+        {confirm === 'delete' && (
           <div className="card stack gap-12" role="alertdialog" aria-labelledby="cf">
             <strong id="cf" style={{ fontSize: 18 }}>Delete your Morning Box account?</strong>
             <span className="help" style={{ fontSize: 15.5 }}>Your profile and saved address will be removed. This can’t be undone.</span>

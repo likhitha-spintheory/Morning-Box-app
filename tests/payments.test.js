@@ -56,7 +56,7 @@ const call = async (method, path, body, token, headers = {}) => {
   return { status: res.status, body: text.startsWith('{') || text.startsWith('[') ? JSON.parse(text) : text };
 };
 const dates = orderableDates(new Date(), 14).map(isoDate);
-const profile = { eatingStyle: 'health', preferences: ['savory', 'fresh'], dietary: ['vegetarian'], allergies: ['sesame'] };
+const profile = { healthConsent: true, eatingStyle: 'health', preferences: ['savory', 'fresh'], dietary: ['vegetarian'], allergies: ['sesame'] };
 const address = { building: 'Gate Village, Building 3', unit: 'Level 4, Unit 402', handover: 'reception' };
 function dayFor(date, size = 'regular') {
   const r = recommendDay(profile, 'regular');

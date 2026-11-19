@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '../components/ui.jsx';
-import { StaffSignIn, StaffTiles, Stepper } from './StaffUi.jsx';
+import { StaffSignIn, StaffTiles, Stepper, defaultStaffDate } from './StaffUi.jsx';
 import { addDaysIso, dubaiTodayIso } from '../domain/standards.js';
 import { ProductionPlan, LabelGrid } from './OpsLive.jsx';
 
@@ -25,7 +25,7 @@ export default function Bakery() {
   const [code, setCode] = useState(() => { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } });
   const [draft, setDraft] = useState(() => { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } });
   const [me, setMe] = useState(null);
-  const [date, setDate] = useState(() => addDaysIso(dubaiTodayIso(), 1));
+  const [date, setDate] = useState(defaultStaffDate);
   const [plan, setPlan] = useState(null);
   const [labels, setLabels] = useState(null);
   const [view, setView] = useState('plan');
@@ -45,11 +45,9 @@ export default function Bakery() {
     if (!code) return;
     setError('');
     try {
-      const [bakery, production, labelData] = await Promise.all([
-        call('GET', '/me'),
-        call('GET', `/plan?date=${date}`),
-        call('GET', `/labels?date=${date}`)
-      ]);
+      /* The code is checked once first: parallel requests with a wrong code would each count towards the lockout. */
+      const bakery = await call('GET', '/me');
+      const [production, labelData] = await Promise.all([call('GET', `/plan?date=${date}`), call('GET', `/labels?date=${date}`)]);
       setMe(bakery);
       setPlan(production);
       setLabels(labelData.labels);
@@ -102,7 +100,7 @@ export default function Bakery() {
             ))}
           </div>
         </nav>
-        <button type="button" className="ops-signout" onClick={() => save('')}><Icon name="logout" size={18} stroke={1.6} /><span>Sign out</span></button>
+        <button type="button" className="ops-signout" onClick={() => { save(''); setDraft(''); setMe(null); setPlan(null); setLabels(null); setError(''); }}><Icon name="logout" size={18} stroke={1.6} /><span>Sign out</span></button>
       </aside>
 
       <div className="ops">
@@ -254,7 +252,7 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
                 <b style={{ fontSize: 14 }}>Delivered to:</b>
                 {(points[o.kind] || []).filter(p => p !== 'your door' || o.dropOff?.handover === 'Door').map(p => <button key={p} type="button" className="btn-secondary" style={small} disabled={busy} onClick={() => act('POST', `/days/${k}/delivered`, { deliveryPoint: p })}>{p[0].toUpperCase() + p.slice(1)}</button>)}
                 <select className="input" style={{ width: 230, minHeight: 40 }} aria-label="Why delivery failed" value={fail[k] || ''} onChange={e => setFail(x => ({ ...x, [k]: e.target.value }))}><option value="">Why couldn’t it be delivered?</option>{failures.map(x => <option key={x}>{x}</option>)}</select>
-                <button type="button" className="btn-text" disabled={busy || !fail[k]} onClick={() => act('POST', `/days/${k}/failed`, { reason: fail[k] })}>Delivery failed</button>
+                <button type="button" className="btn-text" disabled={busy || !fail[k]} onClick={() => { if (window.confirm(`Report that this delivery failed (${fail[k]})? Morning Box will contact the customer.`)) act('POST', `/days/${k}/failed`, { reason: fail[k] }); }}>Delivery failed</button>
               </div>
             )}
             {gone && !done && (
@@ -292,7 +290,7 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
                   </div>
                   <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
                     <select className="input" style={{ width: 260, minHeight: 40 }} aria-label="Why it can’t be made" value={reason[k] || ''} onChange={e => setReason(x => ({ ...x, [k]: e.target.value }))}><option value="">Why can’t it be made?</option>{reasons.map(x => <option key={x}>{x}</option>)}</select>
-                    <button type="button" className="btn-secondary" style={small} disabled={busy || !reason[k]} onClick={() => act('POST', path, { state: 'Unable to Fulfil', reason: reason[k] })}>Report unable to fulfil</button>
+                    <button type="button" className="btn-secondary" style={small} disabled={busy || !reason[k]} onClick={() => { if (window.confirm('Report that you can’t make this order? Morning Box will move it to another bakery or refund the customer.')) act('POST', path, { state: 'Unable to Fulfil', reason: reason[k] }); }}>Report unable to fulfil</button>
                   </div>
                   <span className="xs">Morning Box decides what happens next (another bakery, or a refund). Don’t change the order yourself.</span>
                 </details>
@@ -322,7 +320,8 @@ function Availability({ plan, items, date, busy, act }) {
         {v.kind === 'Reduced Capacity' && <input className="input" style={{ width: 120 }} inputMode="numeric" placeholder="Boxes" aria-label="Boxes you can make" value={v.capacity} onChange={e => setV(x => ({ ...x, capacity: e.target.value }))} />}
         {v.kind === 'Special Requirement Unavailable' && <select className="input" style={{ width: 200 }} aria-label="Requirement" value={v.need} onChange={e => setV(x => ({ ...x, need: e.target.value }))}>{['glutenFree', 'nutFree', 'peanutFree', 'dairyFree', 'eggFree', 'vegan', 'sesameFree', 'soyFree'].map(k => <option key={k}>{k}</option>)}</select>}
         <input className="input" style={{ width: 220 }} placeholder="Note" aria-label="Note" value={v.note} onChange={e => setV(x => ({ ...x, note: e.target.value }))} />
-        <button type="button" className="btn-secondary" style={small} disabled={busy} onClick={() => act('POST', '/conditions', { ...v, date, capacity: Number(v.capacity) })}>Send</button>
+        <button type="button" className="btn-secondary" style={small} disabled={busy || (v.kind === 'Reduced Capacity' && !/^\d+$/.test(v.capacity.trim())) || (v.kind === 'Item Unavailable' && !v.item)}
+          onClick={() => act('POST', '/conditions', { ...v, date, capacity: v.kind === 'Reduced Capacity' ? Number(v.capacity) : undefined })}>Send</button>
       </div>
     </section>
   );

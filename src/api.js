@@ -2,6 +2,8 @@
    The session lives in an httpOnly cookie set by the server at sign-in, so no
    token is kept where page scripts can read it. A token saved by an earlier
    version of the app is still sent until that session ends. */
+import { analyticsAllowed } from './state/consent.js';
+
 const KEY = 'morningbox.app.v1';
 export const UNAUTHORISED_EVENT = 'morningbox:unauthorised';
 
@@ -57,8 +59,13 @@ export const goToPayment = checkout => { window.location.assign(checkout.url); r
 /* Sent with an empty JSON body: the server accepts signed-in changes only as JSON requests (server/auth.js), and a
    request without a body never counts as one, so a bare DELETE was refused with "Request not allowed". */
 export const del = (p, b = {}) => api('DELETE', p, b);
-/** Fire-and-forget product analytics for the MVP KPIs (funnel, no-match). Never blocks the screen. */
-export const track = (kind, data) => { api('POST', '/events', { kind, data }).catch(() => {}); };
+/** Fire-and-forget product analytics for the MVP KPIs (funnel, no-match). Never blocks the screen.
+    Sent only after the visitor allows analytics (Cookie & Device Storage Notice); crash reports are
+    technical data the app needs to run (legitimate interest) and are always sent. */
+export const track = (kind, data) => {
+  if (kind !== 'client_error' && !analyticsAllowed()) return;
+  api('POST', '/events', { kind, data }).catch(() => {});
+};
 
 /** A fresh key that makes a payment request safe to retry (double taps, flaky networks). */
 export const newIdempotencyKey = () =>
@@ -92,7 +99,7 @@ export async function shareText(text) {
 
 /** Clears one customer's data from this device before another customer's session is applied. */
 export function resetPersonal(s) {
-  s.profile = { eatingStyle: null, preferences: [], dietary: [], allergies: [], otherAllergies: '' };
+  s.profile = { eatingStyle: null, preferences: [], dietary: [], allergies: [], otherAllergies: '', healthConsent: false };
   s.profileDone = false;
   s.plan = { dates: [], days: {} };
   s.delivery = { sameForAll: null, address: { building: '', unit: '', area: '', handover: 'reception', notes: '' }, window: null, perDay: {} };
@@ -111,7 +118,7 @@ export const ownerOf = user => user?.mobile || user?.loginEmail || '';
 export function applySession(s, payload) {
   if (payload.token) { s.session = { active: true }; setToken(null); s.owner = ownerOf(payload.user); }
   s.user = payload.user;
-  if (payload.profile && !s.profileDone) { s.profile = { otherAllergies: '', ...payload.profile }; s.profileDone = true; }
+  if (payload.profile && !s.profileDone) { s.profile = { otherAllergies: '', healthConsent: false, ...payload.profile }; s.profileDone = true; }
   if (payload.settings) s.settings = { ...s.settings, ...payload.settings };
   if (payload.address && !s.delivery.address.building) s.delivery.address = { ...s.delivery.address, ...payload.address };
   if (payload.defaultWindow && !s.delivery.window) s.delivery.window = payload.defaultWindow;

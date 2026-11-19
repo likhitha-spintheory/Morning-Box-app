@@ -649,7 +649,9 @@ export function WeeklySummary() {
 
   return (
     <Screen>
-      <TopBar back={-1} close={null}><span className="topbar-title">Your mornings</span></TopBar>
+      {/* A fixed step back (the last planned morning), not history: Delivery's Back opens this screen, so history
+          would bounce between the two. */}
+      <TopBar back={rows.length ? `/plan/day/${rows[rows.length - 1]}/extras` : '/plan/dates'} close={null}><span className="topbar-title">Your mornings</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 8, gap: 16 }}>
         <div className="stack gap-10" style={{ marginBottom: 4 }}>
           <span className="eyebrow">{unsaved ? 'Almost planned' : 'All planned'}</span>

@@ -408,14 +408,14 @@ export const money = n => Math.round(Number(n) * 100) / 100;
  * beyond that was paid with credit and goes back as credit. Returns { card, credit }.
  * Payment gateway integration point: refund `card` against the order's payment_ref.
  */
-export function payBack(orderId, userId, amount, reason) {
+export function payBack(orderId, userId, amount, reason, date = null) {
   const o = db.prepare('SELECT total, credit_used, card_refunded FROM orders WHERE id = ?').get(orderId);
   const charged = db.prepare('SELECT COALESCE(SUM(a.amount), 0) AS n FROM payment_adjustments a JOIN order_days d ON d.id = a.order_day_id WHERE d.order_id = ? AND a.amount > 0').get(orderId).n;
   const cardLeft = Math.max(0, money(o.total - (o.credit_used || 0) + charged - (o.card_refunded || 0)));
   const card = money(Math.min(money(amount), cardLeft));
   const credit = money(money(amount) - card);
   if (card > 0) { db.prepare('UPDATE orders SET card_refunded = card_refunded + ? WHERE id = ?').run(card, orderId); queueRefund('personal', orderId, card, reason); }
-  if (credit > 0) db.prepare('INSERT INTO customer_credits (user_id, amount, reason, ref) VALUES (?, ?, ?, ?)').run(userId, credit, `Returned: ${reason}`.slice(0, 200), orderId);
+  if (credit > 0) db.prepare('INSERT INTO customer_credits (user_id, amount, reason, ref) VALUES (?, ?, ?, ?)').run(userId, credit, `Returned: ${reason}`.slice(0, 200), date ? `${orderId}:${date}` : orderId);   // dated, so the report counts it
   return { card, credit };
 }
 /** Customer wording for money paid back. */
@@ -454,7 +454,7 @@ export function applyRemedy(kind, id, { type, amount, reason }) {
       update(kind, raw.id, { refund: money(already + value), refund_reason: why });
       /* Personal orders may have been paid partly with credit: that part goes back as credit.
          Business orders are paid by card only. */
-      if (kind === 'personal') back = payBack(raw.order_id, raw.user_id, value, why);
+      if (kind === 'personal') back = payBack(raw.order_id, raw.user_id, value, why, r.date);
       else queueRefund('business', raw.order_id, value, why);
     }
     if (type === 'Credit') db.prepare('INSERT INTO customer_credits (user_id, amount, reason, ref) VALUES (?, ?, ?, ?)').run(raw.user_id, value, why, ref(r));
@@ -624,7 +624,9 @@ export function registerFulfilmentRoutes(router) {
    ============================================================ */
 export const bakeryRouter = Router();
 bakeryRouter.use((req, _res, next) => {
-  const b = bakeryByCode(req.get('x-bakery-code'));
+  const code = req.get('x-bakery-code') || '';
+  const b = code ? bakeryByCode(code) : null;
+  if (!code) return next(new ApiError(401, 'unauthorised', 'Enter your bakery access code.'));   // not counted as a wrong code
   try { checkStaffCode(req, 'bakery', !!b); } catch (e) { return next(e); }
   if (!b) return next(new ApiError(401, 'unauthorised', 'Enter your bakery access code.'));
   /* A suspended bakery can still see and finish orders it has already started; it can't confirm new plans. */
@@ -651,7 +653,10 @@ bakeryRouter.post('/plan/start', (req, res) => {
   const held = [];
   for (const r of bakeryRows(req.bakery.id, date)) {
     if (req.body.window && r.window !== req.body.window) continue;
-    if (r.bakeryState && r.bakeryState !== 'Confirmed') continue;
+    /* Split orders: this bakery's own part decides (another bakery may already have started its part). */
+    const parts = r.partStates || {};
+    const mine = Object.keys(parts).length ? parts[req.bakery.id]?.state : r.bakeryState;
+    if (mine && mine !== 'Confirmed') continue;
     /* Orders waiting on a safety check are not started (MB-BKY-001 §3). */
     if (r.safetyHold || r.safetyCheck) { held.push(r.orderId); continue; }
     setBakeryState(r.kind, r.id, 'In Preparation', { bakeryId: req.bakery.id }); n++;

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/ui.jsx';
+import { addDaysIso, dubaiTodayIso } from '../domain/standards.js';
 
 /* Shared look for the partner screens (Bakery View): Morning Box ivory,
    gold and espresso (MB-DSN-001 §3, §6). Layout only — each screen keeps its own logic. */
@@ -47,4 +48,10 @@ export function StaffTiles({ items }) {
       ))}
     </div>
   );
+}
+
+/** The date staff screens open on: today's deliveries until noon (Dubai time), then tomorrow's plan. */
+export function defaultStaffDate() {
+  const hour = Number(new Date().toLocaleString('en-GB', { timeZone: 'Asia/Dubai', hour: '2-digit', hour12: false }));
+  return hour < 12 ? dubaiTodayIso() : addDaysIso(dubaiTodayIso(), 1);
 }

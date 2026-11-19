@@ -66,7 +66,7 @@ function bakeryOut(b) {
     effectiveCapacity: b.effective_capacity ?? null, windowCapacity: windowCapacity(b), glutenFreeCertified: !!b.gluten_free_certified,
     capabilities: bakeryCaps(b), status: b.status, statusNote: b.status_note || '', products: bakeryProducts(b),
     danishFlavours: danishFlavours(b), contactName: b.contact_name || '', contactPhone: b.contact_phone || '', hasAccessCode: !!b.access_hash,
-    payoutPct: b.payout_pct ?? 60, onboarding: onboardingOf(b), licenceNo: b.licence_no || '', licenceExpiry: b.licence_expiry || '', bakesOwnBread: !!b.bakes_own_bread, readyLeadMinutes: b.ready_lead_minutes ?? 30,
+    payoutPct: b.payout_pct ?? 60, onboarding: onboardingOf(b), licenceNo: b.licence_no || '', legalName: b.legal_name || '', legalAddress: b.legal_address || '', trn: b.trn || '', licenceExpiry: b.licence_expiry || '', bakesOwnBread: !!b.bakes_own_bread, readyLeadMinutes: b.ready_lead_minutes ?? 30,
     samples: db.prepare('SELECT id, product, result, note, created_at FROM bakery_samples WHERE bakery_id = ? ORDER BY id DESC LIMIT 50').all(b.id).map(x => ({ ...x, productName: COMPONENTS[x.product]?.name || x.product })),
     openSafety: db.prepare("SELECT COUNT(*) AS n FROM exceptions WHERE resolved = 0 AND category = 'Safety' AND responsible_party = ?").get(b.name).n,
     upcomingBoxes: booked,
@@ -145,11 +145,21 @@ function validateBakery(input, existing = {}) {
     capabilities: json(caps), products: products === null ? null : json(products), danish_flavours: json([...new Set(flavours)]),
     contact_name: clean(input.contactName ?? existing.contact_name ?? ''), contact_phone: clean(input.contactPhone ?? existing.contact_phone ?? '', 30),
     licence_no: clean(input.licenceNo ?? existing.licence_no ?? '', 40), licence_expiry: validDate(input.licenceExpiry ?? existing.licence_expiry),
+    /* The seller on customers' invoices (client feedback FLW-044). */
+    legal_name: clean(input.legalName ?? existing.legal_name ?? '', 120), legal_address: clean(input.legalAddress ?? existing.legal_address ?? '', 200),
+    trn: trnOf(input.trn ?? existing.trn ?? ''),
     bakes_own_bread: input.bakesOwnBread === undefined ? existing.bakes_own_bread || 0 : input.bakesOwnBread ? 1 : 0,
     onboarding: json(input.onboarding && typeof input.onboarding === 'object' ? Object.fromEntries(Object.keys(ONBOARDING).map(k => [k, input.onboarding[k] === true])) : onboardingOf(existing)),
     ready_lead_minutes: readyLead(input.readyLeadMinutes ?? existing.ready_lead_minutes ?? 30),
     payout_pct: payoutPct(input.payoutPct ?? existing.payout_pct ?? 60)
   };
+}
+
+/** UAE TRN: 15 digits, or empty while not registered for VAT. */
+function trnOf(v) {
+  const d = String(v).replace(/\D/g, '');
+  if (d && d.length !== 15) throw bad('trn_invalid', 'A TRN has 15 digits. Leave it empty if the bakery is not VAT-registered.');
+  return d || null;
 }
 
 adminRouter.post('/bakeries', (req, res) => {
@@ -235,7 +245,8 @@ export function addCondition(bakeryId, body) {
   if (!BAKERY_CONDITIONS.includes(body.kind)) throw bad('kind_invalid', `Condition must be one of: ${BAKERY_CONDITIONS.join(', ')}.`);
   const item = body.kind === 'Item Unavailable' ? body.item : null;
   if (body.kind === 'Item Unavailable' && !COMPONENTS[item]) throw bad('item_invalid', 'Choose the item that is unavailable.');
-  const capacity = body.kind === 'Reduced Capacity' ? Number(body.capacity) : null;
+  /* A blank box count must never become 0 (that would move every unstarted order away from the bakery). */
+  const capacity = body.kind === 'Reduced Capacity' && String(body.capacity ?? '').trim() !== '' ? Number(body.capacity) : null;
   if (body.kind === 'Reduced Capacity' && (!Number.isInteger(capacity) || capacity < 0)) throw bad('capacity_invalid', 'Enter the reduced capacity in boxes.');
   const need = body.kind === 'Special Requirement Unavailable' ? body.need : null;
   if (body.kind === 'Special Requirement Unavailable' && !CAPABILITIES.includes(need)) throw bad('need_invalid', 'Choose the requirement it cannot handle.');

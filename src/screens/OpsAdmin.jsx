@@ -39,7 +39,14 @@ function Bakery({ b, catalog, call, act, busy }) {
   const [code, setCode] = useState('');
   const perf = b.performance;
   const approved = b.products ? `${b.products.length} approved products` : 'All Morning Box products';
-  const issueCode = async () => { try { setCode((await call('POST', `/admin/bakeries/${b.id}/access-code`)).code); } catch { /* shown by act */ } };
+  const [codeState, setCodeState] = useState({ busy: false, error: '' });
+  const issueCode = async () => {
+    if (codeState.busy) return;
+    if (b.hasAccessCode && !window.confirm(`Issue a new access code for ${b.name}? The current code stops working straight away, so give the bakery the new one before their next shift.`)) return;
+    setCodeState({ busy: true, error: '' });
+    try { setCode((await call('POST', `/admin/bakeries/${b.id}/access-code`)).code); setCodeState({ busy: false, error: '' }); }
+    catch (e) { setCodeState({ busy: false, error: e.message }); }
+  };
   return (
     <article className={`card stack gap-10${b.status === 'Suspended' ? ' warn' : ''}`} style={{ padding: 18 }}>
       <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
@@ -47,9 +54,10 @@ function Bakery({ b, catalog, call, act, busy }) {
         <span className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
           {[['edit', 'Edit'], ['status', 'Change status'], ['samples', 'Samples'], ['condition', 'Report a condition']].map(([m, label]) =>
             <button key={m} type="button" className="btn-text" onClick={() => setMode(mode === m ? null : m)}>{mode === m ? 'Close' : label}</button>)}
-          <button type="button" className="btn-text" disabled={busy} onClick={issueCode}>{b.hasAccessCode ? 'New access code' : 'Create access code'}</button>
+          <button type="button" className="btn-text" disabled={busy || codeState.busy} onClick={issueCode}>{codeState.busy ? 'Creating…' : b.hasAccessCode ? 'New access code' : 'Create access code'}</button>
         </span>
       </div>
+      {codeState.error && <div className="banner-err" role="alert">{codeState.error}</div>}
       {b.statusNote && <span className="help">{b.statusNote}</span>}
       {b.openSafety > 0 && <div className="banner-warn" role="status"><span><b>{b.openSafety} open safety incident{b.openSafety > 1 ? 's' : ''}</b> linked to this bakery. Consider Under Review (MB-BKY-001 §10).</span></div>}
       <span className="xs">Licence {b.licenceNo || 'not recorded'}{b.licenceExpiry ? ` (expires ${b.licenceExpiry})` : ''} · {b.bakesOwnBread ? 'bakes its own bread in-house' : 'own bread NOT confirmed'} · ready {b.readyLeadMinutes} min before each window</span>
@@ -72,7 +80,7 @@ function Bakery({ b, catalog, call, act, busy }) {
           </div>
           <input className="input" placeholder={status.status === 'Active' ? 'Note (optional)' : 'Issue and corrective action (required)'} value={status.note} onChange={e => setStatus(x => ({ ...x, note: e.target.value }))} />
           {status.status === 'Active' && b.status !== 'Active' && <input className="input" placeholder="Verification: how the corrective action was checked" value={status.verification} onChange={e => setStatus(x => ({ ...x, verification: e.target.value }))} />}
-          <button type="button" className="btn-secondary" style={{ ...small, alignSelf: 'flex-start' }} disabled={busy} onClick={() => act('POST', `/admin/bakeries/${b.id}/status`, status).then(ok => ok && setMode(null))}>Save status</button>
+          <button type="button" className="btn-secondary" style={{ ...small, alignSelf: 'flex-start' }} disabled={busy} onClick={() => (status.status === 'Active' || window.confirm(`Set ${b.name} to ${status.status}? It stops receiving orders, and its unstarted orders for allocated dates will need to be re-allocated.`)) && act('POST', `/admin/bakeries/${b.id}/status`, status).then(ok => ok && setMode(null))}>Save status</button>
           <span className="xs">Suspended or Under Review bakeries stop receiving new allocations. Re-run allocation for dates already allocated to them.</span>
         </div>
       )}
@@ -96,7 +104,7 @@ function Bakery({ b, catalog, call, act, busy }) {
           {cond.kind === 'Reduced Capacity' && <input className="input" style={{ width: 120 }} inputMode="numeric" placeholder="Boxes" aria-label="Reduced capacity" value={cond.capacity} onChange={e => setCond(x => ({ ...x, capacity: e.target.value }))} />}
           {cond.kind === 'Special Requirement Unavailable' && <select className="input" style={{ width: 200 }} aria-label="Requirement" value={cond.need} onChange={e => setCond(x => ({ ...x, need: e.target.value }))}>{catalog.capabilities.map(k => <option key={k} value={k}>{CAP_LABEL[k]}</option>)}</select>}
           <input className="input" style={{ width: 220 }} placeholder="Note" aria-label="Note" value={cond.note} onChange={e => setCond(x => ({ ...x, note: e.target.value }))} />
-          <button type="button" className="btn-secondary" style={small} disabled={busy || !cond.date} onClick={() => act('POST', `/admin/bakeries/${b.id}/conditions`, { ...cond, capacity: Number(cond.capacity) }).then(ok => ok && setMode(null))}>Add</button>
+          <button type="button" className="btn-secondary" style={small} disabled={busy || !cond.date || (cond.kind === 'Reduced Capacity' && !/^\d+$/.test(String(cond.capacity).trim()))} onClick={() => act('POST', `/admin/bakeries/${b.id}/conditions`, { ...cond, capacity: cond.kind === 'Reduced Capacity' ? Number(cond.capacity) : undefined }).then(ok => ok && setMode(null))}>Add</button>
         </div>
       )}
       {b.log.length > 0 && <details><summary className="xs" style={{ cursor: 'pointer' }}>History</summary>{b.log.map((l, i) => <div key={i} className="xs">{l.created_at} · {l.message}</div>)}</details>}
@@ -112,7 +120,7 @@ function BakeryForm({ b, catalog, busy, onSave }) {
     areaDistances: Object.fromEntries(LATER_AREAS.map(a => [a.id, b?.areaDistances?.[a.id] ?? ''])),
     glutenFreeCertified: !!b?.glutenFreeCertified, capabilities: b?.capabilities || {}, allProducts: b ? !b.products : false, products: b?.products || [],
     danishFlavours: b?.danishFlavours || [], contactName: b?.contactName || '', contactPhone: b?.contactPhone || '',
-    licenceNo: b?.licenceNo || '', licenceExpiry: b?.licenceExpiry || '', bakesOwnBread: !!b?.bakesOwnBread, onboarding: { ...(b?.onboarding || {}) }, readyLeadMinutes: b?.readyLeadMinutes ?? 30, payoutPct: b?.payoutPct ?? 60
+    licenceNo: b?.licenceNo || '', legalName: b?.legalName || '', legalAddress: b?.legalAddress || '', trn: b?.trn || '', licenceExpiry: b?.licenceExpiry || '', bakesOwnBread: !!b?.bakesOwnBread, onboarding: { ...(b?.onboarding || {}) }, readyLeadMinutes: b?.readyLeadMinutes ?? 30, payoutPct: b?.payoutPct ?? 60
   }));
   const set = k => e => setV(x => ({ ...x, [k]: e.target.value }));
   const toggle = (k, id) => setV(x => ({ ...x, [k]: x[k].includes(id) ? x[k].filter(y => y !== id) : [...x[k], id] }));
@@ -136,6 +144,9 @@ function BakeryForm({ b, catalog, busy, onSave }) {
         {WINDOWS.map(([w, label]) => <Field key={w} label={`Capacity ${label} (optional)`}><input className="input" inputMode="numeric" placeholder="No window limit" value={v.windowCapacity[w]} onChange={e => setV(x => ({ ...x, windowCapacity: { ...x.windowCapacity, [w]: e.target.value } }))} /></Field>)}
         <Field label="Contact name"><input className="input" value={v.contactName} onChange={set('contactName')} /></Field>
         <Field label="Contact phone"><input className="input" value={v.contactPhone} onChange={set('contactPhone')} /></Field>
+        <Field label="Legal name (seller on customer invoices)"><input className="input" placeholder={v.name} value={v.legalName} onChange={set('legalName')} /></Field>
+        <Field label="Registered address (on invoices)"><input className="input" value={v.legalAddress} onChange={set('legalAddress')} /></Field>
+        <Field label="VAT TRN (15 digits, if registered)"><input className="input" inputMode="numeric" value={v.trn} onChange={set('trn')} /></Field>
         <Field label="Food business licence no."><input className="input" value={v.licenceNo} onChange={set('licenceNo')} /></Field>
         <Field label="Licence expiry"><input className="input" type="date" value={v.licenceExpiry} onChange={set('licenceExpiry')} /></Field>
         <Field label="Ready-by: minutes before each window"><input className="input" inputMode="numeric" value={v.readyLeadMinutes} onChange={set('readyLeadMinutes')} /></Field>
@@ -253,7 +264,7 @@ export function Pricing({ data, act, busy }) {
       </label>
       <div className="row" style={{ gap: 12, justifyContent: 'flex-start' }}>
         <button type="button" className="btn" style={{ width: 'auto', padding: '0 28px' }} disabled={busy} onClick={save}>Save prices</button>
-        <button type="button" className="btn-text" disabled={busy} onClick={() => act('POST', '/admin/pricing/reset')}>Reset to defaults</button>
+        <button type="button" className="btn-text" disabled={busy} onClick={() => window.confirm('Reset all prices, sizes, add-ons and discounts to the defaults? Your saved prices are replaced.') && act('POST', '/admin/pricing/reset')}>Reset to defaults</button>
       </div>
       <span className="xs">New prices apply to new orders and edits right away. Orders already paid keep their price.</span>
       {data.history.length > 0 && <details><summary className="xs" style={{ cursor: 'pointer' }}>Change history</summary>{data.history.map((h, i) => <div key={i} className="xs">{h.at} · levels {Object.values(h.pricing.priceLevels).join('/')} · Light {h.pricing.sizeAdjustment.light} · Large +{h.pricing.sizeAdjustment.large}</div>)}</details>}

@@ -6,8 +6,10 @@ import { notify } from './notify.js';
 import { newOrderId } from './personal.js';
 import { startCheckout, registerCheckoutHandler, recordPayment, queueRefund, demoRef } from './payments.js';
 import { sendBusinessOrderEmail } from './mail.js';
+import { invoiceParties } from './invoice.js';
+import { geoCheck } from './geo.js';
 import { SUPPLIER, VAT_RATE } from './company.js';
-import { DELIVERY_WINDOWS } from '../src/domain/standards.js';
+import { DELIVERY_WINDOWS, areaFor } from '../src/domain/standards.js';
 import { recipeById, describe } from '../src/domain/recipes.js';
 
 import { assertAllocatable, businessUnits, reallocateProvisional, isFinal } from './allocation.js';
@@ -140,6 +142,10 @@ function prepareBusinessOrder(userId, body) {
   return { acct, built, invoice, total, capacity };
 }
 
+/** The company this order is for: the one entered at Delivery (a returning customer may order for another
+    company), else the account's; none for a Family & friends order. */
+const orderCompany = (invoice, built, acct) => (invoice.orderType === 'family' ? '' : built[0]?.delivery?.company || acct.company || '');
+
 /** Saves a paid business order (`payment`: { provider, ref, amount }). */
 function createBusinessOrder(userId, body, payment, key = null) {
   const { acct, built, invoice, total, capacity } = prepareBusinessOrder(userId, body);
@@ -148,7 +154,7 @@ function createBusinessOrder(userId, body, payment, key = null) {
   const order = tx(() => {
     capacity();
     db.prepare('INSERT INTO business_orders (id, user_id, company, email, invoice, payment_ref, total, idempotency_key, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, userId, acct.company, acct.email, json(invoice), payment.ref || demoRef(), total, key, payment.provider === 'stripe' ? 'captured' : 'captured_demo');
+      .run(id, userId, orderCompany(invoice, built, acct), acct.email, json(invoice), payment.ref || demoRef(), total, key, payment.provider === 'stripe' ? 'captured' : 'captured_demo');
     recordPayment('business', id, payment);
     const ins = db.prepare(`INSERT INTO business_days (order_id, date, window, people, lines, specials, delivery, gross, discount, total)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -164,7 +170,7 @@ registerCheckoutHandler('business_order', (userId, p, payment) => createBusiness
 
 /** MVP business orders are prepaid (MB-B2B-001 §8). Capacity is validated before payment (MB-DLV-001 §8)
     and again when the paid order is saved. 201 with the order (demo mode), or 202 { checkout } to pay first. */
-businessRouter.post('/orders', (req, res, next) => {
+businessRouter.post('/orders', geoCheck, (req, res, next) => {
   const key = idemKey(req.body.idempotencyKey);
   if (key) {
     const existing = db.prepare('SELECT * FROM business_orders WHERE user_id = ? AND idempotency_key = ?').get(req.userId, key);
@@ -222,7 +228,7 @@ function editBusinessDay(userId, orderId, date, body, payment = null) {
 registerCheckoutHandler('business_change', (userId, p, payment) => { editBusinessDay(userId, p.orderId, p.date, p.body, payment); return p.orderId; });
 
 /** Response: the order, or 202 { checkout } when the change costs more and must be paid first. */
-businessRouter.patch('/orders/:id/days/:date', (req, res, next) => {
+businessRouter.patch('/orders/:id/days/:date', geoCheck, (req, res, next) => {
   const r = editBusinessDay(req.userId, req.params.id, req.params.date, req.body);
   if (r.order) return res.json(serialize(r.order));
   const p = { orderId: req.params.id, date: req.params.date, body: req.body };
@@ -306,11 +312,12 @@ businessRouter.post('/orders/:id/cancel', (req, res) => {
     It is titled "Tax Invoice" only once the supplier TRN (MB_TRN) is configured. */
 businessRouter.get('/orders/:id/invoice', (req, res) => {
   const o = serialize(own(req.userId, req.params.id));
+  const parties = invoiceParties(db.prepare('SELECT * FROM business_days WHERE order_id = ? ORDER BY date').all(o.id));
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const name = id => { const r = recipeById[id]; return r ? describe(r) : id; };
   const money = n => (Math.round(n * 100) / 100).toFixed(2);
   const vatOf = gross => gross - gross / (1 + VAT_RATE);
-  const rows = o.days.map(d => `<tr><td>${esc(d.date)}${d.cancelled ? ` (cancelled, refunded AED ${esc(d.refund)})` : ''}</td><td>${esc(d.people)}</td>
+  const rows = o.days.map(d => `<tr><td>${esc(d.date)}${d.cancelled ? ` (cancelled, refunded AED ${esc(d.refund)})` : ''}${parties.multiple && !d.cancelled ? `<br><small>Seller: ${esc(parties.sellerOf(d.date))}</small>` : ''}</td><td>${esc(d.people)}</td>
     <td>${d.lines.map(l => `${esc(name(l.recipeId))} · ${esc(l.size)} × ${esc(l.qty)}`).join('<br>')}${d.specials.length ? `<br>Special Breakfasts × ${d.specials.reduce((t, s) => t + s.qty, 0)}` : ''}</td>
     <td style="text-align:right">${d.cancelled ? 0 : esc(d.gross)}</td><td style="text-align:right">${d.cancelled ? 0 : esc(d.discount)}</td><td style="text-align:right">${d.cancelled ? 0 : esc(d.total)}</td></tr>`).join('');
   /* B2B §8: what was paid, then each edit charge, refund and credit, so the invoice matches the money moved. */
@@ -322,13 +329,13 @@ businessRouter.get('/orders/:id/invoice', (req, res) => {
     ...dayIds.flatMap(d => db.prepare("SELECT type, amount, reason, created_at FROM service_recovery WHERE day_kind = 'business' AND day_id = ? AND type LIKE '%Refund'").all(d.id)
       .map(r => ({ at: r.created_at, label: `${r.type}, ${d.date}: ${r.reason}`, amount: -r.amount })))];
   const inv = o.invoice || {};
-  const isTax = inv.wanted && !!SUPPLIER.trn;
+  const isTax = inv.wanted && parties.taxReady;
   const vat = vatOf(o.total);
   res.type('html').send(`<!doctype html><meta charset="utf-8"><title>Invoice ${esc(o.id)}</title>
 <style>body{font-family:Inter,Arial,sans-serif;color:#3B2D22;max-width:820px;margin:40px auto;padding:0 20px}h1{font-family:Georgia,serif;font-weight:400}table{width:100%;border-collapse:collapse;font-size:14px}td,th{border-bottom:1px solid #EADCC1;padding:8px;text-align:left;vertical-align:top}</style>
-<h1>${esc(SUPPLIER.name)} ${isTax ? 'Tax Invoice' : inv.wanted ? 'Invoice' : 'Receipt'}</h1>
-<p>Invoice ${esc(o.id)} · ${esc(o.createdAt)} UTC</p>
-<p><b>Supplier:</b> ${esc(SUPPLIER.name)}<br>${esc(SUPPLIER.address)}${SUPPLIER.trn ? `<br>TRN ${esc(SUPPLIER.trn)}` : ''}</p>
+<h1>Morning Box ${isTax ? 'Tax Invoice' : inv.wanted ? 'Invoice' : 'Receipt'}</h1>
+<p>${inv.wanted ? 'Invoice' : 'Receipt'} ${esc(o.id)} · ${esc(o.createdAt)} UTC</p>
+${parties.html}
 <p><b>Billed to:</b> ${esc(inv.billingName || o.company)}<br>Company: ${esc(o.company)}<br>Email: ${esc(o.email)}${inv.address ? `<br>${esc(inv.address)}` : ''}${inv.trn ? `<br>TRN ${esc(inv.trn)}` : ''}${inv.po ? `<br>PO number: ${esc(inv.po)}` : ''}</p>
 <table><tr><th>Date</th><th>People</th><th>Breakfasts</th><th>Gross AED</th><th>Discount AED</th><th>Total AED</th></tr>${rows}</table>
 <p style="text-align:right">Total excluding VAT: AED ${money(o.total - vat)}<br>VAT ${Math.round(VAT_RATE * 100)}%: AED ${money(vat)}</p>
@@ -352,6 +359,8 @@ function cleanPlan(p) {
     specials: day.specials.map(s => ({ dietary: s.dietary, allergies: s.allergies, qty: s.qty, size: SIZES.includes(s.size) ? s.size : 'regular' })),
     delivery: {
       ...Object.fromEntries(['company', 'building', 'office', 'contact', 'mobile', 'notes'].map(k => [k, text(dl[k])])),
+      /* Kept so a reused plan doesn't ask for the area and order type again. */
+      area: areaFor(dl.area) || '', ...(['family', 'business'].includes(dl.type) ? { type: dl.type } : {}),
       window: windowOk(dl.window) ? dl.window : 'w1'
     }
   };

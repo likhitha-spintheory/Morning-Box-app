@@ -35,7 +35,12 @@ export default function PayReturn() {
       for (let i = 0; i < tries; i++) {
         try { c = await post(`/payments/checkouts/${id}/confirm`); } catch (e) { if (!stop) setState({ status: 'error', message: e.message }); return; }
         if (stop) return;
-        if (c.status === 'done') { await finish(c); return; }
+        if (c.status === 'done') {
+          /* Paid and saved: if loading the order then fails (connection, session), say so and offer "Check again"
+             (confirming a finished payment again is safe and never charges twice). */
+          try { await finish(c); } catch (e) { if (!stop) setState({ status: 'error', message: `Your payment went through. ${e.message}` }); }
+          return;
+        }
         if (c.status !== 'open') { setState(c); return; }
         if (i < tries - 1) await wait(1500);
       }
@@ -70,11 +75,14 @@ export default function PayReturn() {
     checking: 'Confirming your payment…', pending: 'Still confirming with your bank', cancelled: 'Payment not completed',
     expired: 'The payment page timed out', failed: 'We couldn’t complete your order', error: 'We couldn’t check your payment'
   }[s] || 'Confirming your payment…';
+  const business = (state.kind || '').startsWith('business');
+  const change = (state.kind || '').endsWith('_change');
+  const kept = change ? 'Your booked morning hasn’t changed.' : business ? 'Your group order is still saved here.' : 'Your mornings are still in your plan.';
   const text = {
     checking: 'One moment, please don’t close this page.',
     pending: 'This can take a minute. Nothing more is needed from you; check again shortly. You won’t be charged twice.',
-    cancelled: 'Nothing was charged. Your mornings are still in your plan. You can pay when you’re ready.',
-    expired: 'Nothing was charged. Your mornings are still in your plan. Please try again.',
+    cancelled: `Nothing was charged. ${kept} You can pay when you’re ready.`,
+    expired: `Nothing was charged. ${kept} Please try again.`,
     failed: `${state.error || 'Your order could not be confirmed.'} Your payment is being refunded in full to your original payment method.`,
     error: state.message
   }[s];
@@ -91,7 +99,7 @@ export default function PayReturn() {
         <Footer>
           {s === 'pending' || s === 'error'
             ? <button type="button" className="btn" onClick={() => setAttempt(a => a + 1)}>Check again</button>
-            : <Link to={backTo(state)} className="btn">{s === 'failed' ? 'Back to my plan' : 'Try again'}</Link>}
+            : <Link to={backTo(state)} className="btn">{s === 'failed' ? (change ? 'Back to my order' : business ? 'Back to my group order' : 'Back to my plan') : 'Try again'}</Link>}
           <Link to="/help" className="btn-text">Need help?</Link>
         </Footer>
       )}

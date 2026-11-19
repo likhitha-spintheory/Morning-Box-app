@@ -19,5 +19,8 @@ export function productionProblems(env = process.env) {
   } else if (env.PAYMENTS_DEMO !== '1') {
     problems.push('STRIPE_SECRET_KEY must be set so orders are paid (or PAYMENTS_DEMO=1 for a demo server that takes no payments).');
   }
+  /* Behind Caddy every request comes from 127.0.0.1 unless the proxy is trusted: rate limits and the staff-code
+     lockout would then treat all customers and staff as one device (one person's typos would lock everyone out). */
+  if (!env.TRUST_PROXY) problems.push('TRUST_PROXY must be set (e.g. TRUST_PROXY=1 behind Caddy) so each client is identified by its real IP.');
   return problems;
 }

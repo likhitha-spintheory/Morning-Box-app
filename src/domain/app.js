@@ -255,8 +255,10 @@ export const deviceOnDubaiTime = (now = new Date()) => now.getTimezoneOffset() =
 export const dubaiNote = () => (deviceOnDubaiTime() ? '' : ' (Dubai time)');
 
 /** WhatsApp support link when the build sets VITE_SUPPORT_WHATSAPP (digits, e.g. 9715XXXXXXXX), else null. */
-export function whatsappLink(message = '') {
-  const n = String(import.meta.env?.VITE_SUPPORT_WHATSAPP || '').replace(/\D/g, '');
+/** WhatsApp chat link to support. `number` comes from the server settings (MB_SUPPORT_WHATSAPP via /config), so Help
+    and order tracking always use the same number; the build-time VITE_SUPPORT_WHATSAPP is only a fallback. */
+export function whatsappLink(message = '', number = '') {
+  const n = String(number || import.meta.env?.VITE_SUPPORT_WHATSAPP || '').replace(/\D/g, '');
   return n ? `https://wa.me/${n}${message ? `?text=${encodeURIComponent(message)}` : ''}` : null;
 }
 

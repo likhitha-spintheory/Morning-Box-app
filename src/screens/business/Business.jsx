@@ -5,7 +5,8 @@ import {
 } from '../../components/ui.jsx';
 import { useStore, emptyBusiness, normalizeBusiness } from '../../state/store.jsx';
 import { get, post, patch, del, download, applySession, ownerOf, setToken, resetPersonal, newIdempotencyKey, track, goToPayment, signIn } from '../../api.js';
-import { pastedCode, enteredDigits, Agreement } from '../personal/Checkout.jsx';
+import { pastedCode, enteredDigits, Agreement, OffersOptIn } from '../personal/Checkout.jsx';
+import { placeProblem } from '../../domain/places.js';
 import { useConfig, closedOn } from '../../state/config.js';
 import { Loading } from '../../state/orders.jsx';
 
@@ -29,6 +30,8 @@ import {
 /* No fixed maximum headcount (MB-DLV-001 §8): real bakery and delivery capacity is checked
    before payment. This is only the input limit of the people field. */
 const MAX_PEOPLE = 999;
+/* Client feedback USR-006: a group order is for 2 or more; one person orders through Create My Morning. */
+const MIN_PEOPLE = 2;
 const PREF_NAME = { savory: 'Savory Box', bakery: 'Bakery Box', fresh: 'Fresh Box', sweet: 'Sweet Box' };
 const SIZES = ['light', 'regular', 'large'];
 const SEG2 = { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' };
@@ -177,7 +180,7 @@ function useBiz() {
 const ORDER_TYPES = [['family', 'Family & friends', 'A home, villa or apartment', 'home'], ['business', 'Business / company', 'An office or corporate delivery', 'brief']];
 const typeLabel = o => (o.orderType === 'family' ? 'Family & friends breakfast' : o.orderType === 'business' || o.company ? `Business breakfast${o.company ? ` · ${o.company}` : ''}` : 'Group breakfast');
 const placeFields = family => (family
-  ? { building: ['Building or villa', 'e.g. Burj Views A, or Villa 12, Arabian Ranches'], office: ['Apartment / villa number', 'e.g. Apartment 1203'] }
+  ? { building: ['Building or villa', 'e.g. Index Tower, or Sky Gardens'], office: ['Apartment / villa number', 'e.g. Apartment 1203'] }
   : { building: ['Building / Tower', 'e.g. Gate Village, Building 3'], office: ['Office / Floor / Unit', 'e.g. Level 4, Office 402'] });
 const Err = ({ id, children }) => <span id={id} className="err-msg"><Icon name="alert" size={14} stroke={2.2} />{children}</span>;
 
@@ -254,7 +257,8 @@ function useSyncOrders() {
 
 /** Server invoice when signed in; local demo invoice otherwise (or if the server can't be reached). */
 function getInvoice(order, signedIn) {
-  if (signedIn) return download(`/business/orders/${order.id}/invoice`, `Morning-Box-${order.id}.html`).catch(() => downloadInvoice(order));
+  /* Offline: a local summary (marked "not a tax invoice"). Any other failure is shown to the customer. */
+  if (signedIn) return download(`/business/orders/${order.id}/invoice`, `Morning-Box-${order.id}.html`).catch(e => { if (e.code === 'offline') downloadInvoice(order); else throw e; });
   downloadInvoice(order);
   return Promise.resolve();
 }
@@ -284,6 +288,7 @@ export function BizWelcome() {
   const user = state.businessUser;
   const orders = state.businessOrders || [];
   const [plans, setPlans] = useState([]);
+  const [planError, setPlanError] = useState('');
   useEffect(() => {
     if (!state.session) return undefined;
     let live = true;
@@ -315,6 +320,7 @@ export function BizWelcome() {
         ...emptyBusiness(),
         people: d.people, hasSpecial: d.specials.length > 0, specials: structuredClone(d.specials),
         mode: o.mode || 'mix', lines: structuredClone(d.lines),
+        orderType: d.delivery?.type || o.orderType || null,
         delivery: { ...emptyBusiness().delivery, ...structuredClone(d.delivery || {}), area: areaFor(d.delivery?.area) || '', window: d.window || null },
         source: { orderId: o.id, kind: which },
         sourceDays: live.length > 1 ? live.map(x => ({ lines: structuredClone(x.lines), specials: structuredClone(x.specials) })) : null
@@ -328,13 +334,18 @@ export function BizWelcome() {
       s.business = {
         ...emptyBusiness(),
         people: p.people, hasSpecial: p.specials.length > 0, specials: structuredClone(p.specials), mode: p.mode, lines: structuredClone(p.lines),
+        orderType: p.delivery?.type || null,
         delivery: { ...emptyBusiness().delivery, ...structuredClone(p.delivery), area: areaFor(p.delivery?.area) || '', window: p.delivery.window || null },
         source: { planId: pl.id, kind: 'plan' }
       };
     });
     nav('/business/dates');
   };
-  const removePlan = id => del(`/business/plans/${id}`).then(() => setPlans(ps => ps.filter(p => p.id !== id))).catch(() => {});
+  const removePlan = id => {
+    if (!window.confirm('Remove this saved plan? Your orders are not affected.')) return;
+    setPlanError('');
+    del(`/business/plans/${id}`).then(() => setPlans(ps => ps.filter(p => p.id !== id))).catch(e => setPlanError(e.message));
+  };
 
   return (
     <Screen>
@@ -383,6 +394,7 @@ export function BizWelcome() {
                 <Icon name="chevron" size={20} stroke={1.8} style={{ marginLeft: 'auto' }} />
               </button>
               <button type="button" className="btn-text" style={{ alignSelf: 'flex-end', fontSize: 13, color: 'var(--text-3)' }} onClick={() => removePlan(pl.id)}>Remove saved plan</button>
+              {planError && <span className="err-msg" role="alert">{planError}</span>}
             </div>
           ))}
         </div>
@@ -399,7 +411,7 @@ export function People() {
   const nav = useNavigate();
   const [text, setText] = useState(String(b.people));
   const setPeople = n => {
-    const v = Math.max(1, Math.min(MAX_PEOPLE, Math.round(n) || 1));
+    const v = Math.max(MIN_PEOPLE, Math.min(MAX_PEOPLE, Math.round(n) || MIN_PEOPLE));
     upd(d => { d.people = v; });
     setText(String(v));
   };
@@ -415,12 +427,12 @@ export function People() {
           <h1 className="q">How many people are you ordering for? <InfoTip label="Who to include">Include everyone. You can add special breakfasts for dietary needs or allergies in the next step.</InfoTip></h1>
         </div>
         <div className="row" style={{ justifyContent: 'center', gap: 20, padding: '12px 0' }}>
-          <button type="button" className="icon-btn" style={big} aria-label="Fewer people" disabled={b.people <= 1} onClick={() => setPeople(b.people - 1)}><Icon name="minus" size={22} stroke={2} /></button>
+          <button type="button" className="icon-btn" style={big} aria-label="Fewer people" disabled={b.people <= MIN_PEOPLE} onClick={() => setPeople(b.people - 1)}><Icon name="minus" size={22} stroke={2} /></button>
           <label className="stack center" style={{ alignItems: 'center', gap: 2 }}>
             <span className="sr-only">Number of people</span>
             <input className="input" inputMode="numeric" value={text} aria-label="Number of people"
               style={{ width: 130, minHeight: 72, textAlign: 'center', font: '700 40px/1 var(--sans)' }}
-              onChange={e => { const t = e.target.value.replace(/\D/g, '').slice(0, 3); setText(t); if (t) upd(d => { d.people = Math.max(1, Math.min(MAX_PEOPLE, +t)); }); }}
+              onChange={e => { const t = e.target.value.replace(/\D/g, '').slice(0, 3); setText(t); if (t) upd(d => { d.people = Math.max(MIN_PEOPLE, Math.min(MAX_PEOPLE, +t)); }); }}
               onBlur={() => setPeople(+text)} />
             <span className="sm">people</span>
           </label>
@@ -429,9 +441,10 @@ export function People() {
         <div className="chips" style={{ justifyContent: 'center' }} aria-label="Quick pick">
           {[5, 10, 20, 30, 50].map(n => <Chip key={n} on={b.people === n} onClick={() => setPeople(n)}>{n}</Chip>)}
         </div>
+        <p className="xs center" style={{ margin: 0 }}>For 2 or more people. Ordering just for yourself? <Link to="/start" className="link">Create My Morning</Link></p>
         <Note icon="info">Volume discount applies automatically.</Note>
       </main>
-      <Footer><button className="btn" onClick={() => nav('/business/special')}>Continue</button></Footer>
+      <Footer><button className="btn" onClick={() => { setPeople(+text || b.people); nav('/business/special'); }}>Continue</button></Footer>
     </Screen>
   );
 }
@@ -745,7 +758,7 @@ export function BizDates() {
   const [own, setOwn] = useState(() => Object.fromEntries(all.filter(iso => b.perDay?.[iso]?.lines).map(iso => [iso, { lines: b.perDay[iso].lines, specials: b.perDay[iso].specials || activeSpecials(b) }])));
   const [editing, setEditing] = useState(null);
   const sq = specialQty(b);
-  const minPeople = Math.max(1, sq);
+  const minPeople = Math.max(MIN_PEOPLE, sq);
   if (!b.lines?.length && b.people - sq > 0) return <Navigate to="/business/selection" replace />;
 
   const toggle = iso => setPicked(p => (p.includes(iso) ? p.filter(x => x !== iso) : [...p, iso].sort()));
@@ -757,6 +770,8 @@ export function BizDates() {
     upd(d => {
       d.dates = picked;
       d.sameForAll = !custom;
+      /* Back to one date: per-day delivery no longer applies (Review would otherwise use a stale per-day window/address). */
+      if (picked.length < 2) d.deliverySameForAll = true;
       picked.forEach(iso => {
         const mine = custom && own[iso];
         d.perDay[iso] = { ...(d.perDay[iso] || {}), people: mine ? sum(mine.lines) + sum(mine.specials) : custom ? dp[iso] : d.people, lines: mine ? mine.lines : null, specials: mine ? mine.specials : null };
@@ -767,7 +782,8 @@ export function BizDates() {
 
   return (
     <Screen>
-      <StepBar n={4} back={b.mode === 'choose' ? '/business/boxes' : '/business/selection'} />
+      {/* A reorder or saved plan starts here: Back returns to where it was chosen, not to steps the customer never saw. */}
+      <StepBar n={4} back={b.source ? '/business' : b.mode === 'choose' ? '/business/boxes' : '/business/selection'} />
       <main className="screen-main" style={{ paddingTop: 28 }}>
         <div className="stack gap-10">
           <span className="eyebrow">{b.source ? 'Reorder' : 'Delivery dates'}</span>
@@ -862,6 +878,8 @@ export function BizDelivery() {
   const { state, b, upd } = useBiz();
   const nav = useNavigate();
   const [touched, setTouched] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [areaFail, setAreaFail] = useState(null);
   /* Live window availability: a window is offered only if it can take the whole headcount (MB-DLV-001 §8). */
   const [avail, setAvail] = useState({});
   const key = (b.dates || []).join(',');
@@ -874,6 +892,11 @@ export function BizDelivery() {
   const digits = mobileDigits(dl.mobile || '');
   const family = b.orderType === 'family';
   const pf = placeFields(family);
+  /* Declared before `ok` uses them (using ownBad earlier crashed "Set per day" once the form was complete). */
+  /* FLW §15: a day can have its own location and contact when "Set per day" is chosen. */
+  const own = iso => b.perDay?.[iso]?.delivery || null;
+  const setOwn = (iso, patch) => upd(d => { d.perDay[iso] = { ...(d.perDay[iso] || {}), delivery: patch === null ? null : { ...(d.perDay[iso]?.delivery || { building: d.delivery.building, office: d.delivery.office, area: d.delivery.area, contact: d.delivery.contact, mobile: d.delivery.mobile, notes: d.delivery.notes }), ...patch } }; });
+  const ownBad = iso => { const o = own(iso); return o && (!o.building?.trim() || !o.office?.trim() || !areaChosen(o.area || dl.area) || !o.contact?.trim() || !/^5\d{8}$/.test(mobileDigits(o.mobile || ''))); };
   const errs = {
     type: !b.orderType && 'Choose who the breakfast is for',
     company: b.orderType === 'business' && !dl.company.trim() && 'Enter the company name',
@@ -886,6 +909,22 @@ export function BizDelivery() {
       || (b.dates.some(iso => fullOn(iso, same ? dl.window : windowFor(b, iso))) && 'That window is full for your headcount. Please choose another')
   };
   const ok = !Object.values(errs).some(Boolean) && (same || !b.dates.some(iso => ownBad(iso)));
+  /* Client feedback FLW-023: the chosen area must match the address (instant place-name check; the server checks
+     again, with the location where configured, before Review and before payment). */
+  const addresses = [{ building: dl.building, unit: dl.office, area: dl.area },
+    ...(same ? [] : b.dates.map(own).filter(Boolean).map(o => ({ building: o.building, unit: o.office, area: o.area || dl.area })))];
+  const areaProblem = ok ? addresses.map(placeProblem).find(Boolean) : null;
+  const addrKey = JSON.stringify(addresses);
+  const areaError = areaFail?.key === addrKey ? areaFail.message : '';
+  const proceed = async () => {
+    setTouched(true);
+    if (!ok || areaProblem) return;
+    setChecking(true); setAreaFail(null);
+    try { await post('/address/check', { addresses }); }
+    catch (e) { if (e.code !== 'offline') { setAreaFail({ key: addrKey, message: e.message }); setChecking(false); return; } }
+    setChecking(false);
+    nav(state.businessUser ? '/business/review' : '/business/account');
+  };
   const field = (key, label, placeholder, extra = {}) => (
     <div className="field">
       <label htmlFor={`bd-${key}`}>{label}</label>
@@ -912,10 +951,6 @@ export function BizDelivery() {
       </div>
     );
   };
-  /* FLW §15: a day can have its own location and contact when "Set per day" is chosen. */
-  const own = iso => b.perDay?.[iso]?.delivery || null;
-  const setOwn = (iso, patch) => upd(d => { d.perDay[iso] = { ...(d.perDay[iso] || {}), delivery: patch === null ? null : { ...(d.perDay[iso]?.delivery || { building: d.delivery.building, office: d.delivery.office, area: d.delivery.area, contact: d.delivery.contact, mobile: d.delivery.mobile, notes: d.delivery.notes }), ...patch } }; });
-  const ownBad = iso => { const o = own(iso); return o && (!o.building?.trim() || !o.office?.trim() || !areaChosen(o.area || dl.area) || !o.contact?.trim() || !/^5\d{8}$/.test(mobileDigits(o.mobile || ''))); };
 
   return (
     <Screen>
@@ -993,9 +1028,10 @@ export function BizDelivery() {
         {touched && errs.window && <Err>{errs.window}</Err>}
         <div className="field"><label htmlFor="bd-notes">Delivery notes <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
           <input id="bd-notes" className="input" placeholder={family ? 'e.g. Ring the bell, gate code 1234' : 'e.g. Ask for the office manager at reception'} value={dl.notes} onChange={e => upd(d => { d.delivery.notes = e.target.value; })} /></div>
+        {(areaProblem || areaError) && <div className="banner-err" role="alert"><Icon name="alert" size={18} stroke={2} />{areaProblem?.message || areaError}</div>}
       </main>
       <Footer>
-        <button className="btn" onClick={() => { setTouched(true); if (ok) nav(state.businessUser ? '/business/review' : '/business/account'); }}>Continue</button>
+        <button className="btn" disabled={checking} onClick={proceed}>{checking ? 'Checking address…' : 'Continue'}</button>
       </Footer>
     </Screen>
   );
@@ -1014,6 +1050,7 @@ export function BizAccount() {
   const [byEmail, setByEmail] = useState(signIn.email || !signIn.mobile);
   const [sent, setSent] = useState(false);
   const [needName, setNeedName] = useState(false);
+  const [offers, setOffers] = useState(false);
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1075,7 +1112,7 @@ export function BizAccount() {
     setBusy(true); setError('');
     (async () => {
       try {
-        const res = await post('/auth/verify', { ...target, code: code.join(''), firstName: nameOk ? name.trim() : undefined });
+        const res = await post('/auth/verify', { ...target, code: code.join(''), firstName: nameOk ? name.trim() : undefined, offers: needName && offers });
         setToken(null);
         /* A different customer signing in on this device: drop the previous customer's data (the business draft stays). */
         set(s => { if (s.owner && s.owner !== ownerOf(res.user)) resetPersonal(s); applySession(s, res); });
@@ -1165,6 +1202,7 @@ export function BizAccount() {
                 {touched && !nameOk && <Err>Enter your first name</Err>}
               </div>
             )}
+            {sent && needName && <OffersOptIn checked={offers} onChange={setOffers} />}
           </>
         )}
         {(signedIn || sent) && (
@@ -1316,17 +1354,20 @@ export function BizReview() {
 export function BizConfirmed() {
   const { id } = useParams();
   const { state } = useStore();
-  const [planSaved, setPlanSaved] = useState('');
+  const [plan, setPlan] = useState({ busy: false, saved: false, error: '' });
+  const [docError, setDocError] = useState('');
   const order = (state.businessOrders || []).find(o => o.id === id);
   if (!order) return <Navigate to="/business" replace />;
   const first = order.days[0];
   /* Save this team setup as a named plan for next time (never a subscription). */
   const savePlan = () => {
+    if (plan.busy) return;
     const d = order.days.find(x => !x.cancelled) || first;
+    setPlan({ busy: true, saved: false, error: '' });
     post('/business/plans', {
       name: `${order.company || (order.orderType === 'family' ? 'Family & friends' : 'Group')} · ${d.people} people`.slice(0, 60),
-      plan: { people: d.people, mode: order.mode, lines: d.lines, specials: d.specials, delivery: { ...d.delivery, window: d.window } }
-    }).then(() => setPlanSaved('Saved. Find it under Use a Saved Plan next time.')).catch(e => setPlanSaved(e.message));
+      plan: { people: d.people, mode: order.mode, lines: d.lines, specials: d.specials, delivery: { ...d.delivery, type: d.delivery?.type || order.orderType || undefined, window: d.window } }
+    }).then(() => setPlan({ busy: false, saved: true, error: '' })).catch(e => setPlan({ busy: false, saved: false, error: e.message }));
   };
   const heads = [...new Set(order.days.map(d => d.people))];
   const wins = [...new Set(order.days.map(d => windowLabel(d.window)))];
@@ -1345,7 +1386,7 @@ export function BizConfirmed() {
         <div className="stack center" style={{ alignItems: 'center', gap: 14 }}>
           <span style={{ width: 80, height: 80, borderRadius: 999, background: 'var(--gold)', color: 'var(--on-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="check" size={38} stroke={2.4} /></span>
           <h1 className="h-display">{order.orderType === 'family' ? 'Breakfast is arranged for your group' : 'Breakfast is arranged for the team'}</h1>
-          <p className="help">{!order.email ? 'Your order is confirmed.' : order.invoice?.wanted === false ? `Confirmation sent to ${order.email}` : `Confirmation and tax invoice sent to ${order.email}`}</p>
+          <p className="help">{order.email ? `Confirmation sent to ${order.email}.` : 'Your order is confirmed.'} {order.invoice?.wanted === false ? 'Your receipt is ready to download.' : 'Your invoice is ready to download.'}</p>
         </div>
         <section className="card list">
           {rows.map(([k, v], i) => (
@@ -1358,10 +1399,14 @@ export function BizConfirmed() {
       </main>
       <Footer>
         <Link to={`/business/orders/${order.id}`} className="btn">Manage Order</Link>
-        <button type="button" className="btn-secondary" onClick={() => getInvoice(order, !!state.session)}><Icon name="download" size={18} />{order.invoice?.wanted === false ? 'Download receipt' : 'Download Invoice'}</button>
-        {state.session && (planSaved
-          ? <span className="hint" role="status" style={{ justifyContent: 'center', fontSize: 15 }}><Icon name="check" size={18} stroke={1.8} />{planSaved}</span>
-          : <button type="button" className="btn-text" style={{ alignSelf: 'center' }} onClick={savePlan}>Save as a plan</button>)}
+        <button type="button" className="btn-secondary" onClick={() => { setDocError(''); getInvoice(order, !!state.session).catch(e => setDocError(e.message)); }}><Icon name="download" size={18} />{order.invoice?.wanted === false ? 'Download receipt' : 'Download invoice'}</button>
+        {docError && <span className="err-msg" role="alert" style={{ justifyContent: 'center' }}>{docError}</span>}
+        {state.session && (plan.saved
+          ? <span className="hint" role="status" style={{ justifyContent: 'center', fontSize: 15 }}><Icon name="check" size={18} stroke={1.8} />Saved. Find it under Use a Saved Plan next time.</span>
+          : <>
+            <button type="button" className="btn-text" style={{ alignSelf: 'center' }} disabled={plan.busy} onClick={savePlan}>{plan.busy ? 'Saving…' : plan.error ? 'Try saving the plan again' : 'Save as a plan'}</button>
+            {plan.error && <span className="err-msg" role="alert" style={{ justifyContent: 'center' }}>{plan.error}</span>}
+          </>)}
       </Footer>
     </Screen>
   );
@@ -1374,6 +1419,11 @@ export function BizManage() {
   const synced = useSyncOrders();
   const order = (state.businessOrders || []).find(o => o.id === id);
   const [tab, setTab] = useState(() => Math.max(0, order ? order.days.findIndex(d => !d.cancelled) : 0));
+  /* Opened from an email link the order arrives after the first render: start on its first day that isn't cancelled. */
+  const firstLoad = useRef(!order);
+  useEffect(() => {
+    if (order && firstLoad.current) { firstLoad.current = false; setTab(Math.max(0, order.days.findIndex(d => !d.cancelled))); }
+  }, [order]);
   /* Client feedback FLW-025: the confirmation email links here. Not signed in on this device: sign in, then come
      back to this order. Signed in: wait for the orders to load instead of leaving for the ordering steps. */
   if (!order && !state.session) return <Navigate to={`/sign-in?next=/business/orders/${id}`} replace />;
@@ -1576,7 +1626,7 @@ function DayEditor({ order, day, set, signedIn }) {
         <>
           <section className="card stack gap-12">
             <div className="row"><span className="strong">Number of people</span>
-              {open ? <Qty value={people} min={Math.max(1, sq)} max={MAX_PEOPLE} label="people" onChange={v => { setPeople(v); setSaved(false); }} />
+              {open ? <Qty value={people} min={Math.max(MIN_PEOPLE, sq)} max={MAX_PEOPLE} label="people" onChange={v => { setPeople(v); setSaved(false); }} />
                 : <span className="strong">{people}</span>}
             </div>
           </section>
@@ -1609,7 +1659,7 @@ function DayEditor({ order, day, set, signedIn }) {
           {open && (
             <section className="stack gap-12">
               <h2 className="h3">Location &amp; contact on the day</h2>
-              {[['building', 'Building / Tower', 'Enter the building or tower'], ['office', 'Office / Floor / Unit', 'Enter the office, floor or unit'], ['contact', 'Contact person', 'Enter who will receive the delivery']].map(([k, label, msg]) => (
+              {[['building', placeFields(order.orderType === 'family').building[0], 'Enter the building'], ['office', placeFields(order.orderType === 'family').office[0], 'Enter the apartment, office or unit'], ['contact', 'Contact person', 'Enter who will receive the delivery']].map(([k, label, msg]) => (
                 <div key={k} className="field"><label htmlFor={`d${k}-${day.date}`}>{label}</label>
                   <input id={`d${k}-${day.date}`} className={`input${!contact[k].trim() ? ' invalid' : ''}`} aria-invalid={!contact[k].trim()} value={contact[k]} onChange={e => { setContact(c => ({ ...c, [k]: e.target.value })); setSaved(false); }} />
                   {!contact[k].trim() && <Err>{msg}</Err>}</div>
@@ -1642,7 +1692,7 @@ function DayEditor({ order, day, set, signedIn }) {
       )}
 
       <ApiErr error={error} />
-      <button type="button" className="btn-secondary" onClick={() => getInvoice(order, signedIn)}><Icon name="download" size={18} />Download invoice</button>
+      <button type="button" className="btn-secondary" onClick={() => { setError(''); getInvoice(order, signedIn).catch(e => setError(e.message)); }}><Icon name="download" size={18} />{order.invoice?.wanted === false ? 'Download receipt' : 'Download invoice'}</button>
       {open && !confirmCancel && <button type="button" className="btn-danger" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel {info.label} · full refund</button>}
       {open && confirmCancel && (
         <div className="card stack gap-12" role="alertdialog" aria-labelledby={`bc-${day.date}`}>

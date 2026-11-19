@@ -12,6 +12,9 @@ import { bakeryRouter } from './fulfilment.js';
 import { paymentsRouter } from './payments.js';
 
 import { PROD } from './env.js';
+import { legalHtml, LEGAL_PAGES } from '../src/legal/documents.js';
+import { SUPPLIER, SUPPORT, LEGAL } from './company.js';
+import { DELIVERY_WINDOWS } from '../src/domain/standards.js';
 const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com", "img-src 'self' data: blob:", "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
@@ -50,6 +53,15 @@ export function createApp() {
   app.use('/api/bakery', bakeryRouter);
   app.use('/api/demo', demoRouter);
   app.use('/api', (_req, _res, next) => next(new ApiError(404, 'not_found', 'Not found.')));
+
+  /* Public legal pages (UAE legal pack): /terms, /refunds, /privacy, /cookies, /allergens — plain HTML,
+     readable without the app (app stores, email links, search). The app shows the same text at #/legal/<id>. */
+  const legalCtx = () => ({ company: SUPPLIER, support: SUPPORT, legal: LEGAL, windows: DELIVERY_WINDOWS });
+  for (const [id] of LEGAL_PAGES) {
+    app.get([`/${id}`, `/${id}.html`], (_req, res) => {
+      res.set('Cache-Control', 'no-cache').type('html').send(legalHtml(id, legalCtx(), { appUrl: '/' }));
+    });
+  }
 
   /* Serve the built web app in production (npm run build && npm start). */
   const dist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');

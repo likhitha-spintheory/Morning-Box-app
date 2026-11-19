@@ -18,7 +18,7 @@ export function Dashboard({ data, call, open }) {
   }, [call]);
 
   const c = data.counts || {};
-  const boxes = data.rows.reduce((t, r) => t + (r.kind === 'business' ? r.people || 0 : 1), 0);
+  const boxes = data.rows.reduce((t, r) => t + (r.kind === 'business' ? r.boxes || 0 : 1), 0);
   const delivered = (c.Delivered || 0) + (c['Delivered late'] || 0) + (c.Completed || 0);
   const tiles = [
     ['ok', 'check', 'On Track', c['On Track'] || 0],

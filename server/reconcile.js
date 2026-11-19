@@ -61,7 +61,9 @@ export function reconcileDate(date) {
       const status = issues.length ? 'Mismatch' : 'Reconciled';
       db.prepare(`UPDATE ${TABLE[kind]} SET reconcile_status = ?, reconcile_issues = ?, finance = ?, completed_at = COALESCE(completed_at, ?), reconciled_at = datetime('now') WHERE id = ?`)
         .run(status, issues.length ? json(issues) : null, json(financeOf(kind, d)), completed ? new Date().toISOString() : null, d.id);
-      if (issues.length) {
+      /* Raised once: a mismatch staff already resolved (and left as it is) is not raised again every 10 minutes. */
+      const resolved = db.prepare("SELECT 1 FROM exceptions WHERE ref = ? AND kind = 'Reconciliation Mismatch' AND resolved = 1").get(`${kind}:${d.id}`);
+      if (issues.length && !resolved) {
         raiseException({ ref: `${kind}:${d.id}`, kind: 'Reconciliation Mismatch', note: `${d.order_id} · ${date}: ${issues.join('; ')}`,
           owner: 'Operations', action: 'Check the order, bakery and delivery records and correct them' });
         out.mismatched++;

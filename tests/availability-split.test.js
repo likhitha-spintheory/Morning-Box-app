@@ -31,7 +31,7 @@ async function signIn(mobile) {
   return { token: v.body.token };
 }
 const dates = orderableDates(new Date(), 14).map(isoDate);
-const profile = { eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
+const profile = { healthConsent: true, eatingStyle: 'flexible', preferences: ['savory'], dietary: [], allergies: [] };
 const address = { building: 'Gate Village, Building 3', unit: 'Level 4' };
 async function order(mobile, date) {
   const a = await signIn(mobile);

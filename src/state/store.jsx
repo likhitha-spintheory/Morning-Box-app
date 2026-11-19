@@ -34,7 +34,9 @@ export function normalizeBusiness(b) {
     invoice: { ...e.invoice, ...(src.invoice || {}) }
   };
 }
-export const emptyProfile = () => ({ eatingStyle: null, preferences: [], dietary: [], allergies: [], otherAllergies: '' });
+/* healthConsent: the customer ticked "Use my allergy and dietary information" (legal pack B1); without it no
+   allergy or dietary detail is kept. */
+export const emptyProfile = () => ({ eatingStyle: null, preferences: [], dietary: [], allergies: [], otherAllergies: '', healthConsent: false });
 
 const initial = () => ({
   profile: emptyProfile(),

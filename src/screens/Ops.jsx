@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Screen, TopBar, Icon } from '../components/ui.jsx';
 import { addDaysIso, dubaiTodayIso } from '../domain/standards.js';
+import { defaultStaffDate } from './StaffUi.jsx';
 import { Live, Prep, Labels } from './OpsLive.jsx';
 import { Bakeries, Pricing, Company, Products } from './OpsAdmin.jsx';
 import { MenuRules } from './OpsMenu.jsx';
@@ -37,7 +38,7 @@ export default function Ops() {
   const { key, save, call } = useOps();
   const [draft, setDraft] = useState('');
   const [tab, setTab] = useState('home');
-  const [date, setDate] = useState(() => addDaysIso(dubaiTodayIso(), 1));
+  const [date, setDate] = useState(defaultStaffDate);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -45,7 +46,9 @@ export default function Ops() {
 
   const load = useCallback(async () => {
     if (!key) return;
-    setError(''); setData(null);
+    /* The previous view stays until the new one arrives, so an action doesn't wipe what staff were doing
+       (open rows, ticks, notes typed in other cards, "Saved." notices). */
+    setError('');
     const path = { home: `/dashboard?date=${date}`, days: `/dashboard?date=${date}`, prep: `/prep?date=${date}`, labels: `/labels?date=${date}`, support: '/support', feedback: '/feedback', exceptions: '/exceptions', closed: '/closed-dates',
       report: `/report?from=${range.from}&to=${range.to}`, bakeries: '/admin/bakeries', menu: '/admin/menu', products: '/admin/products', pricing: '/admin/pricing', company: '/admin/company' }[tab];
     try { const value = await call('GET', path); setData({ key: `${tab}|${date}|${range.from}|${range.to}`, value }); } catch (e) { setError(e.message); if (e.status === 401) save(''); }
@@ -68,7 +71,22 @@ export default function Ops() {
     try { await call(method, path, body); await load(); return true; } catch (e) { setError(e.message); window.scrollTo({ top: 0, behavior: 'smooth' }); return false; } finally { setBusy(false); }
   };
   const [meta, setMeta] = useState(null);
-  useEffect(() => { if (key) call('GET', '/meta').then(setMeta).catch(() => {}); }, [key, call]);
+  const [metaTry, setMetaTry] = useState(0);
+  useEffect(() => { if (key) call('GET', '/meta').then(setMeta).catch(e => setError(`${e.message} (console settings didn’t load; reload the page to try again)`)); }, [key, call, metaTry]);
+  /* Check a key once before opening the console: several parallel requests with a wrong key would each count
+     towards the sign-in lockout. */
+  const [checking, setChecking] = useState(false);
+  const [signInError, setSignInError] = useState('');
+  const open = async () => {
+    if (!draft || checking) return;
+    setChecking(true); setSignInError('');
+    try {
+      const res = await fetch('./api/ops/meta', { headers: { 'x-ops-key': draft } });
+      if (res.ok) { save(draft); setMetaTry(t => t + 1); }
+      else setSignInError((await res.json().catch(() => null))?.message || 'That key isn’t right.');
+    } catch { setSignInError('Can’t reach Morning Box right now. Check your connection.'); }
+    finally { setChecking(false); }
+  };
 
   if (!key) {
     return (
@@ -77,8 +95,9 @@ export default function Ops() {
         <main className="screen-main" style={{ paddingTop: 24, gap: 18 }}>
           <h1 className="h-display" style={{ fontSize: 34 }}>Team sign-in</h1>
           <div className="field"><label htmlFor="ops-k">Operations key</label>
-            <input id="ops-k" className="input" type="password" autoComplete="off" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && draft && save(draft)} /></div>
-          <button type="button" className="btn" disabled={!draft} onClick={() => save(draft)}>Open console</button>
+            <input id="ops-k" className="input" type="password" autoComplete="off" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && open()} /></div>
+          {signInError && <div className="banner-err" role="alert"><Icon name="alert" size={18} stroke={2} />{signInError}</div>}
+          <button type="button" className="btn" disabled={!draft || checking} onClick={open}>{checking ? 'Checking…' : 'Open console'}</button>
         </main>
       </Screen>
     );
@@ -277,11 +296,11 @@ function Closed({ items, busy, act }) {
           <input className="input" placeholder="Reason, e.g. National Day" value={reason} onChange={e => setReason(e.target.value)} aria-label="Reason" />
         </div>
         <button type="button" className="btn" disabled={busy || !date} onClick={() => act('POST', '/closed-dates', { date, reason })}>Close this day</button>
-        <span className="xs">Customers can’t order closed days. Orders already booked for that day are not cancelled automatically. Check Deliveries.</span>
+        <span className="xs">Customers can’t order closed days. Orders already booked for that day are not cancelled automatically: handle them in Live (cancel and refund, or deliver).</span>
       </div>
       {items.map(c => (
         <div key={c.date} className="card row" style={{ padding: 16 }}>
-          <span><b>{c.date}</b> · {c.reason}</span>
+          <span><b>{c.date}</b> · {c.reason}{c.booked > 0 && <span className="err-msg" style={{ display: 'block' }}>{c.booked} order{c.booked > 1 ? 's' : ''} still booked for this day. Handle them in Live.</span>}</span>
           <button type="button" className="btn-text" disabled={busy} onClick={() => act('DELETE', `/closed-dates/${c.date}`)}>Reopen</button>
         </div>
       ))}
