@@ -63,7 +63,8 @@ function values(ctx = {}) {
     hours: support.hours || DEFAULTS.hours,
     contact,
     windows: windows.length ? windows : ['7:30 – 8:30 AM', '8:30 – 9:30 AM', '9:30 – 10:30 AM'],
-    hosting: ctx.legal?.hosting || 'UltaHost'
+    hosting: ctx.legal?.hosting || 'UltaHost',
+    dataRegion: ctx.legal?.dataRegion || 'the United States (New York)'
   };
 }
 const list = xs => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}` : xs[0] || '');
@@ -289,7 +290,7 @@ function privacy(v) {
       ] } },
       { p: 'Notifications, support messages and app analytics are handled by Morning Box’s own systems, not by third-party tools. We do not sell personal data, and bakeries may not use your details for their own marketing.' },
       { h: '5. Transfers outside the UAE' },
-      { p: 'Some providers, such as Stripe, Resend, Meta and Google, may store or access data outside the UAE, including in the European Union and the United States. We transfer data only to countries with adequate protection recognised under the PDPL, or with safeguards such as contractual protection, or where another lawful condition applies. Sensitive allergy data is kept on Morning Box’s own server and is shared only with the bakery preparing your order.' },
+      { p: `Morning Box’s server, where your account, orders and allergy data are stored, is hosted by ${v.hosting} in ${v.dataRegion}. Other providers, such as Stripe, Resend, Meta and Google, may store or access data outside the UAE, including in the European Union and the United States. We transfer data only to countries with adequate protection recognised under the PDPL, or with safeguards such as contractual protection, or where another lawful condition applies. Sensitive allergy data is not passed to these providers and is shared only with the bakery preparing your order.` },
       { h: '6. Your rights' },
       { p: 'Under the PDPL you can ask us to:' },
       { ul: [

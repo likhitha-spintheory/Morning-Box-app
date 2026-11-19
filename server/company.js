@@ -24,7 +24,9 @@ export const SUPPORT = {
 export const LEGAL = {
   privacyEmail: process.env.MB_PRIVACY_EMAIL || '',
   dpo: process.env.MB_DPO || '',
-  hosting: process.env.MB_HOSTING_PROVIDER || 'UltaHost'
+  hosting: process.env.MB_HOSTING_PROVIDER || 'UltaHost',
+  /* Where the server (and so the database) is: UltaHost VPS, New York. Change if the server moves. */
+  dataRegion: process.env.MB_DATA_REGION || 'the United States (New York)'
 };
 
 /* Bump when the Terms or Privacy Policy change: customers accept the new version at their next sign-in. */
