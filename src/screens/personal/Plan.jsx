@@ -132,7 +132,7 @@ export function ChooseDates() {
       {firstRun && <div style={{ paddingTop: 8 }}><SunArc step={4} total={5} /></div>}
       <main className="screen-main" style={{ paddingTop: firstRun ? 24 : 16, gap: 24 }}>
         <div className="stack gap-8">
-          <span className="eyebrow">{source || roDay ? 'Choose new dates' : firstRun ? 'Step 4 of 5 · Choose your mornings' : 'Choose your mornings'}</span>
+          <span className="eyebrow">{source || roDay ? 'Choose new dates' : firstRun ? 'Step 4 of 5: Choose your mornings' : 'Choose your mornings'}</span>
           <h1 className="h-display">{source ? 'Which dates should we copy your plan to?' : roDay ? 'Which mornings would you like it again?' : 'Which mornings should we plan?'}</h1>
           {/* A profile saved with Gluten-Free while it isn't available (client feedback PRD-004). */}
           {glutenFreeBlocked(state.profile.dietary) && (
@@ -177,7 +177,7 @@ export function ChooseDates() {
             </button>
           );
         })()}
-        {closures.length > 0 && <span className="xs">{closures.map(d => `Closed ${d.wd} ${d.day} ${d.mon} · ${d.reason}`).join('  ·  ')}</span>}
+        {closures.length > 0 && <span className="xs">{closures.map(d => `Closed ${d.wd} ${d.day} ${d.mon}, ${d.reason}`).join('; ')}</span>}
 
         {week === 0 && hoursLeft > 0 && (
           <div className="panel" style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: '16px 20px' }}>
@@ -259,7 +259,7 @@ export function DailyContext() {
       <TopBar back={back} close={null}><span className="topbar-title">{firstRun ? 'Step 5 of 5' : `Morning ${i + 1} of ${plan.dates.length}`}</span></TopBar>
       {firstRun && <div style={{ paddingTop: 8 }}><SunArc step={5} total={5} /></div>}
       <main className="screen-main" style={{ paddingTop: firstRun ? 24 : 8, gap: 24 }}>
-        {firstRun && <span className="eyebrow">Step 5 of 5 · Your daily context{plan.dates.length > 1 ? <span style={{ color: 'var(--text-3)' }}> · Morning {i + 1} of {plan.dates.length}</span> : null}</span>}
+        {firstRun && <span className="eyebrow">Step 5 of 5: Your daily context{plan.dates.length > 1 ? <span style={{ color: 'var(--text-3)' }}>, Morning {i + 1} of {plan.dates.length}</span> : null}</span>}
         {infos.length > 1 && <MorningPills dates={infos} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />}
         <RuledDate eyebrow="Planning">{dateInfo(iso).long}</RuledDate>
         <div className="stack gap-8">
@@ -344,12 +344,12 @@ export function MorningBox() {
 
   return (
     <Screen>
-      <TopBar back={`/plan/day/${iso}/context`} close={null}><span className="topbar-title">{dayComma(iso)} · {contextLabel(day.context)}</span></TopBar>
+      <TopBar back={`/plan/day/${iso}/context`} close={null}><span className="topbar-title">{dayComma(iso)} – {contextLabel(day.context)}</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 8, gap: 20 }}>
         {plan.dates.length > 1 && <MorningPills dates={plan.dates.map(dateInfo)} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />}
         {notice && <div className="note" role="status"><Icon name="alert" size={20} stroke={1.6} style={{ flex: 'none' }} /><span>{notice} Your other mornings are unchanged.</span></div>}
         <div className="stack gap-8">
-          <span className="eyebrow row" style={{ justifyContent: 'flex-start', gap: 10 }}><Icon name="sparkle" size={18} stroke={1.6} color="var(--espresso)" />{day.which === 'primary' ? 'Your Morning Box' : 'Another option for you'}<InfoTip label="Why this breakfast">Matched to: {matched.join(' · ')}</InfoTip></span>
+          <span className="eyebrow row" style={{ justifyContent: 'flex-start', gap: 10 }}><Icon name="sparkle" size={18} stroke={1.6} color="var(--espresso)" />{day.which === 'primary' ? 'Your Morning Box' : 'Another option for you'}<InfoTip label="Why this breakfast">Matched to: {matched.join(', ')}</InfoTip></span>
           <h1 className="h-display" style={{ fontSize: 34 }}>{boxName(cfg)}</h1>
         </div>
 
@@ -390,7 +390,7 @@ export function MorningBox() {
       </main>
       <Footer sheet>
         <div className="row" style={{ alignItems: 'flex-end' }}>
-          <span className="stack"><span className="sm" style={{ fontSize: 15 }}>{sizeLabel(cfg.size)}{canChooseSize(cfg) ? ' · from' : ''}</span><span style={{ font: '700 28px/1.15 var(--sans)' }}>AED {price.base + price.sizeAdj}</span></span>
+          <span className="stack"><span className="sm" style={{ fontSize: 15 }}>{sizeLabel(cfg.size)}{canChooseSize(cfg) ? ', from' : ''}</span><span style={{ font: '700 28px/1.15 var(--sans)' }}>AED {price.base + price.sizeAdj}</span></span>
           {PRICING.indicative && <span className="xs">Indicative pilot price</span>}
         </div>
         <button className="btn" onClick={() => nav(`/plan/day/${iso}/extras`)}><Go>Choose this breakfast</Go></button>
@@ -414,7 +414,7 @@ function NoMatch({ iso }) {
   };
   return (
     <Screen>
-      <TopBar back={`/plan/day/${iso}/context`} close={null}><span className="topbar-title">{dayComma(iso)} · {contextLabel(day.context)}</span></TopBar>
+      <TopBar back={`/plan/day/${iso}/context`} close={null}><span className="topbar-title">{dayComma(iso)} – {contextLabel(day.context)}</span></TopBar>
       <main className="screen-main center" style={{ alignItems: 'center', paddingTop: 36, gap: 24 }}>
         <span style={{ width: 96, height: 96, borderRadius: 999, background: 'var(--sand-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="shield" size={34} stroke={1.5} />
@@ -481,12 +481,12 @@ export function Extras() {
     if (/pcs?$/.test(amount)) return amount.replace(/\s*pcs?$/, ` ${noun}${/pcs$/.test(amount) && !noun.endsWith('s') ? 's' : ''}`);
     return `${amount} ${noun}`;
   };
-  const portions = cfg.components.map(portionText).join(' · ');
+  const portions = cfg.components.map(portionText).join(', ');
   const breadItems = bread ? (moreBread ? bread.items : bread.items.slice(0, 2)) : [];
 
   return (
     <Screen>
-      <TopBar back={`/plan/day/${iso}/box`} close={null}><span className="topbar-title">{dayComma(iso)} · {boxName(cfg)}</span></TopBar>
+      <TopBar back={`/plan/day/${iso}/box`} close={null}><span className="topbar-title">{dayComma(iso)} – {boxName(cfg)}</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 8, gap: 16 }}>
         {plan.dates.length > 1 && <MorningPills dates={plan.dates.map(dateInfo)} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />}
         <div className="stack gap-8" style={{ gap: 8 }}>
@@ -661,7 +661,7 @@ export function WeeklySummary() {
         {rows.map((iso, k) => {
           const day = plan.days[iso];
           const d = dateInfo(iso);
-          const details = [canChooseSize(day.cfg) ? sizeLabel(day.cfg.size) : 'Standard size', day.cfg.addons.length ? `+ ${extrasLine(day.cfg.addons)}` : null].filter(Boolean).join(' · ');
+          const details = [canChooseSize(day.cfg) ? sizeLabel(day.cfg.size) : 'Standard size', day.cfg.addons.length ? `+ ${extrasLine(day.cfg.addons)}` : null].filter(Boolean).join(', ');
           return (
             <article key={iso} className="card row" style={{ alignItems: 'flex-start', gap: 16, padding: 16 }}>
               <span className="datebox"><span className="wd">{d.wd}</span><span className="dn">{d.day}</span><span className="mo">{d.mon}</span></span>

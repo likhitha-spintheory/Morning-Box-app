@@ -51,7 +51,7 @@ export function Dashboard({ data, call, open }) {
           </button>
         ))}
       </div>
-      <p className="xs" style={{ margin: '-4px 0 0' }}>{data.rows.length} deliveries · {boxes} boxes on this date{data.allocated ? ` · ${data.allocated.final ? 'final' : 'provisional'} allocation` : ''}</p>
+      <p className="xs" style={{ margin: '-4px 0 0' }}>{data.rows.length} deliveries, {boxes} boxes on this date{data.allocated ? `, ${data.allocated.final ? 'final' : 'provisional'} allocation` : ''}</p>
 
       <div className="dash-grid">
         <article className="dash-card">
@@ -115,7 +115,7 @@ export function Dashboard({ data, call, open }) {
               {support.slice(0, 4).map(s => (
                 <li key={s.id}>
                   <span className="dash-dot warn" />
-                  <span className="stack" style={{ gap: 2, minWidth: 0, flex: 1 }}><span className="strong">{s.customer} · {s.topic}</span><span className="xs dash-clip">{s.message}</span></span>
+                  <span className="stack" style={{ gap: 2, minWidth: 0, flex: 1 }}><span className="strong">{s.customer}, {s.topic}</span><span className="xs dash-clip">{s.message}</span></span>
                 </li>
               ))}
             </ul>

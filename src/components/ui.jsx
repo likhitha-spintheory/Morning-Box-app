@@ -105,7 +105,7 @@ export function IconButton({ icon, label, to, onClick }) {
 
 /* Signed-in customers get the same navigation on every screen: the notifications bell in the top bar and the
    bottom menu (AppNav). Not on the homepage, sign-in, payment return, or the operations and bakery consoles. */
-const NO_CHROME = /^\/($|ops|bakery|sign-in|pay\/)/;
+const NO_CHROME = /^\/($|ops|bakery|sign-in|pay\/)/i;   // staff pages never show the customer tabs
 export function useCustomerChrome() {
   const { state } = useStore();
   const { pathname } = useLocation();

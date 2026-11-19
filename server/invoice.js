@@ -34,7 +34,7 @@ export function invoiceParties(days) {
     ? 'Partner Bakery assigned by Morning Box. It is named here once assigned (by 9:00 PM the evening before delivery).'
     : all.length === 1 && !pending
       ? `${esc(all[0].name)}${all[0].address ? `<br>${esc(all[0].address)}` : ''}${all[0].trn ? `<br>TRN ${esc(all[0].trn)}` : ''}`
-      : `The Partner Bakery shown for each date:${all.map(s => `<br>${esc(s.name)}${s.address ? `, ${esc(s.address)}` : ''}${s.trn ? ` · TRN ${esc(s.trn)}` : ''}`).join('')}${pending ? '<br>Dates without a bakery yet: assigned by 9:00 PM the evening before.' : ''}`;
+      : `The Partner Bakery shown for each date:${all.map(s => `<br>${esc(s.name)}${s.address ? `, ${esc(s.address)}` : ''}${s.trn ? `, TRN ${esc(s.trn)}` : ''}`).join('')}${pending ? '<br>Dates without a bakery yet: assigned by 9:00 PM the evening before.' : ''}`;
   const taxReady = all.length > 0 && !pending && all.every(s => s.trn);
   return {
     taxReady,

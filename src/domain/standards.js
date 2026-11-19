@@ -265,4 +265,6 @@ export const glutenFreeBlocked = (dietary = []) => !GLUTEN_FREE.available && die
 /** The area to store for a delivery: the one asked for when it is active. With one active area, an address that names
     no area (from an app version before the Area field) is that area; an area that is not active is never accepted. */
 export const areaFor = requested => (ACTIVE_AREAS.includes(requested) ? requested : !requested && ACTIVE_AREAS.length === 1 ? ACTIVE_AREAS[0] : null);
-export const areasText = () => ACTIVE_AREAS.join(' · ');
+export const areasText = () => (ACTIVE_AREAS.length > 1 ? `${ACTIVE_AREAS.slice(0, -1).join(', ')} & ${ACTIVE_AREAS.at(-1)}` : ACTIVE_AREAS[0] || '');
+/** Short form for small headers: "DIFC & Downtown", or "3 areas in Dubai". */
+export const areasShort = () => (ACTIVE_AREAS.length > 2 ? `${ACTIVE_AREAS.length} areas in Dubai` : ACTIVE_AREAS.map(a => a.split(' ')[0]).join(' & '));

@@ -72,7 +72,7 @@ function Frame({ step, back, editing, children, footer }) {
   return (
     <Screen>
       <TopBar back={editing ? (editing === 'plan' ? -1 : '/me') : back} close={editing ? null : '/'}>
-        <span className="topbar-title">{editing ? 'Edit Morning Profile' : `Your Morning Profile · Step ${step} of 5`}</span>
+        <span className="topbar-title">{editing ? 'Edit Morning Profile' : `Your Morning Profile: Step ${step} of 5`}</span>
       </TopBar>
       {!editing && <div style={{ paddingTop: 8 }}><SunArc step={step} total={5} /></div>}
       <main className="screen-main" style={{ paddingTop: 24, gap: 24 }}>{children}</main>
@@ -191,19 +191,20 @@ export function Dietary() {
         </div>
       </section>
       {(hasData || consent) && (
-        <section className="card stack gap-10" style={{ padding: 18, borderColor: asking ? 'var(--warn)' : undefined }} aria-labelledby="hc">
-          <h2 id="hc" className="h3" style={{ fontSize: 17 }}>{CONSENT.healthTitle}</h2>
-          <p className="help" style={{ margin: 0, fontSize: 15 }}>{CONSENT.health} <Link to="/legal/privacy" className="link">Privacy Policy</Link></p>
-          <label className="row" style={{ gap: 10, justifyContent: 'flex-start', cursor: 'pointer', minHeight: 44 }}>
-            <input type="checkbox" checked={consent} style={{ width: 22, height: 22, accentColor: 'var(--espresso)' }}
+        <section className="card stack gap-8" style={{ padding: 16, borderColor: asking ? 'var(--warn)' : undefined }} aria-label={CONSENT.healthTitle}>
+          <label className="row" style={{ gap: 12, justifyContent: 'flex-start', alignItems: 'flex-start', cursor: 'pointer' }}>
+            <input id="hc" type="checkbox" checked={consent} style={{ width: 22, height: 22, flex: 'none', marginTop: 1, accentColor: 'var(--espresso)' }}
               onChange={e => { setAsking(false); update(p => { p.healthConsent = e.target.checked; }); }} />
-            <span className="strong">{CONSENT.healthAgree}</span>
+            <span style={{ fontSize: 15 }}>{CONSENT.healthShort}</span>
           </label>
+          <span className="xs" style={{ paddingLeft: 34 }}>
+            <Link to="/legal/privacy" className="link">Privacy Policy</Link>, <Link to="/legal/allergens" className="link">Allergen information</Link>
+          </span>
         </section>
       )}
       {asking && (
         <div id="hc-ask" className="banner-warn" role="alert" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
-          <span>Without your agreement we can’t keep these details. {CONSENT.healthOff}</span>
+          <span>Tick the box to save these details, or continue without them.</span>
           <button type="button" className="btn-secondary" onClick={withoutData}>Continue without saving them</button>
         </div>
       )}

@@ -416,7 +416,7 @@ function createPersonalOrder(userId, body, payment, key = null) {
   flagOtherAllergies(userId, profile, db.prepare('SELECT * FROM order_days WHERE order_id = ?').all(id));
   reallocateProvisional(built.map(b => b.date));
   db.prepare("INSERT INTO analytics_events (kind, user_id) VALUES ('order_placed', ?)").run(userId);
-  logEvent(id, null, 'placed', `Order placed and paid · AED ${total}${order.credit_used ? ` (AED ${order.credit_used} credit used)` : ''}`);
+  logEvent(id, null, 'placed', `Order placed and paid, AED ${total}${order.credit_used ? ` (AED ${order.credit_used} credit used)` : ''}`);
   notify(userId, id, 'confirmed', `Order ${id} is confirmed: ${built.length} morning${built.length > 1 ? 's' : ''}, AED ${total}.`);
   sendOrderEmail(order);
   return id;
@@ -446,7 +446,7 @@ personalRouter.post('/orders', requireUser, geoCheck, (req, res, next) => {
   startCheckout(req, {
     kind: 'personal_order', payload: { body, key }, amount: card, idempotencyKey: key,
     email: email || db.prepare('SELECT login_email FROM users WHERE id = ?').get(req.userId)?.login_email,
-    description: `Morning Box · ${built.length} morning${built.length > 1 ? 's' : ''}`
+    description: `Morning Box, ${built.length} morning${built.length > 1 ? 's' : ''}`
   }).then(r => (r.checkout
     ? res.status(202).json({ checkout: r.checkout })
     : res.status(201).json(serializeOrder(db.prepare('SELECT * FROM orders WHERE id = ?').get(r.done))))).catch(next);
@@ -500,7 +500,7 @@ function editPersonalDay(userId, orderId, date, body, payment = null) {
     if (b.price !== day.price) changes.push(`price AED ${day.price} → AED ${b.price}`);
   }
   const due = b ? roundAed(b.price - day.price) : 0;
-  if (due > 0 && !payment) return { due, label: `Morning Box · change to ${prettyDate(day.date)}` };
+  if (due > 0 && !payment) return { due, label: `Morning Box, change to ${prettyDate(day.date)}` };
   if (due > 0 && roundAed(payment.amount) !== due) throw new ApiError(409, 'price_changed', 'The price of this change moved while you were paying. Your payment is being refunded. Please try again.');
   tx(() => {
     if (window !== day.window) assertCapacity(day.date, window, 1, { excludeOrderDay: day.id });
@@ -548,7 +548,7 @@ personalRouter.post('/orders/:id/days/:date/cancel', requireUser, (req, res) => 
       db.prepare('UPDATE order_days SET cancelled = 1, refund = ?, safety_hold = 0 WHERE id = ?').run(roundAed((day.refund || 0) + due), day.id);
       return due > 0 ? payBack(order.id, req.userId, due, `cancelled ${day.date}`, day.date) : { card: 0, credit: 0 };
     });
-    logEvent(order.id, day.date, 'cancelled', `You cancelled this morning · ${paidBackText(back)}`);
+    logEvent(order.id, day.date, 'cancelled', `You cancelled this morning, ${paidBackText(back)}`);
     notify(req.userId, `${order.id}:${day.date}`, 'refund', `Your ${prettyDate(day.date)} morning is cancelled. ${paidBackText(back)}.`);
   }
   res.json(serializeOrder(order));
@@ -621,11 +621,11 @@ personalRouter.get('/orders/:id/receipt', requireUser, (req, res) => {
   const u = db.prepare('SELECT first_name FROM users WHERE id = ?').get(req.userId);
   const vat = o.total - o.total / (1 + VAT_RATE);
   const refunded = o.days.filter(d => d.cancelled).reduce((t, d) => t + (d.refund || d.price), 0);
-  const rows = o.days.map(d => `<tr><td>${esc(d.date)}</td><td>${esc(boxName(d.cfg))} · ${esc(sizeLabel(d.cfg.size))}${d.cfg.addons.length ? `<br><small>+ ${esc(extrasText(d.cfg.addons))}</small>` : ''}${d.cancelled ? '<br><small>Cancelled and refunded</small>' : ''}${parties.multiple && !d.cancelled ? `<br><small>Seller: ${esc(parties.sellerOf(d.date))}</small>` : ''}</td><td>${esc(windowLabel(d.window))}</td><td style="text-align:right">${d.cancelled ? '0.00' : money(d.price)}</td></tr>`).join('');
+  const rows = o.days.map(d => `<tr><td>${esc(d.date)}</td><td>${esc(boxName(d.cfg))}, ${esc(sizeLabel(d.cfg.size))}${d.cfg.addons.length ? `<br><small>+ ${esc(extrasText(d.cfg.addons))}</small>` : ''}${d.cancelled ? '<br><small>Cancelled and refunded</small>' : ''}${parties.multiple && !d.cancelled ? `<br><small>Seller: ${esc(parties.sellerOf(d.date))}</small>` : ''}</td><td>${esc(windowLabel(d.window))}</td><td style="text-align:right">${d.cancelled ? '0.00' : money(d.price)}</td></tr>`).join('');
   res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Receipt ${esc(o.id)}</title>
 <style>body{font-family:Inter,Arial,sans-serif;color:#3B2D22;max-width:720px;margin:32px auto;padding:0 20px}h1{font-family:Georgia,serif;font-weight:400}table{width:100%;border-collapse:collapse;font-size:14px}td,th{border-bottom:1px solid #EADCC1;padding:8px;text-align:left;vertical-align:top}.r{text-align:right}</style>
 <h1>Morning Box ${parties.taxReady ? 'Tax Invoice' : 'Receipt'}</h1>
-<p>${parties.taxReady ? 'Invoice' : 'Receipt'} ${esc(o.id)} · ${esc(o.createdAt)} UTC</p>
+<p>${parties.taxReady ? 'Invoice' : 'Receipt'} ${esc(o.id)}, ${esc(o.createdAt)} UTC</p>
 ${parties.html}
 <p><b>Billed to:</b> ${esc(u?.first_name)}${o.email ? `<br>${esc(o.email)}` : ''}</p>
 <table><tr><th>Date</th><th>Breakfast</th><th>Delivery</th><th class="r">AED</th></tr>${rows}</table>
@@ -645,7 +645,7 @@ personalRouter.get('/orders/:id/calendar', requireUser, (req, res) => {
     const w = DELIVERY_WINDOWS.find(x => x.id === d.window);
     const [from, to] = (w?.label || '8:00 – 9:00 AM').replace(/\s*AM/g, '').split(/\s*[–-]\s*/).map(t => (t.length === 4 ? `0${t}` : t));
     return ['BEGIN:VEVENT', `UID:${o.id}-${d.date}@morningbox`, `DTSTAMP:${stamp}`, `DTSTART:${at(d.date, from)}`, `DTEND:${at(d.date, to)}`,
-      `SUMMARY:${line(`Morning Box · ${boxName(d.cfg)}`)}`, `LOCATION:${line(`${d.address.building}, ${d.address.unit}, ${d.address.area || 'DIFC'}, Dubai`)}`,
+      `SUMMARY:${line(`Morning Box, ${boxName(d.cfg)}`)}`, `LOCATION:${line(`${d.address.building}, ${d.address.unit}, ${d.address.area || 'DIFC'}, Dubai`)}`,
       `DESCRIPTION:${line(`Order ${o.id}. Delivered to ${d.address.handover === 'door' ? 'your door' : 'reception'}.`)}`, 'END:VEVENT'].join('\r\n');
   });
   res.type('text/calendar').send(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Morning Box//EN', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].join('\r\n'));

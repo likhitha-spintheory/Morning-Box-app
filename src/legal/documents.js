@@ -28,6 +28,8 @@ export const CONSENT = {
   healthTitle: 'Use my allergy and dietary information',
   health: 'I agree that Morning Box may store the allergy and dietary information I enter, use it to filter breakfast suggestions, and share the relevant details with the bakery preparing each order. This information may relate to my health. I understand that filtering does not guarantee food is allergen-free, and that I can withdraw this consent at any time in my Morning Profile.',
   healthAgree: 'I agree',
+  /* Short checkbox wording for the profile step (client feedback, 19 Nov): the full B1 text is behind the link. */
+  healthShort: 'I agree that Morning Box may use my allergy and dietary details to filter my breakfasts and share them with the bakery preparing my order.',
   healthOff: 'Allergy filtering is off. You can turn it on in your Morning Profile.',
   marketingTitle: 'Breakfast offers and news',
   marketing: 'Send me offers, new bakery launches and Morning Box news by email. I can unsubscribe at any time.',
@@ -185,7 +187,7 @@ function terms(v) {
       { h: '20. Governing law and disputes' },
       { p: 'These Terms are governed by the federal laws of the United Arab Emirates and the laws of the Emirate of Dubai as applied onshore, including Federal Law No. 15 of 2020 on Consumer Protection and Federal Decree-Law No. 14 of 2023 on Trading by Modern Technological Means. We will first try to resolve any dispute through our complaints process. If it remains unresolved, the courts of Dubai have jurisdiction, without affecting your right to complain to a consumer-protection authority or to rely on any mandatory jurisdiction rule.' }
     ],
-    footer: `Morning Box — operated by ${v.operator}, ${v.shortAddress} · ${v.email} · Help & Support in the app`
+    footer: `Morning Box — operated by ${v.operator}, ${v.shortAddress}, ${v.email}, Help & Support in the app`
   };
 }
 
@@ -315,7 +317,7 @@ function privacy(v) {
       { h: '11. Changes to this Policy' },
       { p: 'We update this Policy when our service or the law changes, and show the date at the top. We tell you in the app or by email before material changes take effect, and ask again for consent where required.' },
       { h: '12. Contact' },
-      { p: `${v.operator}, ${v.shortAddress} · ${v.privacyEmail} · Help & Support in the app.` }
+      { p: `${v.operator}, ${v.shortAddress}, ${v.privacyEmail}, Help & Support in the app.` }
     ]
   };
 }

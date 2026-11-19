@@ -208,7 +208,7 @@ adminRouter.post('/bakeries/:id/status', (req, res) => {
     if (b.status !== 'Active' && wasActive && !clean(req.body.verification, 300)) throw bad('verification_required', 'Record the corrective action and how it was verified before returning to Active.');
   }
   db.prepare("UPDATE bakeries SET status = ?, status_note = ?, active = ?, updated_at = datetime('now') WHERE id = ?").run(status, note || null, status === 'Active' ? 1 : 0, b.id);
-  log(b.id, `${b.status} → ${status}${note ? ` (${note})` : ''}${req.body.verification ? ` · Verified: ${clean(req.body.verification, 300)}` : ''}`);
+  log(b.id, `${b.status} → ${status}${note ? ` (${note})` : ''}${req.body.verification ? `, Verified: ${clean(req.body.verification, 300)}` : ''}`);
   /* Orders this bakery hasn't started move to the next eligible bakery (MB-BKY-001 §10); started ones stay to be finished. */
   const today = new Date().toLocaleDateString('en-CA');
   const dates = [...new Set([

@@ -39,7 +39,7 @@ const SEG3 = { gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' };
 
 /* ---------- helpers ---------- */
 const sum = (list, f = x => x.qty || 0) => list.reduce((t, x) => t + f(x), 0);
-const modelName = r => `${PREF_NAME[r.preference] || 'Morning Box'}${r.eatingStyle === 'health' ? ' · Health-Conscious' : ''}`;
+const modelName = r => `${PREF_NAME[r.preference] || 'Morning Box'}${r.eatingStyle === 'health' ? ', Health-Conscious' : ''}`;
 const toModel = r => ({ recipe: r, label: describe(r), base: PRICE_LEVELS[priceLevel(r)] });
 const hydrateLine = l => ({ model: toModel(recipeById[l.recipeId]), size: l.size, qty: l.qty });
 const linePrice = l => toModel(recipeById[l.recipeId]).base + SIZE_ADJUSTMENT[l.size];
@@ -55,7 +55,7 @@ const activeSpecials = b => (b.hasSpecial ? b.specials : []);
 const specialQty = b => sum(activeSpecials(b));
 const specialText = s => [...s.dietary.map(dietLabel), ...s.allergies.map(a => `${allergyLabel(a).split(' /')[0]}-free`)].join(', ') + (s.size && s.size !== 'regular' ? ` (${sizeLabel(s.size)})` : '');
 const linesText = lines => lines.filter(l => l.qty > 0)
-  .map(l => `${modelName(recipeById[l.recipeId])} × ${l.qty} (${sizeLabel(l.size)})`).join(' · ');
+  .map(l => `${modelName(recipeById[l.recipeId])} × ${l.qty} (${sizeLabel(l.size)})`).join(', ');
 
 /**
  * Edit one day's breakfasts: every model × size × quantity, plus Special Breakfast groups
@@ -77,7 +77,7 @@ function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
       {lines.map((l, i) => (
         <div key={`${l.recipeId}-${l.size}-${i}`} className="stack gap-6" style={{ paddingBottom: 8, borderBottom: '1px solid var(--line-soft)' }}>
           <div className="row">
-            <span className="stack"><span className="strong">{modelName(recipeById[l.recipeId])}</span><span className="xs">{describe(recipeById[l.recipeId])} · AED {linePrice(l)}</span></span>
+            <span className="stack"><span className="strong">{modelName(recipeById[l.recipeId])}</span><span className="xs">{describe(recipeById[l.recipeId])}, AED {linePrice(l)}</span></span>
             <Qty value={l.qty} max={max} label={modelName(recipeById[l.recipeId])} onChange={v => set(lines.map((x, k) => (k === i ? { ...x, qty: v } : x)), specials)} />
           </div>
           <SizeSeg value={l.size} label={`Size for ${modelName(recipeById[l.recipeId])}`} onChange={sz => set(lines.map((x, k) => (k === i ? { ...x, size: sz } : x)), specials)} />
@@ -178,7 +178,7 @@ function useBiz() {
 
 /* Who the order is for (client feedback): changes the address fields, Review & Pay and the confirmation. */
 const ORDER_TYPES = [['family', 'Family & friends', 'A home, villa or apartment', 'home'], ['business', 'Business / company', 'An office or corporate delivery', 'brief']];
-const typeLabel = o => (o.orderType === 'family' ? 'Family & friends breakfast' : o.orderType === 'business' || o.company ? `Business breakfast${o.company ? ` · ${o.company}` : ''}` : 'Group breakfast');
+const typeLabel = o => (o.orderType === 'family' ? 'Family & friends breakfast' : o.orderType === 'business' || o.company ? `Business breakfast${o.company ? `, ${o.company}` : ''}` : 'Group breakfast');
 const placeFields = family => (family
   ? { building: ['Building or villa', 'e.g. Index Tower, or Sky Gardens'], office: ['Apartment / villa number', 'e.g. Apartment 1203'] }
   : { building: ['Building / Tower', 'e.g. Gate Village, Building 3'], office: ['Office / Floor / Unit', 'e.g. Level 4, Office 402'] });
@@ -187,7 +187,7 @@ const Err = ({ id, children }) => <span id={id} className="err-msg"><Icon name="
 function StepBar({ n, back }) {
   return (
     <>
-      <TopBar back={back} close="/"><span className="topbar-title">Group &amp; Business · {n} of 5</span></TopBar>
+      <TopBar back={back} close="/"><span className="topbar-title">Group &amp; Business: {n} of 5</span></TopBar>
       <Progress step={n} />
     </>
   );
@@ -265,7 +265,7 @@ function getInvoice(order, signedIn) {
 
 function downloadInvoice(order) {
   /* Offline copy only: the tax invoice itself always comes from the server. */
-  const rows = order.days.map(d => `<tr><td>${esc(dateInfo(d.date).label)}${d.cancelled ? ' (cancelled, refunded)' : ''}</td><td>${esc(d.people)} people</td><td>${esc(linesText(d.lines))}${d.specials.length ? ` · Special × ${sum(d.specials)}` : ''}</td><td style="text-align:right">AED ${d.cancelled ? 0 : esc(d.total)}</td></tr>`).join('');
+  const rows = order.days.map(d => `<tr><td>${esc(dateInfo(d.date).label)}${d.cancelled ? ' (cancelled, refunded)' : ''}</td><td>${esc(d.people)} people</td><td>${esc(linesText(d.lines))}${d.specials.length ? `, Special × ${sum(d.specials)}` : ''}</td><td style="text-align:right">AED ${d.cancelled ? 0 : esc(d.total)}</td></tr>`).join('');
   const inv = order.invoice || {};
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Order summary ${esc(order.id)}</title>
 <style>body{font-family:Arial,sans-serif;color:#3B2D22;max-width:720px;margin:40px auto;padding:0 20px}td,th{padding:8px;border-bottom:1px solid #EADCC1;text-align:left;font-size:14px}table{border-collapse:collapse;width:100%}</style></head>
@@ -359,7 +359,7 @@ export function BizWelcome() {
           <Link to={`/business/orders/${next.o.id}`} className="dark-band" style={{ textDecoration: 'none' }}>
             <span className="eyebrow">Next delivery</span>
             <span style={{ font: '400 28px/1.15 var(--serif)' }}>{dateInfo(next.d.date).long}</span>
-            <span style={{ fontSize: 15, color: '#E9DCC6' }}>{next.d.people} people · {windowLabel(next.d.window)}</span>
+            <span style={{ fontSize: 15, color: '#E9DCC6' }}>{next.d.people} people, {windowLabel(next.d.window)}</span>
             <span className="row" style={{ fontSize: 14, fontWeight: 600 }}>
               <span>Order {next.o.id}</span><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>Manage<Icon name="chevron" size={16} stroke={2} /></span>
             </span>
@@ -378,7 +378,7 @@ export function BizWelcome() {
                   <button key={o.id} type="button" className="option" onClick={() => reorder('reorder', o.id)}>
                     <span className="ico"><Icon name="repeat" size={22} stroke={1.6} /></span>
                     <span className="stack gap-4"><span style={{ fontWeight: 600, fontSize: 17 }}>{typeLabel(o)}</span>
-                      <span className="sm">{live.length > 1 ? `${live.length} days · ` : ''}{d.people} people · last on {dateInfo(d.date).label}. Order again for new dates.</span></span>
+                      <span className="sm">{live.length > 1 ? `${live.length} days, ` : ''}{d.people} people, last on {dateInfo(d.date).label}. Order again for new dates.</span></span>
                     <Icon name="chevron" size={20} stroke={1.8} style={{ marginLeft: 'auto' }} />
                   </button>
                 );
@@ -389,7 +389,7 @@ export function BizWelcome() {
             <div key={pl.id} className="stack" style={{ gap: 2 }}>
               <button type="button" className="option" onClick={() => fromPlan(pl)}>
                 <span className="ico"><Icon name="bookmark" size={22} stroke={1.6} /></span>
-                <span className="stack gap-4"><span style={{ fontWeight: 600, fontSize: 17 }}>Use a Saved Plan · {pl.name}</span>
+                <span className="stack gap-4"><span style={{ fontWeight: 600, fontSize: 17 }}>Use a Saved Plan: {pl.name}</span>
                   <span className="sm">{pl.plan.people} people. Headcount, special breakfasts and boxes are copied. You choose the dates.</span></span>
                 <Icon name="chevron" size={20} stroke={1.8} style={{ marginLeft: 'auto' }} />
               </button>
@@ -562,14 +562,14 @@ function SpecialDetails({ specials }) {
           <span className="ci"><Icon name="shield" size={20} stroke={1.6} /></span>
           <span className="stack" style={{ flex: 1, minWidth: 0 }}>
             <span className="strong">Special Breakfast {i + 1}: {modelName(recipe)}</span>
-            <span className="xs">{need} · AED {unit} each</span>
+            <span className="xs">{need}, AED {unit} each</span>
           </span>
           <span className="strong" style={{ whiteSpace: 'nowrap' }}>× {s.qty}</span>
           <span className="chev" aria-hidden="true"><Icon name="chevron" size={18} stroke={1.8} /></span>
         </summary>
         <dl className="special-facts">
           <dt>Breakfast</dt><dd>{modelName(recipe)}: {describe({ ...recipe, components })}</dd>
-          <dt>Ingredients</dt><dd><ul>{components.map(id => <li key={id}>{componentName(id)} · {componentPortion(id, size)}</li>)}</ul></dd>
+          <dt>Ingredients</dt><dd><ul>{components.map(id => <li key={id}>{componentName(id)}, {componentPortion(id, size)}</li>)}</ul></dd>
           <dt>Suitable for</dt><dd>{need}</dd>
           <dt>Contains</dt><dd>{contains.length ? contains.join(', ') : 'None of the allergens we track'}</dd>
           <dt>Quantity</dt><dd>{s.qty}</dd>
@@ -634,7 +634,7 @@ export function Selection() {
               <div key={l.recipeId} className="stack gap-10" style={{ padding: '14px 0', borderTop: '1px solid var(--line-soft)' }}>
                 <div className="row" style={{ alignItems: 'flex-start' }}>
                   <span className="stack"><span className="strong">{modelName(r)}</span><span className="xs">{describe(r)}</span>
-                    {mode === 'mix' && <span className="xs">AED {linePrice(l)} each · {sizeLabel(l.size)}</span>}</span>
+                    {mode === 'mix' && <span className="xs">AED {linePrice(l)} each, {sizeLabel(l.size)}</span>}</span>
                   {/* FLW §13: the Mix is a starting point — quantities stay editable (Total Boxes = Total People is checked below). */}
                   {mode === 'mix'
                     ? <Qty value={l.qty} max={MAX_PEOPLE} label={modelName(r)} onChange={q => setLines(ls => ls.map((x, k) => (k === i ? { ...x, qty: q } : x)))} />
@@ -685,7 +685,7 @@ export function ChooseBoxes() {
 
   return (
     <Screen>
-      <TopBar back="/business/selection" close="/"><span className="topbar-title">Group &amp; Business · 3 of 5</span></TopBar>
+      <TopBar back="/business/selection" close="/"><span className="topbar-title">Group &amp; Business: 3 of 5</span></TopBar>
       <Progress step={3} />
       <main className="screen-main" style={{ paddingTop: 28 }}>
         <div className="stack gap-10">
@@ -792,7 +792,7 @@ export function BizDates() {
         <div className="seg" style={SEG2} role="tablist" aria-label="Week">
           {weeks.map((w, i) => (
             <button key={i} role="tab" aria-selected={week === i} className={week === i ? 'on' : ''} onClick={() => setWeek(i)}>
-              {i === 0 ? 'This week · ' : i === 1 ? 'Next week · ' : ''}{w[0].day}{w[0].mon === w[6].mon ? '' : ` ${w[0].mon}`}–{w[6].day} {w[6].mon}
+              {i === 0 ? 'This week, ' : i === 1 ? 'Next week, ' : ''}{w[0].day}{w[0].mon === w[6].mon ? '' : ` ${w[0].mon}`}–{w[6].day} {w[6].mon}
             </button>
           ))}
         </div>
@@ -838,7 +838,7 @@ export function BizDates() {
               return (
                 <div key={iso} className="stack gap-8" style={{ padding: '14px 0', borderTop: k ? '1px solid var(--line-soft)' : 0 }}>
                   <div className="row">
-                    <span className="stack"><span className="strong">{dateInfo(iso).label}</span><span className="xs">{people} people · AED {price.total}</span></span>
+                    <span className="stack"><span className="strong">{dateInfo(iso).label}</span><span className="xs">{people} people, AED {price.total}</span></span>
                     {mine ? <span className="strong">{people}</span> : <Qty value={people} min={minPeople} max={MAX_PEOPLE} label={`people on ${dateInfo(iso).label}`} onChange={v => setDp(p => ({ ...p, [iso]: v }))} />}
                   </div>
                   <button type="button" className="link-hit" style={{ alignSelf: 'flex-start', fontWeight: 600, fontSize: 14 }} onClick={() => setEditing(editing === iso ? null : iso)}>{editing === iso ? 'Done' : 'Change boxes for this day'}</button>
@@ -862,7 +862,7 @@ export function BizDates() {
         {picked.length > 0 && !custom && (
           <div className="card stack gap-4" style={{ padding: 16 }}>
             <span className="strong">{picked.length} morning{picked.length > 1 ? 's' : ''} selected</span>
-            <span className="sm">{picked.map(p => dateInfo(p).label).join(' · ')}</span>
+            <span className="sm">{picked.map(p => dateInfo(p).label).join(', ')}</span>
           </div>
         )}
       </main>
@@ -1136,7 +1136,7 @@ export function BizAccount() {
       <main className="screen-main" style={{ paddingTop: 8, gap: 22 }}>
         <div className="note" style={{ alignItems: 'center' }}>
           <Icon name="cal" size={22} color="#7A5A14" />
-          <span style={{ fontSize: 15 }}><b>{b.people} people · {b.dates.length} day{b.dates.length > 1 ? 's' : ''}</b> saved and ready</span>
+          <span style={{ fontSize: 15 }}><b>{b.people} people, {b.dates.length} day{b.dates.length > 1 ? 's' : ''}</b> saved and ready</span>
         </div>
         <div className="stack gap-8">
           <h1 className="h-display" style={{ fontSize: 34 }}>Save your order</h1>
@@ -1302,10 +1302,10 @@ export function BizReview() {
         {days.map(d => (
           <section key={d.iso} className="card stack gap-8" aria-label={dateInfo(d.iso).label}>
             <div className="sr"><strong>{dateInfo(d.iso).label}</strong><Link to={b.sameForAll === false && b.dates.length > 1 ? '/business/dates' : '/business/selection'} className="link-hit" style={{ fontWeight: 600, fontSize: 14 }}>Edit</Link></div>
-            <span className="sm" style={{ color: 'var(--espresso)' }}>{d.people} people · {windowLabel(d.window)}</span>
+            <span className="sm" style={{ color: 'var(--espresso)' }}>{d.people} people, {windowLabel(d.window)}</span>
             <span className="xs">{linesText(d.lines) || 'No general breakfasts'}</span>
-            {d.specials.length > 0 && <span className="xs"><Icon name="shield" size={12} stroke={2} style={{ verticalAlign: '-2px', marginRight: 4 }} />Special × {sum(d.specials)}: {d.specials.map(s => `${specialText(s)} × ${s.qty}`).join(' · ')}</span>}
-            <span className="xs">{(d.delivery || dl).building}, {(d.delivery || dl).office}, {areaFor((d.delivery || dl).area || dl.area)} · {(d.delivery || dl).contact}, {fmtMobile(mobileDigits((d.delivery || dl).mobile))}</span>
+            {d.specials.length > 0 && <span className="xs"><Icon name="shield" size={12} stroke={2} style={{ verticalAlign: '-2px', marginRight: 4 }} />Special × {sum(d.specials)}: {d.specials.map(s => `${specialText(s)} × ${s.qty}`).join(', ')}</span>}
+            <span className="xs">{(d.delivery || dl).building}, {(d.delivery || dl).office}, {areaFor((d.delivery || dl).area || dl.area)}, {(d.delivery || dl).contact}, {fmtMobile(mobileDigits((d.delivery || dl).mobile))}</span>
             <div className="sr">
               <span className="xs" style={d.price.discount ? { color: 'var(--ok)' } : undefined}>{d.price.discount ? `Includes ${Math.round(d.price.discountPct * 100)}% volume discount` : ''}</span>
               <span className="money">AED {d.price.total}</span>
@@ -1365,7 +1365,7 @@ export function BizConfirmed() {
     const d = order.days.find(x => !x.cancelled) || first;
     setPlan({ busy: true, saved: false, error: '' });
     post('/business/plans', {
-      name: `${order.company || (order.orderType === 'family' ? 'Family & friends' : 'Group')} · ${d.people} people`.slice(0, 60),
+      name: `${order.company || (order.orderType === 'family' ? 'Family & friends' : 'Group')}, ${d.people} people`.slice(0, 60),
       plan: { people: d.people, mode: order.mode, lines: d.lines, specials: d.specials, delivery: { ...d.delivery, type: d.delivery?.type || order.orderType || undefined, window: d.window } }
     }).then(() => setPlan({ busy: false, saved: true, error: '' })).catch(e => setPlan({ busy: false, saved: false, error: e.message }));
   };
@@ -1374,10 +1374,10 @@ export function BizConfirmed() {
   const rows = [
     ['Order', order.id],
     ['Order type', typeLabel(order)],
-    ['Dates', order.days.map(d => dateInfo(d.date).label).join(' · ')],
+    ['Dates', order.days.map(d => dateInfo(d.date).label).join(', ')],
     ['Headcount', heads.length > 1 ? `${Math.min(...heads)}–${Math.max(...heads)} people` : `${heads[0]} people`],
     ['Location', [first.delivery.building, first.delivery.office, first.delivery.area].filter(Boolean).join(', ')],
-    ['Window', wins.join(' · ')],
+    ['Window', wins.join(', ')],
     ['Paid', `AED ${order.paid ?? order.total}`]
   ];
   return (
@@ -1479,7 +1479,7 @@ function CancelOrder({ order, set }) {
   if (result) {
     return (
       <div className="banner-ok" role="status"><Icon name="check" size={18} stroke={2.4} style={{ flex: 'none' }} />
-        <span>{result.cancelled.length ? `${result.cancelled.length} day${result.cancelled.length === 1 ? '' : 's'} cancelled · AED ${result.refund} will be refunded.` : 'Nothing could be cancelled.'}
+        <span>{result.cancelled.length ? `${result.cancelled.length} day${result.cancelled.length === 1 ? '' : 's'} cancelled, AED ${result.refund} will be refunded.` : 'Nothing could be cancelled.'}
           {result.notCancelled.length > 0 && ` ${result.notCancelled.map(x => dateInfo(x.date).label).join(', ')} could not be cancelled.`}</span>
       </div>
     );
@@ -1541,8 +1541,8 @@ function Tracking({ day }) {
       <div className="row" style={{ gap: 6, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
         {TRACK.map((t, i) => <span key={t} className={`status ${i <= st ? (i === 3 ? 'ok' : 'prep') : 'done'}`} style={{ opacity: i <= st ? 1 : 0.55, fontSize: 12 }}>{t}</span>)}
       </div>
-      {st === 3 && <span className="strong">Delivered to {day.deliveryPoint || 'Reception'}{time ? ` · ${time}` : ''}</span>}
-      {day.lateNote && st < 3 && !day.problem && <span className="help">Running late · now around {day.lateNote}</span>}
+      {st === 3 && <span className="strong">Delivered to {day.deliveryPoint || 'Reception'}{time ? `, ${time}` : ''}</span>}
+      {day.lateNote && st < 3 && !day.problem && <span className="help">Running late, now around {day.lateNote}</span>}
       {day.problem && <span className="help" style={{ color: 'var(--err)' }}>{day.problem === 'Not Fulfilled' ? 'We couldn’t prepare this order.' : 'We couldn’t complete the handover. Our team will contact you.'}</span>}
       {day.refund > 0 && <span className="help">AED {day.refund} refunded to your original payment method.</span>}
       {day.bakeries?.length > 0 && <span className="help">Prepared by {day.bakeries.join(' & ')}</span>}
@@ -1612,9 +1612,9 @@ function DayEditor({ order, day, set, signedIn }) {
     <>
       <div className="stack gap-8">
         <div className="date-title">{info.long}</div>
-        <span className="sm">{windowLabel(day.window)} · {day.delivery.building}, {day.delivery.office}</span>
+        <span className="sm">{windowLabel(day.window)}, {day.delivery.building}, {day.delivery.office}</span>
         {day.cancelled
-          ? <span className="status off" style={{ alignSelf: 'flex-start' }}><Icon name="close" size={12} stroke={2.4} />Cancelled · refunded</span>
+          ? <span className="status off" style={{ alignSelf: 'flex-start' }}><Icon name="close" size={12} stroke={2.4} />Cancelled, refunded</span>
           : open
             ? <span className="status ok" style={{ alignSelf: 'flex-start' }}><Icon name="clock" size={13} stroke={2} />Editable until {cutoffLabel(day.date)}</span>
             : <span className="status done" style={{ alignSelf: 'flex-start' }}><Icon name="lock" size={13} stroke={2} />Changes closed</span>}
@@ -1693,7 +1693,7 @@ function DayEditor({ order, day, set, signedIn }) {
 
       <ApiErr error={error} />
       <button type="button" className="btn-secondary" onClick={() => { setError(''); getInvoice(order, signedIn).catch(e => setError(e.message)); }}><Icon name="download" size={18} />{order.invoice?.wanted === false ? 'Download receipt' : 'Download invoice'}</button>
-      {open && !confirmCancel && <button type="button" className="btn-danger" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel {info.label} · full refund</button>}
+      {open && !confirmCancel && <button type="button" className="btn-danger" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel {info.label}, full refund</button>}
       {open && confirmCancel && (
         <div className="card stack gap-12" role="alertdialog" aria-labelledby={`bc-${day.date}`}>
           <strong id={`bc-${day.date}`} style={{ fontSize: 18 }}>Cancel breakfast on {info.long}?</strong>

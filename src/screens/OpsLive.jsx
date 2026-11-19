@@ -20,9 +20,9 @@ export function Live({ data, meta, busy, act, call }) {
     <section className="stack gap-16">
       <div className="card stack gap-12" style={{ padding: 18 }}>
         <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
-          <span className="strong">{data.rows.length} deliveries · {boxes} boxes</span>
+          <span className="strong">{data.rows.length} deliveries, {boxes} boxes</span>
           <span className="row" style={{ gap: 10 }}>
-            <span className="xs">{data.allocated ? `${data.allocated.final ? 'Final' : 'Provisional'} allocation ${new Date(data.allocated.at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}${data.allocated.failed ? ` · ${data.allocated.failed} not allocated` : ''}${data.allocated.final ? '' : ' · final runs at 9:00 PM the evening before'}` : 'Final allocation runs automatically at 9:00 PM the evening before'}</span>
+            <span className="xs">{data.allocated ? `${data.allocated.final ? 'Final' : 'Provisional'} allocation ${new Date(data.allocated.at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}${data.allocated.failed ? `, ${data.allocated.failed} not allocated` : ''}${data.allocated.final ? '' : ', final runs at 9:00 PM the evening before'}` : 'Final allocation runs automatically at 9:00 PM the evening before'}</span>
             <button type="button" className="btn-secondary" style={small} disabled={busy || !data.rows.length} onClick={() => (!data.allocated?.final || window.confirm('Re-run the final allocation? Orders not yet started may move to another bakery, and bakeries will need to confirm again.')) && act('POST', '/allocate', { date: data.date })}>{data.allocated?.final ? 'Re-run allocation' : 'Allocate now'}</button>
           </span>
         </div>
@@ -30,7 +30,7 @@ export function Live({ data, meta, busy, act, call }) {
           <thead><tr><th>Bakery</th><th>Booked / capacity</th><th>Production plan</th><th /></tr></thead>
           <tbody>{data.plans.map(p => (
             <tr key={p.bakeryId} className={p.booked && p.plan?.status !== 'Confirmed' ? 'warn' : ''}>
-              <td>{p.bakery}</td><td>{p.booked} / {p.capacity}{p.windowCapacity ? <><br /><small>{Object.entries(p.windowCapacity).map(([w, n]) => `${windowLabel(w)}: ${p.bookedByWindow?.[w] ?? 0} / ${n}`).join(' · ')}</small></> : null}</td>
+              <td>{p.bakery}</td><td>{p.booked} / {p.capacity}{p.windowCapacity ? <><br /><small>{Object.entries(p.windowCapacity).map(([w, n]) => `${windowLabel(w)}: ${p.bookedByWindow?.[w] ?? 0} / ${n}`).join(', ')}</small></> : null}</td>
               <td>{p.plan ? `${p.plan.status}${p.plan.reason ? ` (${p.plan.reason})` : ''}` : p.booked ? 'Waiting for the bakery to confirm' : '—'}</td>
               <td>{p.booked > 0 && p.plan?.status !== 'Confirmed' && <small>Only the bakery can confirm (Bakery View). Chase the bakery or reallocate.</small>}</td>
             </tr>
@@ -39,7 +39,7 @@ export function Live({ data, meta, busy, act, call }) {
       </div>
 
       <div className="row" style={{ flexWrap: 'wrap', gap: 8, justifyContent: 'flex-start' }}>
-        {Object.entries(data.counts).map(([k, n]) => <span key={k} className={`status ${HEALTH_CLASS[k] || 'done'}`}>{k} · {n}</span>)}
+        {Object.entries(data.counts).map(([k, n]) => <span key={k} className={`status ${HEALTH_CLASS[k] || 'done'}`}>{k}, {n}</span>)}
         <span style={{ flex: 1 }} />
         <div className="ops-tabs" role="tablist">
           {[['attention', 'Needs attention'], ['all', 'All']].map(([id, label]) => <button key={id} role="tab" aria-selected={filter === id} className={filter === id ? 'on' : ''} onClick={() => setFilter(id)}>{label}</button>)}
@@ -53,12 +53,12 @@ export function Live({ data, meta, busy, act, call }) {
           return (
             <Fragment key={key}>
               <tr className={['Late', 'Failed', 'Attention Required'].includes(r.health) || r.safetyHold || r.safetyCheck ? 'warn' : ''}>
-                <td>{r.orderId}{r.kind === 'business' ? ' (business)' : ''}{r.safetyHold ? ' · SAFETY HOLD' : ''}{r.safetyCheck ? ' · ALLERGY CHECK OPEN' : ''}{r.needs?.length ? <><br /><small>Needs: {r.needs.join(', ')}</small></> : null}</td>
+                <td>{r.orderId}{r.kind === 'business' ? ' (business)' : ''}{r.safetyHold ? ', SAFETY HOLD' : ''}{r.safetyCheck ? ', ALLERGY CHECK OPEN' : ''}{r.needs?.length ? <><br /><small>Needs: {r.needs.join(', ')}</small></> : null}</td>
                 <td>{windowLabel(r.window)}<br /><small>Ready by {r.readyBy}</small></td>
                 <td>{r.address.building}, {r.address.unit || r.address.office}</td>
                 <td>{r.boxes}{r.specialBoxes ? <><br /><small>{r.specialBoxes} special</small></> : null}</td>
                 <td>{bakeryOf(r, names)}</td>
-                <td><small>Bakery: {r.bakeryState || '—'}{r.delayMinutes ? ` (+${r.delayMinutes} min)` : ''}<br />Delivery: {r.deliveryState || '—'}<br />Customer sees: {STAGE[r.stage]}{r.lateNote ? ` · around ${r.lateNote}` : ''}</small></td>
+                <td><small>Bakery: {r.bakeryState || '—'}{r.delayMinutes ? ` (+${r.delayMinutes} min)` : ''}<br />Delivery: {r.deliveryState || '—'}<br />Customer sees: {STAGE[r.stage]}{r.lateNote ? `, around ${r.lateNote}` : ''}</small></td>
                 <td><span className={`status ${HEALTH_CLASS[r.health] || 'done'}`}>{r.health}</span></td>
                 <td><button type="button" className="btn-text" onClick={() => setOpen(open === key ? null : key)}>{open === key ? 'Close' : 'Actions'}</button></td>
               </tr>
@@ -104,7 +104,7 @@ function Actions({ r, meta, busy, act, call, names = {} }) {
       {r.attempts?.length > 0 && <span className="xs">Attempts: {r.attempts.map(a => `${a.reason} (${a.created_at})`).join('; ')}</span>}
       {done && r.hasDeliveryPhoto && call && <DeliveryPhoto r={r} call={call} />}
       {blocked && <div className="banner-warn" role="status"><span><b>{r.safetyHold ? 'Safety hold' : 'Open allergy / dietary check'}</b>: resolve it in Exceptions before the bakery prepares or hands this over (MB-BKY-001 §3).</span></div>}
-      {r.handover && <span className="xs">Dispatched by the bakery: {r.handover.boxes} boxes ({r.handover.special_boxes} special){r.handover.picked_up_at ? ` · ${r.handover.picked_up_at}` : ''}</span>}
+      {r.handover && <span className="xs">Dispatched by the bakery: {r.handover.boxes} boxes ({r.handover.special_boxes} special){r.handover.picked_up_at ? `, ${r.handover.picked_up_at}` : ''}</span>}
       {!leftBakery && !done && (
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
           <b style={{ fontSize: 14 }}>Bakery:</b>
@@ -178,7 +178,7 @@ function Actions({ r, meta, busy, act, call, names = {} }) {
 export function Prep({ data }) {
   return (
     <section className="stack gap-16">
-      <div className="row no-print"><span className="strong">Production plans · {data.date}</span><button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} onClick={() => window.print()}>Print</button></div>
+      <div className="row no-print"><span className="strong">Production plans, {data.date}</span><button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} onClick={() => window.print()}>Print</button></div>
       {data.bakeries.map(b => <ProductionPlan key={b.bakeryId ?? 'none'} plan={b} date={data.date} />)}
       {!data.bakeries.length && <p className="help">Nothing to prepare on this date.</p>}
     </section>
@@ -192,16 +192,16 @@ export function ProductionPlan({ plan, date, children }) {
   return (
     <div className="card stack gap-12 print-block" style={{ padding: 18 }}>
       <div className="row" style={{ flexWrap: 'wrap' }}>
-        <h2 className="h3">{plan.bakery} <span className="xs">· {date}</span></h2>
-        <span className="xs">{plan.boxes} boxes{plan.special ? ` · ${plan.special} special` : ''}{plan.readyBy ? ` · first ready by ${plan.readyBy}` : ''}{plan.status?.status ? ` · plan ${plan.status.status.toLowerCase()}` : ''}</span>
+        <h2 className="h3">{plan.bakery} <span className="xs">{date}</span></h2>
+        <span className="xs">{plan.boxes} boxes{plan.special ? `, ${plan.special} special` : ''}{plan.readyBy ? `, first ready by ${plan.readyBy}` : ''}{plan.status?.status ? `, plan ${plan.status.status.toLowerCase()}` : ''}</span>
       </div>
       {children}
       <span className="eyebrow grey">Production</span>
       <table className="ops-table">
-        <thead><tr><th>Qty</th><th>Ready by</th><th>Breakfast · size</th><th>Make</th></tr></thead>
+        <thead><tr><th>Qty</th><th>Ready by</th><th>Breakfast, size</th><th>Make</th></tr></thead>
         <tbody>{plan.production.map((p, i) => (
           <tr key={i} className={p.special.length ? 'warn' : ''}>
-            <td><b>{p.qty}×</b></td><td>{p.readyBy}</td><td>{p.box} · {p.size}{p.format ? <><br /><small>{p.format}</small></> : null}{p.special.length ? <><br /><b>SPECIAL: {p.special.join(', ')}</b></> : null}</td>
+            <td><b>{p.qty}×</b></td><td>{p.readyBy}</td><td>{p.box}, {p.size}{p.format ? <><br /><small>{p.format}</small></> : null}{p.special.length ? <><br /><b>SPECIAL: {p.special.join(', ')}</b></> : null}</td>
             <td>{p.components.join(', ')}{p.swaps.length ? <><br /><small>Swaps: {p.swaps.join('; ')}</small></> : null}{p.substitutions.length ? <><br /><small>Substitutions: {p.substitutions.join('; ')}</small></> : null}</td>
           </tr>
         ))}</tbody>
@@ -219,9 +219,9 @@ export function ProductionPlan({ plan, date, children }) {
         <thead><tr><th>Order</th><th>Ready by</th><th>Box</th><th>Pack</th></tr></thead>
         <tbody>{plan.packing.map(o => (
           <tr key={`${o.kind}${o.id}`} className={o.safetyHold || o.safetyCheck || o.lines.some(l => l.special.length) ? 'warn' : ''}>
-            <td>{o.ref}<br /><small>{[o.name, o.window, o.shared].filter(Boolean).join(' · ')}</small>{o.safetyHold ? <><br /><b>SAFETY HOLD: do not prepare</b></> : o.safetyCheck ? <><br /><b>ALLERGY CHECK OPEN: do not prepare</b></> : null}</td>
+            <td>{o.ref}<br /><small>{[o.name, o.window, o.shared].filter(Boolean).join(', ')}</small>{o.safetyHold ? <><br /><b>SAFETY HOLD: do not prepare</b></> : o.safetyCheck ? <><br /><b>ALLERGY CHECK OPEN: do not prepare</b></> : null}</td>
             <td>{o.readyBy}</td>
-            <td>{o.lines.map((l, i) => <div key={i}>{l.qty}× {l.box} · {l.size}{l.special.length ? <b> · {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? <><br /><small>+ {l.addons.join(', ')}</small></> : null}</div>)}{o.otherAllergies && !o.lines.some(l => l.special.some(w => w.startsWith('Also avoid'))) ? <b>Also avoid: {o.otherAllergies}</b> : null}</td>
+            <td>{o.lines.map((l, i) => <div key={i}>{l.qty}× {l.box}, {l.size}{l.special.length ? <b>, {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? <><br /><small>+ {l.addons.join(', ')}</small></> : null}</div>)}{o.otherAllergies && !o.lines.some(l => l.special.some(w => w.startsWith('Also avoid'))) ? <b>Also avoid: {o.otherAllergies}</b> : null}</td>
             <td><small>{[...new Set(o.lines.flatMap(l => l.packing))].join(' ')}</small></td>
           </tr>
         ))}</tbody>
@@ -233,7 +233,7 @@ export function ProductionPlan({ plan, date, children }) {
 export function Labels({ data }) {
   return (
     <section className="stack gap-16">
-      <div className="row no-print"><span className="strong">{data.labels.length} labels · {data.date}</span><button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} onClick={() => window.print()}>Print</button></div>
+      <div className="row no-print"><span className="strong">{data.labels.length} labels, {data.date}</span><button type="button" className="btn-secondary" style={{ width: 'auto', padding: '0 18px' }} onClick={() => window.print()}>Print</button></div>
       <LabelGrid labels={data.labels} />
     </section>
   );
@@ -246,13 +246,13 @@ export function LabelGrid({ labels }) {
           <span className="eyebrow" style={{ fontSize: 11 }}>Morning Box</span>
           <b style={{ fontSize: 18 }}>{l.name || l.ref}</b>
           {l.place && <span>{l.place}</span>}
-          <span>{l.window}{l.handover ? ` · ${l.handover}` : ''}</span>
-          <span><b>{l.size}</b> · {l.box}</span>
+          <span>{l.window}{l.handover ? `, ${l.handover}` : ''}</span>
+          <span><b>{l.size}</b>, {l.box}</span>
           {l.addons?.length > 0 && <span>+ {l.addons.join(', ')}</span>}
           {l.warnings?.length > 0 && <b>⚠ {l.warnings.join(', ').toUpperCase()}</b>}
           {l.safetyHold && <b>SAFETY HOLD</b>}
           {!l.safetyHold && l.safetyCheck && <b>ALLERGY CHECK PENDING</b>}
-          <small>{l.ref} · ready by {l.readyBy}</small>
+          <small>{l.ref}, ready by {l.readyBy}</small>
         </div>
       ))}
     </div>

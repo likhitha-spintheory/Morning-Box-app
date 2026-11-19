@@ -180,7 +180,7 @@ businessRouter.post('/orders', geoCheck, (req, res, next) => {
   capacity();
   startCheckout(req, {
     kind: 'business_order', payload: { body: { ...req.body, idempotencyKey: undefined }, key }, amount: total, idempotencyKey: key,
-    email: acct.email, description: `Morning Box Group & Business Breakfast${acct.company ? ` · ${acct.company}` : ''} · ${built.length} day${built.length > 1 ? 's' : ''}`
+    email: acct.email, description: `Morning Box Group & Business Breakfast${acct.company ? `, ${acct.company}` : ''}, ${built.length} day${built.length > 1 ? 's' : ''}`
   }).then(r => (r.checkout
     ? res.status(202).json({ checkout: r.checkout })
     : res.status(201).json(serialize(db.prepare('SELECT * FROM business_orders WHERE id = ?').get(r.done))))).catch(next);
@@ -205,7 +205,7 @@ function editBusinessDay(userId, orderId, date, body, payment = null) {
     specials: body.specials ?? parse(d.specials)
   });
   const diff = Math.round((b.total - d.total) * 100) / 100;
-  if (diff > 0 && !payment) return { due: diff, label: `Morning Box Business Breakfast · change to ${rules.prettyDate(d.date)}` };
+  if (diff > 0 && !payment) return { due: diff, label: `Morning Box Business Breakfast, change to ${rules.prettyDate(d.date)}` };
   if (diff > 0 && Math.abs(payment.amount - diff) > 0.001) throw new ApiError(409, 'price_changed', 'The price of this change moved while you were paying. Your payment is being refunded. Please try again.');
   tx(() => {
     if (window !== d.window || b.people > d.people) assertCapacity(d.date, window, b.people, { excludeBusinessDay: d.id });
@@ -318,7 +318,7 @@ businessRouter.get('/orders/:id/invoice', (req, res) => {
   const money = n => (Math.round(n * 100) / 100).toFixed(2);
   const vatOf = gross => gross - gross / (1 + VAT_RATE);
   const rows = o.days.map(d => `<tr><td>${esc(d.date)}${d.cancelled ? ` (cancelled, refunded AED ${esc(d.refund)})` : ''}${parties.multiple && !d.cancelled ? `<br><small>Seller: ${esc(parties.sellerOf(d.date))}</small>` : ''}</td><td>${esc(d.people)}</td>
-    <td>${d.lines.map(l => `${esc(name(l.recipeId))} · ${esc(l.size)} × ${esc(l.qty)}`).join('<br>')}${d.specials.length ? `<br>Special Breakfasts × ${d.specials.reduce((t, s) => t + s.qty, 0)}` : ''}</td>
+    <td>${d.lines.map(l => `${esc(name(l.recipeId))}, ${esc(l.size)} × ${esc(l.qty)}`).join('<br>')}${d.specials.length ? `<br>Special Breakfasts × ${d.specials.reduce((t, s) => t + s.qty, 0)}` : ''}</td>
     <td style="text-align:right">${d.cancelled ? 0 : esc(d.gross)}</td><td style="text-align:right">${d.cancelled ? 0 : esc(d.discount)}</td><td style="text-align:right">${d.cancelled ? 0 : esc(d.total)}</td></tr>`).join('');
   /* B2B §8: what was paid, then each edit charge, refund and credit, so the invoice matches the money moved. */
   const dayIds = db.prepare('SELECT id, date FROM business_days WHERE order_id = ?').all(o.id);
@@ -334,7 +334,7 @@ businessRouter.get('/orders/:id/invoice', (req, res) => {
   res.type('html').send(`<!doctype html><meta charset="utf-8"><title>Invoice ${esc(o.id)}</title>
 <style>body{font-family:Inter,Arial,sans-serif;color:#3B2D22;max-width:820px;margin:40px auto;padding:0 20px}h1{font-family:Georgia,serif;font-weight:400}table{width:100%;border-collapse:collapse;font-size:14px}td,th{border-bottom:1px solid #EADCC1;padding:8px;text-align:left;vertical-align:top}</style>
 <h1>Morning Box ${isTax ? 'Tax Invoice' : inv.wanted ? 'Invoice' : 'Receipt'}</h1>
-<p>${inv.wanted ? 'Invoice' : 'Receipt'} ${esc(o.id)} · ${esc(o.createdAt)} UTC</p>
+<p>${inv.wanted ? 'Invoice' : 'Receipt'} ${esc(o.id)}, ${esc(o.createdAt)} UTC</p>
 ${parties.html}
 <p><b>Billed to:</b> ${esc(inv.billingName || o.company)}<br>Company: ${esc(o.company)}<br>Email: ${esc(o.email)}${inv.address ? `<br>${esc(inv.address)}` : ''}${inv.trn ? `<br>TRN ${esc(inv.trn)}` : ''}${inv.po ? `<br>PO number: ${esc(inv.po)}` : ''}</p>
 <table><tr><th>Date</th><th>People</th><th>Breakfasts</th><th>Gross AED</th><th>Discount AED</th><th>Total AED</th></tr>${rows}</table>

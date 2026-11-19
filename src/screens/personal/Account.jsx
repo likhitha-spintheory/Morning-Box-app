@@ -57,8 +57,8 @@ function allDays(orders) {
 function groupDays(orders = []) {
   return orders.flatMap(o => o.days.map(d => ({ ...d, kind: 'group', orderId: o.id, orderType: o.orderType, company: o.company })));
 }
-const groupTitle = d => (d.orderType === 'family' ? 'Family & friends breakfast' : d.orderType === 'business' || d.company ? `Business breakfast${d.company ? ` · ${d.company}` : ''}` : 'Group breakfast');
-const groupStatus = d => (d.cancelled ? ['off', 'Cancelled · refunded'] : d.problem ? ['off', d.problem === 'Failed' ? 'Delivery missed' : 'Not prepared · refunded']
+const groupTitle = d => (d.orderType === 'family' ? 'Family & friends breakfast' : d.orderType === 'business' || d.company ? `Business breakfast${d.company ? `, ${d.company}` : ''}` : 'Group breakfast');
+const groupStatus = d => (d.cancelled ? ['off', 'Cancelled, refunded'] : d.problem ? ['off', d.problem === 'Failed' ? 'Delivery missed' : 'Not prepared, refunded']
   : d.stage >= 3 ? ['done', 'Delivered'] : d.stage === 2 ? ['prep', 'On its way'] : d.stage === 1 ? ['prep', 'Being prepared'] : ['ok', 'Confirmed']);
 /** One card for every morning, personal or group: date, title on its own line, details, then status. */
 function MorningCard({ d, showCutoff = true, children }) {
@@ -73,8 +73,8 @@ function MorningCard({ d, showCutoff = true, children }) {
           {group && <span className="mcard-kind">Group order</span>}
           <span className="mcard-title">{group ? groupTitle(d) : boxName(d.cfg)}</span>
           <span className="mcard-meta">{group
-            ? `${d.people} people · ${windowLabel(d.window)}${d.delivery?.building ? ` · ${shortPlace(d.delivery.building)}` : ''}`
-            : `${canChooseSize(d.cfg) ? sizeLabel(d.cfg.size) : 'Standard'} · ${windowLabel(d.window)}${d.address?.building ? ` · ${shortPlace(d.address.building)}` : ''}`}</span>
+            ? `${d.people} people, ${windowLabel(d.window)}${d.delivery?.building ? `, ${shortPlace(d.delivery.building)}` : ''}`
+            : `${canChooseSize(d.cfg) ? sizeLabel(d.cfg.size) : 'Standard'}, ${windowLabel(d.window)}${d.address?.building ? `, ${shortPlace(d.address.building)}` : ''}`}</span>
           <span className="mcard-foot">
             {group ? <span className={`status ${tone}`}>{text}</span> : <StatusPill day={d} />}
             {editable && <span className="xs row" style={{ gap: 4 }}><Icon name="clock" size={13} stroke={1.8} />Changes close in {timeLeft(d.date)}</span>}
@@ -89,10 +89,10 @@ function MorningCard({ d, showCutoff = true, children }) {
 
 function StatusPill({ day }) {
   const st = trackingStage(day);
-  if (st === -1) return <span className="status off">Cancelled · refunded</span>;
-  if (day.problem === 'Not Fulfilled') return <span className="status off">Not prepared · refunded</span>;
+  if (st === -1) return <span className="status off">Cancelled, refunded</span>;
+  if (day.problem === 'Not Fulfilled') return <span className="status off">Not prepared, refunded</span>;
   if (day.problem === 'Failed') return <span className="status off">Delivery missed</span>;
-  if (st === 3) return <span className="status done">Delivered{day.feedback ? ` · ${day.feedback}` : ''}</span>;
+  if (st === 3) return <span className="status done">Delivered{day.feedback ? `, ${day.feedback}` : ''}</span>;
   if (day.safetyReview) return <span className="status off">Needs review</span>;
   if (day.safetyCheck) return <span className="status warn">Allergy check by our team</span>;
   if (st === 0) return <span className="status ok">Confirmed</span>;
@@ -114,7 +114,7 @@ function CutoffPanel({ iso, title }) {
       <Ring fraction={Math.min(1, hours / 24)} label={`${Math.floor(hours)}h`} size={42} />
       <span className="stack" style={{ lineHeight: 1.35 }}>
         <span className="strong" style={{ fontSize: 16 }}>{title}</span>
-        <span className="help" style={{ fontSize: 15 }}>Edits and free cancellation until {cutoffLabel(iso)} · {left} left</span>
+        <span className="help" style={{ fontSize: 15 }}>Edits and free cancellation until {cutoffLabel(iso)}, {left} left</span>
       </span>
     </div>
   );
@@ -213,7 +213,7 @@ export function Today() {
         )}
         {inProgress && (
           <Link to="/plan/summary" className="panel row" style={{ flexDirection: 'row', textDecoration: 'none', alignItems: 'center' }}>
-            <Icon name="cal" size={22} stroke={1.6} /><span style={{ flex: 1 }}><b>Plan in progress</b> · {state.plan.dates.length} morning{state.plan.dates.length > 1 ? 's' : ''}</span>
+            <Icon name="cal" size={22} stroke={1.6} /><span style={{ flex: 1 }}><b>Plan in progress</b>: {state.plan.dates.length} morning{state.plan.dates.length > 1 ? 's' : ''}</span>
             <Icon name="chevron" size={18} stroke={1.8} />
           </Link>
         )}
@@ -232,14 +232,14 @@ export function Today() {
         <ErrorBanner>{loadError}</ErrorBanner>
         {suggestion && !suggestion.none && !inProgress && (
           <section className="card stack gap-12" style={{ padding: 18 }} aria-label="Your Morning Box">
-            <span className="eyebrow row" style={{ justifyContent: 'flex-start', gap: 8 }}><Icon name="sparkle" size={16} stroke={1.6} color="var(--espresso)" />Your Morning Box · {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</span>
+            <span className="eyebrow row" style={{ justifyContent: 'flex-start', gap: 8 }}><Icon name="sparkle" size={16} stroke={1.6} color="var(--espresso)" />Your Morning Box, {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</span>
             {askType ? <>
               <span className="strong" style={{ fontSize: 18 }}>Choose your breakfast for {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</span>
               <span className="help" style={{ fontSize: 15 }}>Usually a {contextLabel(usualContext)}. Pick what you’d prefer that morning and we’ll recommend your box.</span>
               <button type="button" className="btn" onClick={() => startWith('primary')}>Plan {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</button>
             </> : <>
               <span className="strong" style={{ fontSize: 18 }}>{boxName(suggestion.primary)}</span>
-              <span className="help" style={{ fontSize: 15 }}>{contextLabel(usualContext)} · AED {dayPrice(suggestion.primary, state.profile).total}</span>
+              <span className="help" style={{ fontSize: 15 }}>{contextLabel(usualContext)}, AED {dayPrice(suggestion.primary, state.profile).total}</span>
               <button type="button" className="btn" onClick={() => startWith('primary')}>Order for {nextOpen.iso === tomorrowIso() ? 'tomorrow' : dayComma(nextOpen.iso)}</button>
             </>}
             <div className="row">
@@ -369,7 +369,7 @@ function DeliveryMap({ address, stage, label, embedKey }) {
     <div className="route map">
       <iframe title={`Map of the delivery location: ${address?.building || ''}`} loading="lazy" referrerPolicy="no-referrer-when-downgrade" allowFullScreen
         src={`https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(embedKey)}&q=${encodeURIComponent(q)}&zoom=16`} />
-      <span className="badge-float" style={{ top: 16, left: 16 }}><Icon name="map" size={18} stroke={1.6} />{label} · {status}</span>
+      <span className="badge-float" style={{ top: 16, left: 16 }}><Icon name="map" size={18} stroke={1.6} />{label}, {status}</span>
     </div>
   );
 }
@@ -426,14 +426,14 @@ export function OrderDay() {
   const steps = [
     { t: 'Order confirmed', d: dayComma(serverDateIso(order.createdAt)), time: clock(order.createdAt), icon: 'check' },
     { t: 'Being prepared', d: day.bakery ? `Prepared by ${day.bakery}` : '', icon: 'check' },
-    { t: 'Out for delivery', d: day.lateNote ? `Running late · now around ${day.lateNote}` : '', icon: 'truck' },
+    { t: 'Out for delivery', d: day.lateNote ? `Running late, now around ${day.lateNote}` : '', icon: 'truck' },
     { t: 'Delivered', d: st === 3 ? `Delivered to ${day.deliveryPoint || 'Reception'}` : '', time: st === 3 ? clock(day.deliveredAt) : null, icon: 'home' }
   ];
   const shortBuilding = shortPlace(day.address.building);
 
   return (
     <Screen>
-      <TopBar back="/orders" close={null}><span className="topbar-title">{dayComma(date)} · {id}</span></TopBar>
+      <TopBar back="/orders" close={null}><span className="topbar-title">{dayComma(date)} – {id}</span></TopBar>
       <main className="screen-main" style={{ paddingTop: 4, gap: 18 }}>
         <div className="row">
           {st === 1 || st === 2 ? <span className="live"><i />Updated {updated.toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase()}</span> : <StatusPill day={day} />}
@@ -441,7 +441,7 @@ export function OrderDay() {
         </div>
         <div className="stack gap-4">
           <h1 className="h-display" style={{ fontSize: 38 }}>{heading}</h1>
-          {st !== 0 && st !== 1 && st !== 2 && <span className="help" style={{ fontSize: 17 }}>{st === 3 ? `${day.address.handover === 'door' ? 'At your door' : 'At reception'} · ${day.address.building}` : `Refund of AED ${refund} to your original payment method`}</span>}
+          {st !== 0 && st !== 1 && st !== 2 && <span className="help" style={{ fontSize: 17 }}>{st === 3 ? `${day.address.handover === 'door' ? 'At your door' : 'At reception'}, ${day.address.building}` : `Refund of AED ${refund} to your original payment method`}</span>}
         </div>
 
         {day.problem && (
@@ -484,8 +484,8 @@ export function OrderDay() {
         )}
 
         <section className="card stack gap-10" style={{ padding: 20 }}>
-          <div className="row"><span className="strong" style={{ fontSize: 17 }}>{boxName(day.cfg)} · {canChooseSize(day.cfg) ? sizeLabel(day.cfg.size) : 'Standard'}</span><Money value={price.total} /></div>
-          <span className="help" style={{ fontSize: 15 }}>{day.cfg.components.map(componentName).join(' · ')}{day.cfg.addons.length ? ` · + ${extrasText(day.cfg.addons)}` : ''}</span>
+          <div className="row"><span className="strong" style={{ fontSize: 17 }}>{boxName(day.cfg)}, {canChooseSize(day.cfg) ? sizeLabel(day.cfg.size) : 'Standard'}</span><Money value={price.total} /></div>
+          <span className="help" style={{ fontSize: 15 }}>{day.cfg.components.map(componentName).join(', ')}{day.cfg.addons.length ? ` + ${extrasText(day.cfg.addons)}` : ''}</span>
           {containsAllergens(day.cfg).length > 0 && <span className="xs">Contains: {containsAllergens(day.cfg).join(', ')} <InfoTip label="About allergens">Prepared in a kitchen that handles other allergens, so traces can’t be ruled out. <Link to="/legal/allergens" className="link" style={{ color: 'inherit' }}>Allergen information</Link></InfoTip></span>}
         </section>
 
@@ -521,7 +521,7 @@ export function OrderDay() {
           <details className="card activity" style={{ padding: '4px 20px' }}>
             <summary className="row" style={{ minHeight: 52, cursor: 'pointer' }}><span className="strong">Order activity</span><Icon name="chevron" size={18} stroke={1.8} /></summary>
             <ol className="stack gap-10" style={{ listStyle: 'none', margin: 0, padding: '0 0 16px' }}>
-              {day.events.map((e, i) => <li key={i} className="stack" style={{ gap: 2 }}><span style={{ fontSize: 15 }}>{e.message}</span><span className="xs">{dayComma(serverDateIso(e.createdAt))} · {clock(e.createdAt)}</span></li>)}
+              {day.events.map((e, i) => <li key={i} className="stack" style={{ gap: 2 }}><span style={{ fontSize: 15 }}>{e.message}</span><span className="xs">{dayComma(serverDateIso(e.createdAt))}, {clock(e.createdAt)}</span></li>)}
             </ol>
           </details>
         )}
@@ -826,7 +826,7 @@ export function Feedback() {
       <main className="screen-main" style={{ paddingTop: 4, gap: 20 }}>
         <div className="card row" style={{ justifyContent: 'flex-start', gap: 16, padding: '18px 20px' }}>
           <span style={{ width: 46, height: 46, borderRadius: 999, background: 'var(--espresso)', color: 'var(--ivory)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Icon name="check" size={22} stroke={2} /></span>
-          <span className="strong" style={{ fontSize: 17 }}>Delivered to {day.deliveryPoint || (day.address.handover === 'door' ? 'your door' : 'Reception')}{time ? ` · ${time}` : ''}</span>
+          <span className="strong" style={{ fontSize: 17 }}>Delivered to {day.deliveryPoint || (day.address.handover === 'door' ? 'your door' : 'Reception')}{time ? `, ${time}` : ''}</span>
         </div>
 
         <div style={{ borderRadius: 24, background: 'linear-gradient(160deg, #F6EBD8, #EBDcC3)', padding: '26px 16px', display: 'grid', gridTemplateColumns: `repeat(${Math.min(day.cfg.components.length, 5)}, minmax(0, 1fr))`, gap: 8 }} aria-hidden="true">
@@ -998,7 +998,7 @@ export function Me() {
         {healthData && !p.healthConsent && (
           <section className="card stack gap-10" style={{ padding: 18, borderColor: 'var(--warn)' }} aria-labelledby="hc-me">
             <strong id="hc-me" style={{ fontSize: 17 }}>{CONSENT.healthTitle}</strong>
-            <p className="help" style={{ margin: 0, fontSize: 15 }}>{CONSENT.health} <Link to="/legal/privacy" className="link">Privacy Policy</Link></p>
+            <p className="help" style={{ margin: 0, fontSize: 15 }}>{CONSENT.healthShort} <Link to="/legal/privacy" className="link">Privacy Policy</Link></p>
             <div className="grid-2"><button type="button" className="btn-secondary" disabled={busy} onClick={() => saveHealth(false)}>Remove them</button>
               <button type="button" className="btn" disabled={busy} onClick={() => saveHealth(true)}>{CONSENT.healthAgree}</button></div>
           </section>
@@ -1038,7 +1038,7 @@ export function Me() {
             <div className="card row" style={{ gap: 16, padding: '18px 20px' }}>
               <Icon name="pin" size={24} stroke={1.6} />
               <span className="stack" style={{ flex: 1 }}><span className="strong" style={{ fontSize: 17 }}>{a.building}</span>
-                <span className="help" style={{ fontSize: 15 }}>{a.unit}{state.delivery.window ? ` · ${windowLabel(state.delivery.window)}` : ''}</span></span>
+                <span className="help" style={{ fontSize: 15 }}>{a.unit}{state.delivery.window ? `, ${windowLabel(state.delivery.window)}` : ''}</span></span>
             </div>
           </section>
         )}

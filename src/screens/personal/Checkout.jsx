@@ -57,7 +57,7 @@ const SHOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_DEMO === '1';
 const ErrorBanner = ({ children }) => children
   ? <div className="banner-err" role="alert"><Icon name="alert" size={18} stroke={2} />{children}</div> : null;
 const prettyMobile = d => `+971 ${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5)}`;
-const extrasShort = addons => addons.map(a => `+${a.qty} ${componentName(a.item)}${a.unit ? ` (${a.unit} loaf)` : a.qty > 1 ? 's' : ''}${a.flavour ? ` (${a.flavour})` : ''}`).join(' · ');
+const extrasShort = addons => addons.map(a => `+${a.qty} ${componentName(a.item)}${a.unit ? ` (${a.unit} loaf)` : a.qty > 1 ? 's' : ''}${a.flavour ? ` (${a.flavour})` : ''}`).join(', ');
 
 /* ---------- Create account / sign in (style-1 P14 + P15) ---------- */
 export function SignIn() {
@@ -166,7 +166,7 @@ export function SignIn() {
           <div className="stack gap-8">
             <span className="eyebrow">Verify</span>
             <h1 className="h-display" style={{ fontSize: 34 }}>Enter the code</h1>
-            <p className="help" style={{ fontSize: 17 }}>Sent {byEmail ? 'to' : 'on WhatsApp to'} {byEmail ? email.trim() : prettyMobile(digits)} · <button type="button" className="link" style={{ padding: 0, fontWeight: 400, color: 'var(--text-3)' }} onClick={() => setSent(false)}>Change</button></p>
+            <p className="help" style={{ fontSize: 17 }}>Sent {byEmail ? 'to' : 'on WhatsApp to'} {byEmail ? email.trim() : prettyMobile(digits)}, <button type="button" className="link" style={{ padding: 0, fontWeight: 400, color: 'var(--text-3)' }} onClick={() => setSent(false)}>Change</button></p>
           </div>
           <div className="otp" role="group" aria-label="6-digit code">
             {code.map((c, i) => (
@@ -234,7 +234,7 @@ export function SignIn() {
         )}
         {planned.length > 0 && (
           <div className="panel row" style={{ flexDirection: 'row', padding: '16px 20px', borderRadius: 999 }}>
-            <span style={{ fontSize: 16 }}><b>Your plan:</b> {planned.length} morning{planned.length > 1 ? 's' : ''} · AED {total}</span>
+            <span style={{ fontSize: 16 }}><b>Your plan:</b> {planned.length} morning{planned.length > 1 ? 's' : ''}, AED {total}</span>
             <Icon name="check" size={20} stroke={1.8} />
           </div>
         )}
@@ -352,7 +352,7 @@ export function Delivery() {
           <div className="card row" style={{ padding: '20px 24px', gap: 16 }}>
             <Icon name="pin" size={24} stroke={1.6} />
             <span className="stack" style={{ flex: 1 }}><span className="strong" style={{ fontSize: 18 }}>{a.building}</span>
-              <span className="help" style={{ fontSize: 16 }}>{a.unit} · {a.handover === 'door' ? 'At my door' : 'At reception'}</span></span>
+              <span className="help" style={{ fontSize: 16 }}>{a.unit}, {a.handover === 'door' ? 'At my door' : 'At reception'}</span></span>
             <button type="button" className="link" onClick={() => setEditing(true)}>Change</button>
           </div>
         ) : (
@@ -527,7 +527,7 @@ export function ReviewPay() {
           {dates.map((iso, k) => {
             const c = plan.days[iso].cfg;
             const d = dateInfo(iso);
-            const meta = [c.addons.length ? extrasShort(c.addons) : null, windowLabel(win(iso)).replace(' AM', '').replace(' – ', '–'), dl.sameForAll || dates.length === 1 ? null : shortPlace(addrOf(iso).building)].filter(Boolean).join(' · ');
+            const meta = [c.addons.length ? extrasShort(c.addons) : null, windowLabel(win(iso)).replace(' AM', '').replace(' – ', '–'), dl.sameForAll || dates.length === 1 ? null : shortPlace(addrOf(iso).building)].filter(Boolean).join(', ');
             return (
               <div key={iso} className="row" style={{ alignItems: 'flex-start', gap: 16, padding: '16px 0', borderTop: k ? '1px solid var(--line-soft)' : 0 }}>
                 <span className="stack" style={{ alignItems: 'center', width: 46, flex: 'none' }}>
@@ -536,7 +536,7 @@ export function ReviewPay() {
                   <span className="xs">{d.mon}</span>
                 </span>
                 <span className="stack" style={{ flex: 1, gap: 2 }}>
-                  <Link to={`/plan/day/${iso}/box`} className="strong" style={{ fontSize: 17, textDecoration: 'none' }}>{boxName(c)} · {canChooseSize(c) ? sizeLabel(c.size) : 'Standard'}</Link>
+                  <Link to={`/plan/day/${iso}/box`} className="strong" style={{ fontSize: 17, textDecoration: 'none' }}>{boxName(c)}, {canChooseSize(c) ? sizeLabel(c.size) : 'Standard'}</Link>
                   <span className="help" style={{ fontSize: 15 }}>{meta}</span>
                 </span>
                 <span className="money" style={{ fontSize: 17 }}>AED {prices[k].total}</span>
@@ -556,7 +556,7 @@ export function ReviewPay() {
           <Link to="/checkout/delivery" className="card row" style={{ textDecoration: 'none', gap: 16, padding: '16px 20px' }}>
             <Icon name="pin" size={22} stroke={1.6} />
             <span className="stack" style={{ flex: 1, gap: 2 }}><span className="strong" style={{ fontSize: 16 }}>{dl.address.building}{dl.address.unit ? `, ${dl.address.unit}` : ''}</span>
-              <span className="help" style={{ fontSize: 15 }}>{dl.address.handover === 'door' ? 'To your door' : 'At Reception'} · {dates.length > 1 ? 'all mornings' : areaFor(dl.address.area)}</span></span>
+              <span className="help" style={{ fontSize: 15 }}>{dl.address.handover === 'door' ? 'To your door' : 'At Reception'}, {dates.length > 1 ? 'all mornings' : areaFor(dl.address.area)}</span></span>
             <span className="link">Edit</span>
           </Link>
         )}
@@ -617,14 +617,14 @@ export function Confirmed() {
         <div className="stack center" style={{ alignItems: 'center', gap: 10, marginTop: -6 }}>
           <span className="eyebrow" style={{ letterSpacing: '.24em' }}>Order {order.id}</span>
           <h1 className="h-display" style={{ fontSize: 34 }}>Your mornings are set, {state.user?.firstName}.</h1>
-          <p className="help" style={{ fontSize: 17 }}>{order.days.length} breakfast{order.days.length > 1 ? 's' : ''} · {list}</p>
+          <p className="help" style={{ fontSize: 17 }}>{order.days.length} breakfast{order.days.length > 1 ? 's' : ''}, {list}</p>
         </div>
         <section className="card stack gap-16" style={{ padding: 20, gap: 16 }}>
           <div className="row" style={{ alignItems: 'flex-start' }}>
             <span className="stack" style={{ gap: 2 }}>
               <span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>First delivery</span>
-              <span className="strong" style={{ fontSize: 18 }}>{ds[0].wd}, {ds[0].day} {ds[0].mon} · {windowLabel(first.window).replace(' – ', '–')}</span>
-              <span className="help" style={{ fontSize: 16 }}>{shortPlace(first.address.building)} · {first.address.handover === 'door' ? 'Door' : 'Reception'}</span>
+              <span className="strong" style={{ fontSize: 18 }}>{ds[0].wd}, {ds[0].day} {ds[0].mon}, {windowLabel(first.window).replace(' – ', '–')}</span>
+              <span className="help" style={{ fontSize: 16 }}>{shortPlace(first.address.building)}, {first.address.handover === 'door' ? 'Door' : 'Reception'}</span>
               {first.bakery && <span className="help" style={{ fontSize: 16 }}>Prepared by {first.bakery}</span>}
             </span>
             <span className="status ok">Confirmed</span>

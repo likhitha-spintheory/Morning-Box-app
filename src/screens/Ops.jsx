@@ -171,7 +171,7 @@ function Support({ items, busy, act }) {
     <section className="stack gap-12">
       {items.map(s => (
         <article key={s.id} className="card stack gap-8" style={{ padding: 18 }}>
-          <div className="row"><span className="strong">{s.customer} · {s.mobile} · {s.topic}{s.orderRef ? ` · ${s.orderRef}` : ''}</span><span className={`status ${s.status === 'open' ? 'prep' : 'ok'}`}>{s.status}</span></div>
+          <div className="row"><span className="strong">{s.customer}, {s.mobile}, {s.topic}{s.orderRef ? `, ${s.orderRef}` : ''}</span><span className={`status ${s.status === 'open' ? 'prep' : 'ok'}`}>{s.status}</span></div>
           <span className="help">{s.message}</span>
           <span className="xs">{s.createdAt} UTC</span>
           {s.reply && <div className="note"><span><b>Replied:</b> {s.reply}</span></div>}
@@ -223,7 +223,7 @@ function Exceptions({ items, busy, act, call }) {
   return (
     <section className="stack gap-12">
       <div className="row" style={{ flexWrap: 'wrap' }}>
-        <span className="strong">{open.length} open · {open.filter(x => x.category === 'Safety').length} safety</span>
+        <span className="strong">{open.length} open, {open.filter(x => x.category === 'Safety').length} safety</span>
         <div className="ops-tabs">{[['open', 'Open'], ['all', 'All']].map(([id, label]) => <button key={id} className={show === id ? 'on' : ''} onClick={() => setShow(id)}>{label}</button>)}</div>
       </div>
       <details className="card" style={{ padding: 16 }}>
@@ -258,12 +258,12 @@ function ExceptionCard({ x, busy, act, call }) {
   return (
     <article className={`card stack gap-8${!x.resolved && x.priority <= 1 ? ' warn' : ''}`} style={{ padding: 16, opacity: x.resolved ? 0.65 : 1 }}>
       <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <span className="row" style={{ gap: 8 }}><span className={`status ${CATEGORY_CLASS[x.category] || 'done'}`}>P{x.priority} · {x.category || '—'}</span><span className="strong">{x.kind}</span></span>
-        <span className="xs">{x.ref} · {x.created_at}</span>
+        <span className="row" style={{ gap: 8 }}><span className={`status ${CATEGORY_CLASS[x.category] || 'done'}`}>P{x.priority}, {x.category || '—'}</span><span className="strong">{x.kind}</span></span>
+        <span className="xs">{x.ref}, {x.created_at}</span>
       </div>
       <span className="help">{x.note}</span>
       {!!x.has_photo && <ExceptionPhoto id={x.id} call={call} />}
-      {x.resolved ? <span className="xs">Resolved {x.resolved_at} by {x.owner || '—'}: {x.resolution}{x.cause ? ` · Cause: ${x.cause}` : ''}</span> : (
+      {x.resolved ? <span className="xs">Resolved {x.resolved_at} by {x.owner || '—'}: {x.resolution}{x.cause ? `, Cause: ${x.cause}` : ''}</span> : (
         <>
           <div className="grid-2">
             <input className="input" placeholder="Owner" aria-label="Owner" value={v.owner} onChange={set('owner')} />
@@ -300,7 +300,7 @@ function Closed({ items, busy, act }) {
       </div>
       {items.map(c => (
         <div key={c.date} className="card row" style={{ padding: 16 }}>
-          <span><b>{c.date}</b> · {c.reason}{c.booked > 0 && <span className="err-msg" style={{ display: 'block' }}>{c.booked} order{c.booked > 1 ? 's' : ''} still booked for this day. Handle them in Live.</span>}</span>
+          <span><b>{c.date}</b>, {c.reason}{c.booked > 0 && <span className="err-msg" style={{ display: 'block' }}>{c.booked} order{c.booked > 1 ? 's' : ''} still booked for this day. Handle them in Live.</span>}</span>
           <button type="button" className="btn-text" disabled={busy} onClick={() => act('DELETE', `/closed-dates/${c.date}`)}>Reopen</button>
         </div>
       ))}
@@ -343,7 +343,7 @@ function Report({ data }) {
         <Tile label="Exceptions (safety)" value={`${t.exceptions} (${t.safety})`} />
         <Tile label="Loved it / Not for me" value={`${t.loved} / ${t.notForMe}`} />
       </div>
-      <p className="help" style={{ margin: 0 }}>Personal AED {t.personalRevenue} · Business AED {t.businessRevenue} ({t.businessBoxes} boxes, {t.businessOrders} orders) · VAT included AED {vat(t.revenue).toFixed(2)} · Cancelled {t.cancelled} · Refunds AED {t.refunds} ({t.refundedOrders ?? 0} orders) · Credits AED {t.credits} · {t.customers} customers</p>
+      <p className="help" style={{ margin: 0 }}>Personal AED {t.personalRevenue}, Business AED {t.businessRevenue} ({t.businessBoxes} boxes, {t.businessOrders} orders), VAT included AED {vat(t.revenue).toFixed(2)}, Cancelled {t.cancelled}, Refunds AED {t.refunds} ({t.refundedOrders ?? 0} orders), Credits AED {t.credits}, {t.customers} customers</p>
       <h2 className="h3">Daily snapshot</h2>
       <table className="ops-table">
         <thead><tr><th>Date</th><th>Boxes</th><th>Revenue</th><th>Delivered</th><th>On time</th><th>Late</th><th>Failed</th><th>Refunds</th><th>Exceptions</th><th>Feedback</th></tr></thead>
@@ -387,13 +387,13 @@ function Report({ data }) {
         <Tile label="Active / repeat customers" value={`${k.activeCustomers} / ${k.repeatCustomers}`} />
         <Tile label="Ordered in 2+ weeks" value={k.repeatWeekCustomers} />
         <Tile label="Mornings per active customer" value={k.morningsPerActiveCustomer ?? '—'} />
-        <Tile label="Average order value · personal / business" value={`${k.averageOrderValue != null ? `AED ${k.averageOrderValue}` : '—'} / ${k.averageOrderValueBusiness != null ? `AED ${k.averageOrderValueBusiness}` : '—'}`} />
+        <Tile label="Average order value, personal / business" value={`${k.averageOrderValue != null ? `AED ${k.averageOrderValue}` : '—'} / ${k.averageOrderValueBusiness != null ? `AED ${k.averageOrderValueBusiness}` : '—'}`} />
         <Tile label="Repeat breakfast (same box twice+)" value={k.repeatBreakfast != null ? `${k.repeatBreakfast}%` : '—'} />
         <Tile label="Exception rate (per delivery)" value={k.exceptionRate != null ? `${k.exceptionRate}%` : '—'} />
-        <Tile label="Business: inquiries · people/order · repeat" value={`${k.businessInquiries} · ${k.peoplePerBusinessOrder ?? '—'} · ${k.repeatBusinessCustomers}`} />
+        <Tile label="Business: inquiries, people/order, repeat" value={`${k.businessInquiries}, ${k.peoplePerBusinessOrder ?? '—'}, ${k.repeatBusinessCustomers}`} />
         <Tile label="Proof of delivery complete" value={k.podCompletion != null ? `${k.podCompletion}%` : '—'} />
       </div>
-      <p className="help" style={{ margin: 0 }}>On time by window: {k.onTimeByWindow.map(w => `${w.window.toUpperCase()} ${w.onTime != null ? `${w.onTime}%` : '—'} (${w.delivered})`).join(' · ')}</p>
+      <p className="help" style={{ margin: 0 }}>On time by window: {k.onTimeByWindow.map(w => `${w.window.toUpperCase()} ${w.onTime != null ? `${w.onTime}%` : '—'} (${w.delivered})`).join(', ')}</p>
       <table className="ops-table">
         <thead><tr><th>Funnel</th>{k.funnel.map(f => <th key={f.step}>{f.step.replace(/_/g, ' ')}</th>)}</tr></thead>
         <tbody><tr><td>Count</td>{k.funnel.map(f => <td key={f.step}>{f.count}</td>)}</tr></tbody>

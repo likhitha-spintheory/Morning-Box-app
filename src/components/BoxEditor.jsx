@@ -16,7 +16,8 @@ function useSheet(onClose) {
     sheet.current?.querySelector('button')?.focus();
     const onKey = e => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('keydown', onKey); before?.focus?.(); };
+    document.body.classList.add('sheet-open');   // the page behind must not scroll instead of the sheet
+    return () => { document.removeEventListener('keydown', onKey); document.body.classList.remove('sheet-open'); before?.focus?.(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return sheet;
 }
@@ -30,7 +31,7 @@ export function SwapSheet({ cfg, profile, index, onClose, onSwap }) {
   const sheet = useSheet(onClose);
   const row = (id, isCurrent) => (
     <Option key={id} icon={componentIcon(id)} on={pick === id} title={componentName(id)} onClick={() => setPick(id)}>
-      {componentPortion(id, cfg.size)}{isCurrent ? ' · current choice' : ''}
+      {componentPortion(id, cfg.size)}{isCurrent ? ', current choice' : ''}
     </Option>
   );
   return (

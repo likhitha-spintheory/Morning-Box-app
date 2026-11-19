@@ -92,7 +92,7 @@ export default function Help() {
             <span className="eyebrow">Your messages</span>
             {requests.map(r => (
               <article key={r.id} className="card stack gap-8" style={{ padding: 18 }}>
-                <div className="row"><span className="strong">{r.topic}{r.orderRef ? ` · ${r.orderRef}` : ''}</span>
+                <div className="row"><span className="strong">{r.topic}{r.orderRef ? `, ${r.orderRef}` : ''}</span>
                   <span className={`status ${r.status === 'answered' ? 'ok' : 'prep'}`}>{r.status === 'open' ? 'Received' : r.status === 'answered' ? 'Replied' : 'Closed'}</span></div>
                 <span className="help" style={{ fontSize: 15 }}>{r.message}</span>
                 {r.reply && <div className="note" style={{ marginTop: 4 }}><Icon name="info" size={18} stroke={1.6} style={{ flex: 'none' }} /><span><b>Morning Box:</b> {r.reply}</span></div>}

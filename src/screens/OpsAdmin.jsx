@@ -9,7 +9,7 @@ const ONBOARDING_LABEL = { allergenRecords: 'Ingredient, allergen and dietary re
 const STATUS_CLASS = { Active: 'ok', 'Under Review': 'prep', Suspended: 'off' };
 const small = { width: 'auto', padding: '0 16px', minHeight: 40 };
 const WINDOWS = [['w1', '7:30–8:30'], ['w2', '8:30–9:30'], ['w3', '9:30–10:30']];
-const windowCaps = wc => (wc ? ` · per window ${WINDOWS.filter(([w]) => wc[w] != null).map(([w, label]) => `${label}: ${wc[w]}`).join(', ')}` : '');
+const windowCaps = wc => (wc ? `, per window ${WINDOWS.filter(([w]) => wc[w] != null).map(([w, label]) => `${label}: ${wc[w]}`).join(', ')}` : '');
 /* Service areas after DIFC: each bakery can have its own distance to them, so the nearest bakery is chosen per delivery area. */
 const LATER_AREAS = SERVICE_AREAS.filter(a => a.id !== 'DIFC');
 const Field = ({ label, children }) => <div className="field" style={{ gap: 6 }}><label>{label}</label>{children}</div>;
@@ -60,15 +60,15 @@ function Bakery({ b, catalog, call, act, busy }) {
       {codeState.error && <div className="banner-err" role="alert">{codeState.error}</div>}
       {b.statusNote && <span className="help">{b.statusNote}</span>}
       {b.openSafety > 0 && <div className="banner-warn" role="status"><span><b>{b.openSafety} open safety incident{b.openSafety > 1 ? 's' : ''}</b> linked to this bakery. Consider Under Review (MB-BKY-001 §10).</span></div>}
-      <span className="xs">Licence {b.licenceNo || 'not recorded'}{b.licenceExpiry ? ` (expires ${b.licenceExpiry})` : ''} · {b.bakesOwnBread ? 'bakes its own bread in-house' : 'own bread NOT confirmed'} · ready {b.readyLeadMinutes} min before each window</span>
-      <span className="xs">{b.area} · {b.distanceKm} km · capacity {b.effectiveCapacity ?? b.dailyCapacity}{b.effectiveCapacity != null ? ` (stated ${b.dailyCapacity})` : ''} boxes/day{windowCaps(b.windowCapacity)} · {b.upcomingBoxes} upcoming · {approved}{b.danishFlavours.length ? ` · Danish: ${b.danishFlavours.join(', ')}` : ''}</span>
-      <span className="xs">Can handle: {Object.entries(b.capabilities).filter(([, v]) => v).map(([k]) => CAP_LABEL[k]).join(', ') || 'no special requirements'}{b.glutenFreeCertified ? ' · gluten-free certified' : ''}</span>
+      <span className="xs">Licence {b.licenceNo || 'not recorded'}{b.licenceExpiry ? ` (expires ${b.licenceExpiry})` : ''}, {b.bakesOwnBread ? 'bakes its own bread in-house' : 'own bread NOT confirmed'}, ready {b.readyLeadMinutes} min before each window</span>
+      <span className="xs">{b.area}, {b.distanceKm} km, capacity {b.effectiveCapacity ?? b.dailyCapacity}{b.effectiveCapacity != null ? ` (stated ${b.dailyCapacity})` : ''} boxes/day{windowCaps(b.windowCapacity)}, {b.upcomingBoxes} upcoming, {approved}{b.danishFlavours.length ? `, Danish: ${b.danishFlavours.join(', ')}` : ''}</span>
+      <span className="xs">Can handle: {Object.entries(b.capabilities).filter(([, v]) => v).map(([k]) => CAP_LABEL[k]).join(', ') || 'no special requirements'}{b.glutenFreeCertified ? ', gluten-free certified' : ''}</span>
       {(b.contactName || b.contactPhone) && <span className="xs">Contact: {b.contactName} {b.contactPhone}</span>}
-      <span className="xs">So far: {perf.mornings} mornings · {perf.onTime} on time · {perf.late} late · {perf.unableToFulfil} not fulfilled · Loved it {perf.loved} / Not for me {perf.notForMe}</span>
+      <span className="xs">So far: {perf.mornings} mornings, {perf.onTime} on time, {perf.late} late, {perf.unableToFulfil} not fulfilled, Loved it {perf.loved} / Not for me {perf.notForMe}</span>
       {code && <div className="note"><span>Bakery View access code for {b.name}: <b style={{ fontSize: 18, letterSpacing: '.1em' }}>{code}</b>. Share it with the bakery now; it isn’t shown again. They sign in at <b>#/bakery</b>.</span></div>}
       {b.conditions.length > 0 && (
         <table className="ops-table"><tbody>{b.conditions.map(c => (
-          <tr key={c.id} className="warn"><td>{c.date}</td><td>{c.kind}{c.itemName ? `: ${c.itemName}` : ''}{c.capacity != null ? `, ${c.capacity} boxes` : ''}{c.need ? `, ${CAP_LABEL[c.need]}` : ''}{c.note ? ` · ${c.note}` : ''}</td>
+          <tr key={c.id} className="warn"><td>{c.date}</td><td>{c.kind}{c.itemName ? `: ${c.itemName}` : ''}{c.capacity != null ? `, ${c.capacity} boxes` : ''}{c.need ? `, ${CAP_LABEL[c.need]}` : ''}{c.note ? `, ${c.note}` : ''}</td>
             <td><button type="button" className="btn-text" disabled={busy} onClick={() => act('DELETE', `/admin/conditions/${c.id}`)}>Clear</button></td></tr>
         ))}</tbody></table>
       )}
@@ -93,7 +93,7 @@ function Bakery({ b, catalog, call, act, busy }) {
             <input className="input" style={{ width: 240 }} placeholder="Notes" aria-label="Notes" value={sample.note} onChange={e => setSample(x => ({ ...x, note: e.target.value }))} />
             <button type="button" className="btn-secondary" style={small} disabled={busy || !sample.product} onClick={() => act('POST', `/admin/bakeries/${b.id}/samples`, sample).then(ok => ok && setSample(x => ({ ...x, product: '', note: '' })))}>Record</button>
           </div>
-          {b.samples.map(x => <span key={x.id} className="xs">{x.created_at.slice(0, 10)} · {x.productName}: <b>{x.result}</b>{x.note ? ` (${x.note})` : ''}</span>)}
+          {b.samples.map(x => <span key={x.id} className="xs">{x.created_at.slice(0, 10)}, {x.productName}: <b>{x.result}</b>{x.note ? ` (${x.note})` : ''}</span>)}
         </div>
       )}
       {mode === 'condition' && (
@@ -107,7 +107,7 @@ function Bakery({ b, catalog, call, act, busy }) {
           <button type="button" className="btn-secondary" style={small} disabled={busy || !cond.date || (cond.kind === 'Reduced Capacity' && !/^\d+$/.test(String(cond.capacity).trim()))} onClick={() => act('POST', `/admin/bakeries/${b.id}/conditions`, { ...cond, capacity: cond.kind === 'Reduced Capacity' ? Number(cond.capacity) : undefined }).then(ok => ok && setMode(null))}>Add</button>
         </div>
       )}
-      {b.log.length > 0 && <details><summary className="xs" style={{ cursor: 'pointer' }}>History</summary>{b.log.map((l, i) => <div key={i} className="xs">{l.created_at} · {l.message}</div>)}</details>}
+      {b.log.length > 0 && <details><summary className="xs" style={{ cursor: 'pointer' }}>History</summary>{b.log.map((l, i) => <div key={i} className="xs">{l.created_at}, {l.message}</div>)}</details>}
     </article>
   );
 }
@@ -184,7 +184,7 @@ export function Products({ data }) {
   return (
     <section className="stack gap-12">
       <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
-        <span className="strong">{data.items.length} products · ingredient &amp; allergen record</span>
+        <span className="strong">{data.items.length} products, ingredient &amp; allergen record</span>
         <input className="input" style={{ width: 240, minHeight: 40 }} placeholder="Search products" aria-label="Search products" value={q} onChange={e => setQ(e.target.value)} />
       </div>
       <p className="help" style={{ margin: 0 }}>Read-only. No product enters a recommendation, swap or add-on without this record (MB-PRO-001 §15.1). SAMPLE items are for testing until approved.</p>
@@ -192,11 +192,11 @@ export function Products({ data }) {
         <thead><tr><th>Product</th><th>Category</th><th>Contains</th><th>Suitable for</th><th>Approved variants</th></tr></thead>
         <tbody>{items.map(i => (
           <tr key={i.id} className={i.sample ? 'warn' : ''}>
-            <td><b>{i.name}</b>{i.sample ? <small> · SAMPLE</small> : null}{i.note ? <><br /><small>{i.note}</small></> : null}</td>
+            <td><b>{i.name}</b>{i.sample ? <small>, SAMPLE</small> : null}{i.note ? <><br /><small>{i.note}</small></> : null}</td>
             <td>{i.category}</td>
             <td>{i.allergens.length ? <b>{list(i.allergens)}</b> : 'None of the 7 listed allergens'}</td>
             <td>{list(i.diet) || '—'}</td>
-            <td>{i.variants.length ? i.variants.map(v => <div key={v.id}><small>{v.label}{v.sample ? ' (sample)' : ''}: contains {v.allergens.length ? list(v.allergens) : 'none listed'} · suits {list(v.diet) || '—'}</small></div>) : '—'}</td>
+            <td>{i.variants.length ? i.variants.map(v => <div key={v.id}><small>{v.label}{v.sample ? ' (sample)' : ''}: contains {v.allergens.length ? list(v.allergens) : 'none listed'}, suits {list(v.diet) || '—'}</small></div>) : '—'}</td>
           </tr>
         ))}</tbody>
       </table>
@@ -221,7 +221,7 @@ export function Pricing({ data, act, busy }) {
         <span className="xs">Customers only see one price per breakfast. These levels are internal (MB-BOX-001 §8). Swaps never change the price.</span>
         <div className="grid-2">{Object.keys(p.priceLevels).map(k => (
           <div key={k} className="stack gap-6">{box(['priceLevels', k], p.priceLevels[k], `Level ${k.slice(1)}`)}
-            <details><summary className="xs" style={{ cursor: 'pointer' }}>{data.levels[k]?.length || 0} breakfasts</summary><span className="xs">{(data.levels[k] || []).join(' · ')}</span></details></div>
+            <details><summary className="xs" style={{ cursor: 'pointer' }}>{data.levels[k]?.length || 0} breakfasts</summary><span className="xs">{(data.levels[k] || []).join(', ')}</span></details></div>
         ))}</div>
       </div>
       <div className="card stack gap-12" style={{ padding: 18 }}>
@@ -267,7 +267,7 @@ export function Pricing({ data, act, busy }) {
         <button type="button" className="btn-text" disabled={busy} onClick={() => window.confirm('Reset all prices, sizes, add-ons and discounts to the defaults? Your saved prices are replaced.') && act('POST', '/admin/pricing/reset')}>Reset to defaults</button>
       </div>
       <span className="xs">New prices apply to new orders and edits right away. Orders already paid keep their price.</span>
-      {data.history.length > 0 && <details><summary className="xs" style={{ cursor: 'pointer' }}>Change history</summary>{data.history.map((h, i) => <div key={i} className="xs">{h.at} · levels {Object.values(h.pricing.priceLevels).join('/')} · Light {h.pricing.sizeAdjustment.light} · Large +{h.pricing.sizeAdjustment.large}</div>)}</details>}
+      {data.history.length > 0 && <details><summary className="xs" style={{ cursor: 'pointer' }}>Change history</summary>{data.history.map((h, i) => <div key={i} className="xs">{h.at}, levels {Object.values(h.pricing.priceLevels).join('/')}, Light {h.pricing.sizeAdjustment.light}, Large +{h.pricing.sizeAdjustment.large}</div>)}</details>}
     </section>
   );
 }
@@ -306,7 +306,7 @@ export function Company({ data, act, busy, call }) {
         <div className="stack gap-8">{areas.map(a => (
           <label key={a.id} className="row xs" style={{ gap: 8, justifyContent: 'flex-start' }}>
             <input type="checkbox" checked={a.active} onChange={e => setAreas(list => list.map(x => (x.id === a.id ? { ...x, active: e.target.checked } : x)))} />
-            <b>{a.label}</b> · Phase {a.phase}
+            <b>{a.label}</b>, Phase {a.phase}
           </label>
         ))}</div>
         <button type="button" className="btn-secondary" style={{ width: 'auto', alignSelf: 'flex-start' }} disabled={busy || !areas.some(a => a.active)}

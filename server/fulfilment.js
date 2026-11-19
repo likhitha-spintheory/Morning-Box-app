@@ -88,7 +88,7 @@ function setStage(kind, id, stage, point) {
   event(row, 'stage', ['', 'Being prepared', 'Out for delivery', `Delivered to ${point}`][stage]);
   if (stage === 2) tell(row, 'on_the_way', `Your breakfast for ${prettyDate(row.date)} is on its way.`);
   /* DLV §5: "Delivered to Reception - 8:14 AM", then the simple feedback. */
-  if (stage === 3) tell(row, 'delivered', `Delivered to ${point} · ${dubaiTime()}. Enjoy your morning! Loved it or not for you? Tell us in the app.`);
+  if (stage === 3) tell(row, 'delivered', `Delivered to ${point}, ${dubaiTime()}. Enjoy your morning! Loved it or not for you? Tell us in the app.`);
 }
 
 const bakeryName = id => db.prepare('SELECT name FROM bakeries WHERE id = ?').get(id)?.name || `Bakery #${id}`;
@@ -560,7 +560,7 @@ export function labelsFor(date, onlyBakery = null, { forBakery = false } = {}) {
     for (const o of p.packing) {
       const row = rows.find(r => r.kind === o.kind && r.id === o.id);
       const place = row.kind === 'personal' ? `${row.address.building}, ${row.address.unit}` : `${row.address.building}, ${row.address.office}`;
-      const handover = row.kind === 'personal' ? (row.address.handover === 'door' ? 'Door' : 'Reception') : `Reception · ${row.address.contact}`;
+      const handover = row.kind === 'personal' ? (row.address.handover === 'door' ? 'Door' : 'Reception') : `Reception, ${row.address.contact}`;
       for (const l of o.lines) for (let i = 0; i < l.qty; i++) {
         /* The customer's free-text allergies are a warning on every label (MB-BKY-001 §5). */
         const avoid = o.otherAllergies && !l.special.some(w => w.startsWith('Also avoid')) ? [`Also avoid: ${o.otherAllergies}`] : [];

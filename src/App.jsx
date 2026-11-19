@@ -24,6 +24,14 @@ const Bakery = lazy(() => import('./screens/Bakery.jsx'));
 /* Back from the card payment page. */
 const PayReturn = lazy(() => import('./screens/PayReturn.jsx'));
 
+/* One address per page: "#/OPS" or "#/Ops" becomes "#/ops". Only the page name is lowercased;
+   order references and other values later in the address keep their capitals. */
+function LowercasePage() {
+  const { pathname, search } = useLocation();
+  const [, first = '', rest = ''] = pathname.match(/^\/([^/]*)(.*)$/) || [];
+  return first !== first.toLowerCase() ? <Navigate to={`/${first.toLowerCase()}${rest}${search}`} replace /> : null;
+}
+
 function ScrollTop() {
   const { pathname } = useLocation();
   useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
@@ -33,6 +41,7 @@ function ScrollTop() {
 export default function App() {
   return (
     <ErrorBoundary>
+      <LowercasePage />
       <ScrollTop />
       <Splash />
       <OfflineBanner />

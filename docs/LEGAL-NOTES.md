@@ -37,7 +37,8 @@ The drafts carry "Draft for review by UAE-qualified counsel"; that internal note
 2. **"Accepted" vs "Confirmed".** Terms §6 says a contract forms when the order shows as "Accepted". The app's status after payment is "Confirmed", so the text uses "Confirmed".
 3. **Delivery Partner.** The app has no separate courier at launch: Partner Bakeries deliver their own orders. The Terms definition adds: "Where a Partner Bakery delivers its own orders, it acts as the Delivery Partner."
 4. **Invoices (client feedback FLW-044).** The Partner Bakery is the seller on receipts and invoices; Morning Box is the platform and Studio Nest L.L.C-FZ the platform operator, collecting payment as the bakery's agent. A document is titled "Tax Invoice" only when every bakery on it has a TRN entered in Admin. Whether Studio Nest may issue invoices on the bakeries' behalf must be confirmed by the accountant and the bakery agreements (as the client noted).
-5. **Initial service area.** The drafts say DIFC; Admin can switch on Downtown Dubai and Meydan One. The text keeps "initially DIFC" and says the checkout shows which areas are covered.
+5. **Short allergy consent (B1) on the profile step.** At the client's request (19 Nov) the profile step shows one unticked checkbox with shortened wording: "I agree that Morning Box may use my allergy and dietary details to filter my breakfasts and share them with the bakery preparing my order." It links to the Privacy Policy and Allergen information, which carry the full B1 points (health data, no allergen-free guarantee, withdrawal in the Morning Profile). Counsel: confirm the short form is enough for explicit consent under the PDPL, or the full B1 text has to be shown.
+6. **Initial service area.** The drafts say DIFC; Admin can switch on Downtown Dubai and Meydan One. The text keeps "initially DIFC" and says the checkout shows which areas are covered.
 
 ## Consent records
 

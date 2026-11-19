@@ -132,7 +132,7 @@ export default function Bakery() {
         )}
         {view === 'orders' && <Orders plan={plan} date={date} busy={busy} act={act} checks={me?.qcChecks || {}} reasons={me?.planIssues || []} points={me?.points || {}} failures={me?.failureReasons || []} />}
         {view === 'labels' && (labels?.length ? <>
-          <div className="row no-print"><span className="strong">{labels.length} labels · {date}</span><button type="button" className="btn-secondary" style={small} onClick={() => window.print()}>Print</button></div>
+          <div className="row no-print"><span className="strong">{labels.length} labels, {date}</span><button type="button" className="btn-secondary" style={small} onClick={() => window.print()}>Print</button></div>
           <LabelGrid labels={labels} />
         </> : <p className="help">No labels for this date.</p>)}
         {view === 'conditions' && <Availability plan={plan} items={me?.items || []} date={date} busy={busy} act={act} />}
@@ -214,7 +214,7 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
   const pending = plan.packing.filter(notStarted);
   return (
     <section className="stack gap-12">
-      <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}><span className="strong">{plan.packing.length} orders · {plan.boxes} boxes</span>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}><span className="strong">{plan.packing.length} orders, {plan.boxes} boxes</span>
         {pending.length > 0 && <button type="button" className="btn-secondary" style={small} disabled={busy} onClick={() => act('POST', '/plan/start', { date })}>Start preparing all ({pending.length})</button>}</div>
       {plan.packing.map(o => {
         const k = `${o.kind}/${o.id}`;
@@ -227,20 +227,20 @@ function Orders({ plan, date, busy, act, checks, reasons, points, failures }) {
         return (
           <article key={k} className={`staff-card${blocked ? ' risk' : o.lines.some(l => l.special.length) ? ' special' : ''}`}>
             <div className="staff-card-head">
-              <span className="stack" style={{ gap: 2 }}><b className="staff-ref">{o.ref}{o.shared ? ` · your part: ${o.shared}` : ''}</b><span className="xs">Ready by <b>{o.readyBy}</b> · {o.window}</span></span>
+              <span className="stack" style={{ gap: 2 }}><b className="staff-ref">{o.ref}{o.shared ? `, your part: ${o.shared}` : ''}</b><span className="xs">Ready by <b>{o.readyBy}</b>, {o.window}</span></span>
               <span className={`status ${blocked || ['Delayed', 'Unable to Fulfil'].includes(o.state) || o.deliveryState === 'Failed' ? 'off' : o.state === 'Ready' || gone ? 'ok' : o.state === 'In Preparation' ? 'prep' : 'done'}`}>{done ? 'Delivered' : o.deliveryState === 'Failed' ? 'Delivery failed' : gone ? (o.deliveryState ? 'Out for delivery' : 'Your part is out') : (o.state === 'Confirmed' ? 'Accepted' : o.state) || 'Not started'}</span>
             </div>
             <Stepper steps={STEP_LABELS} current={stepOf(o)} bad={['Delayed', 'Unable to Fulfil'].includes(o.state) || o.deliveryState === 'Failed'} />
             {o.safetyHold && <div className="banner-err" role="alert"><Icon name="shieldAlert" size={18} stroke={2} /><b>SAFETY HOLD: do not prepare until Morning Box confirms.</b></div>}
             {!o.safetyHold && o.safetyCheck && <div className="banner-err" role="alert"><Icon name="shieldAlert" size={18} stroke={2} /><b>ALLERGY CHECK PENDING: Morning Box is confirming the customer’s allergy note. Do not prepare until it is cleared.</b></div>}
             <div className="staff-lines">
-              {o.lines.map((l, i) => <span key={i}><b>{l.qty}× {l.box}</b> · {l.size}{l.special.length ? <b className="staff-special"> · {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? ` + ${l.addons.join(', ')}` : ''}<br /><small>{l.components.join(', ')}</small></span>)}
+              {o.lines.map((l, i) => <span key={i}><b>{l.qty}× {l.box}</b>, {l.size}{l.special.length ? <b className="staff-special">, {l.special.join(', ').toUpperCase()}</b> : null}{l.addons.length ? ` + ${l.addons.join(', ')}` : ''}<br /><small>{l.components.join(', ')}</small></span>)}
             </div>
             {o.otherAllergies && !o.lines.some(l => l.special.some(w => w.startsWith('Also avoid'))) && <b className="staff-special">Also avoid: {o.otherAllergies}</b>}
             {/* The bakery delivers: where it goes and how it is handed over (MB-DLV-001 §4, §10). */}
-            <span className="xs"><b>Deliver to:</b> {[d.company, d.building, d.place].filter(Boolean).join(', ')} · {d.handover}{d.contact?.name ? ` · ${d.contact.name}${d.contact.mobile ? ` (${d.contact.mobile})` : ''}` : ''}{d.notes ? ` · ${d.notes}` : ''}</span>
+            <span className="xs"><b>Deliver to:</b> {[d.company, d.building, d.place].filter(Boolean).join(', ')}, {d.handover}{d.contact?.name ? `, ${d.contact.name}${d.contact.mobile ? ` (${d.contact.mobile})` : ''}` : ''}{d.notes ? `, ${d.notes}` : ''}</span>
             {o.lateNote && !done && <span className="xs">Customer told: arriving around {o.lateNote}</span>}
-            {done && <span className="xs">Delivered to {o.delivered?.point}{o.delivered?.late ? ' · after the window' : ''}.</span>}
+            {done && <span className="xs">Delivered to {o.delivered?.point}{o.delivered?.late ? ', after the window' : ''}.</span>}
             {gone && !o.deliveryState && <span className="xs">Your part is out. Waiting for the other bakery on this order to send theirs.</span>}
             {gone && !done && o.deliveryState === 'Failed' && (
               <div className="row staff-actions" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
@@ -313,7 +313,7 @@ function Availability({ plan, items, date, busy, act }) {
     <section className="staff-card">
       <h2 className="h3">Tell Morning Box about {date}</h2>
       <span className="xs">Report it before 9:00 PM the evening before so orders can go to another bakery.</span>
-      {plan.conditions.map(c => <span key={c.id} className="xs">• {c.kind}{c.item ? `: ${name(c.item)}` : ''}{c.capacity != null ? `, ${c.capacity} boxes` : ''}{c.need ? `, ${c.need}` : ''}{c.note ? ` · ${c.note}` : ''}</span>)}
+      {plan.conditions.map(c => <span key={c.id} className="xs">{c.kind}{c.item ? `: ${name(c.item)}` : ''}{c.capacity != null ? `, ${c.capacity} boxes` : ''}{c.need ? `, ${c.need}` : ''}{c.note ? `, ${c.note}` : ''}</span>)}
       <div className="row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
         <select className="input" style={{ width: 260 }} aria-label="Condition" value={v.kind} onChange={e => setV(x => ({ ...x, kind: e.target.value }))}>{CONDITIONS.map(k => <option key={k}>{k}</option>)}</select>
         {v.kind === 'Item Unavailable' && <select className="input" style={{ width: 240 }} aria-label="Item" value={v.item} onChange={e => setV(x => ({ ...x, item: e.target.value }))}><option value="">Choose item</option>{items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select>}

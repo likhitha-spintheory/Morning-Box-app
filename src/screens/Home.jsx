@@ -5,7 +5,7 @@ import { useStore } from '../state/store.jsx';
 import { get, track } from '../api.js';
 import { analyticsAllowed, openCookieSettings } from '../state/consent.js';
 import { planningWeeks, timeLeft, tomorrowIso, fromPrice, dubaiNote } from '../domain/app.js';
-import { cutoffFor, areasText, SERVICE_AREAS, ACTIVE_AREAS, DELIVERY_WINDOWS } from '../domain/standards.js';
+import { cutoffFor, areasText, areasShort, SERVICE_AREAS, ACTIVE_AREAS, DELIVERY_WINDOWS } from '../domain/standards.js';
 import { useConfig, closedOn } from '../state/config.js';
 
 
@@ -41,7 +41,7 @@ export default function Home() {
       <header className="home-wide row" style={{ paddingTop: 16, paddingBottom: 8 }}>
         <Logo width={150} />
         <span className="row" style={{ gap: 10 }}>
-          <span className="date-pill home-area-pill" style={{ padding: '10px 16px', fontWeight: 500 }}><Icon name="pin" size={18} stroke={1.7} /> {areasText()}</span>
+          <span className="date-pill home-area-pill" title={`Delivering in ${areasText()}`}><Icon name="pin" size={16} stroke={1.7} /><span className="area-full">{areasText()}</span><span className="area-short">{areasShort()}</span></span>
           <Link to={signedIn ? '/today' : '/sign-in?next=/today'} className="icon-btn" style={{ width: 48, height: 48 }} aria-label={signedIn ? 'My mornings' : 'Sign in'}>
             <Icon name="user" size={22} />
           </Link>
@@ -62,7 +62,7 @@ export default function Home() {
             <Ring fraction={Math.min(1, hoursLeft / 24)} label={`${Math.floor(hoursLeft)}h`} size={44} />
             <span className="stack" style={{ lineHeight: 1.3 }}>
               <span className="strong" style={{ fontSize: 16 }}>Order by 9:00 PM{dubaiNote()}</span>
-              <span className="sm">for {first.label}{left ? <> · <b className="strong">{left} left</b></> : ''}</span>
+              <span className="sm">for {first.label}{left ? <>, <b className="strong">{left} left</b></> : ''}</span>
             </span>
           </div>
         </div>

@@ -64,7 +64,7 @@ export function MenuRules({ data, act, busy, call }) {
       {section === 'history' && (
         <div className="card stack gap-8" style={{ padding: 18 }}>
           {data.history.length === 0 && <span className="xs">No changes yet. The approved menu is in use.</span>}
-          {data.history.map((h, i) => <div key={i} className="stack gap-4"><span className="strong xs">{h.at}</span>{h.changes.map((c, k) => <span key={k} className="xs">· {c}</span>)}</div>)}
+          {data.history.map((h, i) => <div key={i} className="stack gap-4"><span className="strong xs">{h.at}</span>{h.changes.map((c, k) => <span key={k} className="xs">{c}</span>)}</div>)}
         </div>
       )}
 
@@ -117,13 +117,13 @@ function Items({ m, lists, setItem, setM }) {
       )}
       <div style={{ overflowX: 'auto' }}>
         <table className="ops-table">
-          <thead><tr><th>Item</th><th>Category · portions (L / R / L)</th><th>Contains allergens</th><th>Suitable for</th><th>Flexible only</th><th>Used in</th></tr></thead>
+          <thead><tr><th>Item</th><th>Category, portions (L / R / L)</th><th>Contains allergens</th><th>Suitable for</th><th>Flexible only</th><th>Used in</th></tr></thead>
           <tbody>{ids.map(id => {
             const it = m.items[id];
             return (
               <tr key={id}>
                 <td style={{ minWidth: 180 }}><input className="input" style={{ minHeight: 40 }} aria-label="Item name" value={it.name} onChange={e => setItem(id, { name: e.target.value })} />
-                  {it.custom && <span className="xs"> Added in Admin{!usedIn(id) && <> · <button type="button" className="btn-text" onClick={() => setM(x => { const items = { ...x.items }; delete items[id]; return { ...x, items }; })}>Remove</button></>}</span>}</td>
+                  {it.custom && <span className="xs"> Added in Admin{!usedIn(id) && <>, <button type="button" className="btn-text" onClick={() => setM(x => { const items = { ...x.items }; delete items[id]; return { ...x, items }; })}>Remove</button></>}</span>}</td>
                 <td className="xs">{it.category}<br />{it.portions.light} / {it.portions.regular} / {it.portions.large}</td>
                 <td style={{ minWidth: 220 }}><Chips options={lists.allergens} value={it.allergens} onChange={v => setItem(id, { allergens: v })} label={`Allergens in ${it.name}`} /></td>
                 <td style={{ minWidth: 220 }}><Chips options={lists.dietary} value={it.diet} onChange={v => setItem(id, { diet: v })} label={`${it.name} is suitable for`} /></td>
@@ -160,7 +160,7 @@ function Breakfasts({ m, lists, name, prefLabel, ctxLabel, setBreakfast }) {
             const level = b.level || auto;
             return (
               <tr key={id}>
-                <td className="xs" style={{ minWidth: 170 }}><b>{prefLabel(p)}</b><br />{STYLES[style]} · {ctxLabel(ctx)}</td>
+                <td className="xs" style={{ minWidth: 170 }}><b>{prefLabel(p)}</b><br />{STYLES[style]}, {ctxLabel(ctx)}</td>
                 <td style={{ minWidth: 320 }}>
                   <div className="chips" style={{ gap: 6 }}>
                     {b.components.map((x, i) => (
@@ -184,7 +184,7 @@ function Breakfasts({ m, lists, name, prefLabel, ctxLabel, setBreakfast }) {
                     <option value="">Auto ({auto})</option>
                     {LEVEL_IDS.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
-                  <span className="xs">{level} · AED {PRICE_LEVELS[level]} Regular{b.level ? '' : ' (auto)'}</span>
+                  <span className="xs">{level}, AED {PRICE_LEVELS[level]} Regular{b.level ? '' : ' (auto)'}</span>
                 </td>
               </tr>
             );
