@@ -731,12 +731,12 @@ export function EditMorning() {
 
         {!noSafe && <section className="stack gap-12">
           <h2 className="h3" style={{ fontSize: 19 }}>Delivery window</h2>
-          <div className="stack gap-10">
+          <div className="grid-3" role="radiogroup" aria-label="Delivery window">
             {DELIVERY_WINDOWS.map(w => (
-              <button key={w.id} type="button" className={`win${draft.window === w.id ? ' on' : ''}`} role="radio" aria-checked={draft.window === w.id} disabled={windowFull(w.id)} onClick={() => setDraft(d => ({ ...d, window: w.id }))}>
-                <span className="ico"><Icon name={w.id === 'w1' ? 'sunrise' : 'sunny'} size={22} stroke={1.6} /></span>
-                <span style={{ fontSize: 18, fontWeight: 600, flex: 1 }}>{w.label}</span>
-                {windowFull(w.id) ? <span className="tag" style={{ marginLeft: 'auto' }}>Full</span> : <span className="dot">{draft.window === w.id && <Icon name="check" size={15} stroke={2.2} />}</span>}
+              <button key={w.id} type="button" className={`win compact${draft.window === w.id ? ' on' : ''}`} role="radio" aria-checked={draft.window === w.id} disabled={windowFull(w.id)} onClick={() => setDraft(d => ({ ...d, window: w.id }))}>
+                {draft.window === w.id && <span className="ck"><Icon name="check" size={13} stroke={2.6} /></span>}
+                <Icon name={w.id === 'w1' ? 'sunrise' : 'sunny'} size={20} stroke={1.6} />
+                <span className="t">{w.label.replace(' AM', '')}</span><span className="xs">{windowFull(w.id) ? 'Full' : 'AM'}</span>
               </button>
             ))}
           </div>
@@ -891,9 +891,11 @@ export function Me() {
   const a = state.delivery.address;
   const reviewCount = Number(params.get('review')) || 0;
   const Row = ({ label, children, to }) => (
-    <div className="list-row" style={{ minHeight: 76 }}>
-      <span className="stack gap-4" style={{ flex: 1 }}><span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>{label}</span>{children}</span>
-      {to && <Link to={to} className="link">Change</Link>}
+    <div className="list-row" style={{ minHeight: 76, display: 'block' }}>
+      {/* "Change" sits on the label line so the tags below get the full width (two tags fit side by side on a phone). */}
+      <span className="row" style={{ marginBottom: 2, minHeight: 32 }}><span className="eyebrow grey" style={{ letterSpacing: '.1em', fontWeight: 500 }}>{label}</span>
+        {to && <Link to={to} className="link" style={{ padding: 0 }} aria-label={`Change ${label.toLowerCase()}`}>Change</Link>}</span>
+      {children}
     </div>
   );
   const tags = list => list.length ? <span className="tags">{list.map(t => <span key={t} className="tag">{t}</span>)}</span> : <span className="strong">None</span>;
@@ -1053,8 +1055,9 @@ export function Me() {
                   <button type="button" className="btn" disabled={busy} onClick={saveEmail}>{busy ? 'Saving…' : 'Save'}</button></div>
               </div>
             ) : (
-              <div className="list-row"><Icon name="mail" size={20} /><span className="strong" style={{ flex: '1 0 auto' }}>Receipt email</span>
-                <span className="help" style={{ fontSize: 15, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{state.user.email || 'Not added'}</span>
+              <div className="list-row"><Icon name="mail" size={20} style={{ flex: 'none' }} />
+                <span className="stack" style={{ flex: 1, minWidth: 0 }}><span className="strong">Receipt email</span>
+                  <span className="help" style={{ fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{state.user.email || 'Not added'}</span></span>
                 <button type="button" className="link" style={{ marginLeft: 12, flex: 'none' }} onClick={() => setEditEmail(true)}>{state.user.email ? 'Change' : 'Add'}</button></div>
             )}
             <Link to="/notifications" className="list-row"><Icon name="bell" size={20} /><span className="strong" style={{ flex: 1 }}>Notifications</span><Icon name="chevron" size={18} stroke={1.8} /></Link>

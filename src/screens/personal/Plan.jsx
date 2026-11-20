@@ -132,7 +132,7 @@ export function ChooseDates() {
       {firstRun && <div style={{ paddingTop: 8 }}><SunArc step={4} total={5} /></div>}
       <main className="screen-main" style={{ paddingTop: firstRun ? 24 : 16, gap: 24 }}>
         <div className="stack gap-8">
-          <span className="eyebrow">{source || roDay ? 'Choose new dates' : firstRun ? 'Step 4 of 5: Choose your mornings' : 'Choose your mornings'}</span>
+          <span className="eyebrow">{source || roDay ? 'Choose new dates' : 'Choose your mornings'}</span>
           <h1 className="h-display">{source ? 'Which dates should we copy your plan to?' : roDay ? 'Which mornings would you like it again?' : 'Which mornings should we plan?'}</h1>
           {/* A profile saved with Gluten-Free while it isn't available (client feedback PRD-004). */}
           {glutenFreeBlocked(state.profile.dietary) && (
@@ -145,10 +145,10 @@ export function ChooseDates() {
             (a wider page made the browser zoom out and pushed the Continue button off screen). */}
         <div className="row" style={{ flexWrap: 'wrap', rowGap: 2 }}>
           <span className="strong" style={{ fontSize: 18, whiteSpace: 'nowrap' }}>{monthName}</span>
-          <span className="row" style={{ gap: 4, marginLeft: 'auto' }} role="group" aria-label="Week">
-            <button type="button" className="icon-btn" style={{ border: 0, background: 'none' }} aria-label="Previous week" disabled={week === 0} onClick={() => setWeek(w => w - 1)}><Icon name="back" size={18} stroke={1.8} /></button>
-            <span style={{ fontSize: 15.5, whiteSpace: 'nowrap', minWidth: 96, textAlign: 'center' }} aria-live="polite">{weekLabel}</span>
-            <button type="button" className="icon-btn" style={{ border: 0, background: 'none' }} aria-label="Next week" disabled={week === weeks.length - 1} onClick={() => setWeek(w => w + 1)}><Icon name="chevron" size={18} stroke={1.8} /></button>
+          <span className="row" style={{ gap: 0, marginLeft: 'auto' }} role="group" aria-label="Week">
+            <button type="button" className="icon-btn" style={{ border: 0, background: 'none', width: 36, height: 40 }} aria-label="Previous week" disabled={week === 0} onClick={() => setWeek(w => w - 1)}><Icon name="back" size={18} stroke={1.8} /></button>
+            <span style={{ fontSize: 15.5, whiteSpace: 'nowrap', minWidth: 80, textAlign: 'center' }} aria-live="polite">{weekLabel}</span>
+            <button type="button" className="icon-btn" style={{ border: 0, background: 'none', width: 36, height: 40 }} aria-label="Next week" disabled={week === weeks.length - 1} onClick={() => setWeek(w => w + 1)}><Icon name="chevron" size={18} stroke={1.8} /></button>
           </span>
         </div>
 
@@ -167,6 +167,11 @@ export function ChooseDates() {
           })}
         </div>
 
+        {picked.length > 0 && (
+          <div className="row" style={{ justifyContent: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+            <span className="date-pill" style={{ background: 'var(--espresso)', color: 'var(--ivory)', borderColor: 'var(--espresso)' }}>{picked.length} morning{picked.length > 1 ? 's' : ''}</span>
+          </div>
+        )}
         {source && (() => {
           /* PER §3.2: copy the same weekdays to next week — preselected, the customer still reviews and confirms. */
           const wds = new Set(source.days.map(d => dateInfo(d.date).wd));
@@ -189,11 +194,6 @@ export function ChooseDates() {
           </div>
         )}
 
-        {picked.length > 0 && (
-          <div className="row" style={{ justifyContent: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-            <span className="date-pill" style={{ background: 'var(--espresso)', color: 'var(--ivory)', borderColor: 'var(--espresso)' }}>{picked.length} morning{picked.length > 1 ? 's' : ''}</span>
-          </div>
-        )}
       </main>
       <Footer>
         <button className="btn" disabled={!picked.length || glutenFreeBlocked(state.profile.dietary)} onClick={proceed}>
@@ -259,7 +259,7 @@ export function DailyContext() {
       <TopBar back={back} close={null}><span className="topbar-title">{firstRun ? 'Step 5 of 5' : `Morning ${i + 1} of ${plan.dates.length}`}</span></TopBar>
       {firstRun && <div style={{ paddingTop: 8 }}><SunArc step={5} total={5} /></div>}
       <main className="screen-main" style={{ paddingTop: firstRun ? 24 : 8, gap: 24 }}>
-        {firstRun && <span className="eyebrow">Step 5 of 5: Your daily context{plan.dates.length > 1 ? <span style={{ color: 'var(--text-3)' }}>, Morning {i + 1} of {plan.dates.length}</span> : null}</span>}
+        {firstRun && <span className="eyebrow">Your daily context{plan.dates.length > 1 ? <span style={{ color: 'var(--text-3)' }}>, morning {i + 1} of {plan.dates.length}</span> : null}</span>}
         {infos.length > 1 && <MorningPills dates={infos} active={iso} done={plan.dates.filter(x => plan.days[x]?.saved)} />}
         <RuledDate eyebrow="Planning">{dateInfo(iso).long}</RuledDate>
         <div className="stack gap-8">
@@ -358,9 +358,9 @@ export function MorningBox() {
           {boxPhoto(cfg.recipeId) && <img src={boxPhoto(cfg.recipeId)} alt={`${boxName(cfg)}: ${cfg.components.map(componentName).join(', ')}`} style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'cover' }} />}
           {!boxPhoto(cfg.recipeId) && <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(cfg.components.length, 5)}, minmax(0, 1fr))`, gap: 8, textAlign: 'center' }} aria-hidden="true">
             {cfg.components.map(id => (
-              <div key={id} className="stack" style={{ alignItems: 'center', gap: 8 }}>
-                <span style={{ width: 58, height: 58, borderRadius: 18, background: 'rgba(255,255,255,.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={componentIcon(id)} size={28} stroke={1.5} /></span>
-                <span className="xs strong" style={{ fontSize: 12 }}>{componentName(id).replace(/^Halal /, '').split(' ').slice(-1)[0]}</span>
+              <div key={id} className="stack" style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <span style={{ width: '100%', maxWidth: 58, aspectRatio: '1', borderRadius: 18, background: 'rgba(255,255,255,.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={componentIcon(id)} size={28} stroke={1.5} /></span>
+                <span className="xs strong" style={{ fontSize: 12, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{componentName(id).replace(/^Halal /, '').split(' ').slice(-1)[0]}</span>
               </div>
             ))}
           </div>}
@@ -694,7 +694,7 @@ export function WeeklySummary() {
         </div>
         <button className="btn" disabled={!!unsaved || !rows.length}
           onClick={() => nav(signedIn ? '/checkout/delivery' : '/sign-in?next=/checkout/delivery')}>
-          <Go>{signedIn ? 'Continue to delivery' : 'Continue to secure my mornings'}</Go>
+          <Go>{signedIn ? 'Continue to delivery' : 'Secure my mornings'}</Go>
         </button>
         {!signedIn && <span className="hint" style={{ justifyContent: 'center', fontSize: 15 }}><Icon name="lock" size={18} stroke={1.6} />Your plan is saved while you sign in.</span>}
       </Footer>

@@ -438,7 +438,7 @@ export function People() {
           </label>
           <button type="button" className="icon-btn" style={big} aria-label="More people" disabled={b.people >= MAX_PEOPLE} onClick={() => setPeople(b.people + 1)}><Icon name="plus" size={22} stroke={2} /></button>
         </div>
-        <div className="chips" style={{ justifyContent: 'center' }} aria-label="Quick pick">
+        <div className="chips tight" style={{ justifyContent: 'center' }} aria-label="Quick pick">
           {[5, 10, 20, 30, 50].map(n => <Chip key={n} on={b.people === n} onClick={() => setPeople(n)}>{n}</Chip>)}
         </div>
         <p className="xs center" style={{ margin: 0 }}>For 2 or more people. Ordering just for yourself? <Link to="/start" className="link">Create My Morning</Link></p>
@@ -789,12 +789,13 @@ export function BizDates() {
           <span className="eyebrow">{b.source ? 'Reorder' : 'Delivery dates'}</span>
           <h1 className="q">Which mornings should we deliver?</h1>
         </div>
-        <div className="seg" style={SEG2} role="tablist" aria-label="Week">
-          {weeks.map((w, i) => (
-            <button key={i} role="tab" aria-selected={week === i} className={week === i ? 'on' : ''} onClick={() => setWeek(i)}>
-              {i === 0 ? 'This week, ' : i === 1 ? 'Next week, ' : ''}{w[0].day}{w[0].mon === w[6].mon ? '' : ` ${w[0].mon}`}–{w[6].day} {w[6].mon}
-            </button>
-          ))}
+        {/* One week at a time with arrows (four week tabs wrapped into a broken two-row pill on phones). */}
+        <div className="row" style={{ gap: 0, justifyContent: 'space-between' }} role="group" aria-label="Week">
+          <button type="button" className="icon-btn" style={{ border: 0, background: 'none' }} aria-label="Previous week" disabled={week === 0} onClick={() => setWeek(w => w - 1)}><Icon name="back" size={18} stroke={1.8} /></button>
+          <span className="strong" style={{ fontSize: 16, textAlign: 'center' }} aria-live="polite">
+            {week === 0 ? 'This week, ' : week === 1 ? 'Next week, ' : ''}{weeks[week][0].day}{weeks[week][0].mon === weeks[week][6].mon ? '' : ` ${weeks[week][0].mon}`}–{weeks[week][6].day} {weeks[week][6].mon}
+          </span>
+          <button type="button" className="icon-btn" style={{ border: 0, background: 'none' }} aria-label="Next week" disabled={week === weeks.length - 1} onClick={() => setWeek(w => w + 1)}><Icon name="chevron" size={18} stroke={1.8} /></button>
         </div>
         <div className="grid-4">
           {weeks[week].map(d => {
@@ -820,7 +821,8 @@ export function BizDates() {
             <div className="stack gap-8" role="radiogroup" aria-label="Order across days">
               {[[true, 'Same Order for All Days', `${b.people} people every day`], [false, 'Customize Each Day', 'Set the headcount for each date']].map(([v, l, d]) => (
                 <button key={l} type="button" className={`win${same === v ? ' on' : ''}`} role="radio" aria-checked={same === v} onClick={() => setSame(v)}>
-                  <span className="dot" /><span className="strong">{l}</span>
+                  <span className="stack" style={{ flex: 1 }}><span className="strong">{l}</span><span className="help" style={{ fontSize: 14 }}>{d}</span></span>
+                  <span className="dot">{same === v && <Icon name="check" size={15} stroke={2.2} />}</span>
                 </button>
               ))}
             </div>
@@ -941,10 +943,9 @@ export function BizDelivery() {
         {DELIVERY_WINDOWS.map(w => {
           const full = iso ? fullOn(iso, w.id) : b.dates.some(d => fullOn(d, w.id));
           return (
-            <button key={w.id} type="button" className={`win${cur === w.id ? ' on' : ''}`} role="radio" aria-checked={cur === w.id} disabled={full}
-              style={{ flexDirection: 'column', justifyContent: 'center', gap: 2, padding: '10px 6px', minHeight: 64, textAlign: 'center' }}
+            <button key={w.id} type="button" className={`win compact${cur === w.id ? ' on' : ''}`} role="radio" aria-checked={cur === w.id} disabled={full}
               onClick={() => upd(d => { if (iso) d.perDay[iso] = { ...(d.perDay[iso] || {}), window: w.id }; else d.delivery.window = w.id; })}>
-              <span className="strong row" style={{ fontSize: 14, gap: 4 }}>{cur === w.id && <Icon name="check" size={13} stroke={2.6} />}{w.label.replace(' AM', '')}</span><span className="xs">{full ? 'Full' : 'AM'}</span>
+              {cur === w.id && <span className="ck"><Icon name="check" size={13} stroke={2.6} /></span>}<span className="t">{w.label.replace(' AM', '')}</span><span className="xs">{full ? 'Full' : 'AM'}</span>
             </button>
           );
         })}
@@ -1449,10 +1450,9 @@ export function BizManage() {
         )}
         <DayEditor key={day.date} order={order} day={day} set={set} signedIn={!!state.session} />
         {state.session && order.days.length > 1 && <CancelOrder order={order} set={set} />}
+        {/* A plain link at the end of the page: pinned to the bottom it covered the order details while scrolling. */}
+        <Link to="/business" className="btn-text" style={{ alignSelf: 'center', marginTop: 8 }}>Back to Group &amp; Business Breakfast</Link>
       </main>
-      <Footer>
-        <Link to="/business" className="btn-text" style={{ alignSelf: 'center' }}>Back to Group &amp; Business Breakfast</Link>
-      </Footer>
     </Screen>
   );
 }
@@ -1646,10 +1646,9 @@ function DayEditor({ order, day, set, signedIn }) {
                 {DELIVERY_WINDOWS.map(w => {
                   const full = winFull(w.id);
                   return (
-                    <button key={w.id} type="button" className={`win${win === w.id ? ' on' : ''}`} role="radio" aria-checked={win === w.id} disabled={full && win !== w.id}
-                      style={{ flexDirection: 'column', justifyContent: 'center', gap: 2, padding: '10px 6px', minHeight: 64, textAlign: 'center' }}
+                    <button key={w.id} type="button" className={`win compact${win === w.id ? ' on' : ''}`} role="radio" aria-checked={win === w.id} disabled={full && win !== w.id}
                       onClick={() => { setWin(w.id); setSaved(false); }}>
-                      <span className="strong" style={{ fontSize: 14 }}>{w.label.replace(' AM', '')}</span><span className="xs">{full ? 'Full' : 'AM'}</span>
+                      {win === w.id && <span className="ck"><Icon name="check" size={13} stroke={2.6} /></span>}<span className="t">{w.label.replace(' AM', '')}</span><span className="xs">{full ? 'Full' : 'AM'}</span>
                     </button>
                   );
                 })}

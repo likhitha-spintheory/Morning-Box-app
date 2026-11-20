@@ -178,10 +178,16 @@ img { max-width: 100%; display: block; }
 .chip { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 17px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--white); font-size: 16px; font-weight: 500; cursor: pointer; color: var(--espresso); }
 .chip.on { background: var(--gold-chip); border: 2px solid var(--gold); padding: 0 16.5px; }
 .chip.dashed { border-style: dashed; }
+.chips.tight { gap: 6px; flex-wrap: nowrap; }
+.chips.tight .chip, .chips.tight .chip.on { padding: 0 12px; min-width: 48px; justify-content: center; gap: 4px; }
 .chips.sm { gap: 6px; margin-top: 8px; }
 .chips.sm .chip { gap: 6px; padding: 0 13px; font-size: 14.5px; white-space: nowrap; }
 .loaf-qty { display: flex; margin-top: 10px; }
 .chips.sm .chip.on { padding: 0 12.5px; }
+/* Half / whole loaf: two equal buttons side by side, price under the name, so they fit next to each other on a phone. */
+.chips.loaf { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 320px; }
+.chips.loaf .chip, .chips.loaf .chip.on { flex-direction: column; justify-content: center; gap: 1px; min-height: 52px; padding: 6px 8px; line-height: 1.2; white-space: nowrap; }
+.chips.loaf .chip .price { font-size: 13px; }
 .chip .price { font-weight: 400; color: var(--text-3); }
 .chip.on .price { color: var(--espresso); }
 .seg { display: grid; gap: 4px; padding: 5px; border-radius: 999px; background: var(--sand-soft); }
@@ -190,6 +196,8 @@ img { max-width: 100%; display: block; }
 /* DSN §10: the selected tab is underlined as well as raised, so it does not rely on colour alone. */
 .seg:not(.tall) button.on { text-decoration: underline; text-decoration-color: var(--gold); text-decoration-thickness: 2px; text-underline-offset: 6px; }
 .seg.tall { border-radius: 22px; padding: 6px; }
+/* On phones the white highlight and gold underline mark the choice; a tick as well made labels wrap onto two lines. */
+@media (max-width: 420px) { .seg:not(.tall) button > svg { display: none; } .seg button { padding: 0 6px; } }
 .seg.tall button { min-height: 62px; border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; line-height: 1.2; font-size: 16px; }
 .seg.tall button span { font-weight: 400; font-size: 14px; color: var(--text-3); }
 .seg.tall button.on { outline: 2px solid var(--gold); outline-offset: -2px; }
@@ -203,6 +211,10 @@ img { max-width: 100%; display: block; }
 .day:disabled .wd, .day:disabled .mo { color: var(--text-4); }
 .win { display: flex; align-items: center; gap: 16px; min-height: 64px; padding: 14px 18px; border: 1.5px solid var(--line); border-radius: 24px; background: var(--white); width: 100%; text-align: left; cursor: pointer; }
 .win.on { border: 2px solid var(--gold); background: var(--gold-wash); padding: 13.5px 17.5px; box-shadow: var(--shadow-sel); }
+.win.compact, .win.compact.on { position: relative; flex-direction: column; justify-content: center; align-items: center; gap: 2px; padding: 10px 4px; min-height: 68px; text-align: center; }
+.win.compact .ck { position: absolute; top: -8px; right: -6px; width: 22px; height: 22px; border-radius: 999px; background: var(--gold); color: var(--on-gold); display: flex; align-items: center; justify-content: center; }
+.win.compact .t { font-size: 15px; font-weight: 600; white-space: nowrap; }
+@media (max-width: 370px) { .win.compact .t { font-size: 13.5px; letter-spacing: -.01em; } }
 .win:disabled { background: rgba(255, 255, 255, .35); border-style: dashed; color: var(--text-4); cursor: not-allowed; }
 .dot { width: 26px; height: 26px; border-radius: 999px; border: 1.5px solid #D6CBBB; background: var(--white); flex: none; margin-left: auto; display: flex; align-items: center; justify-content: center; color: var(--on-gold); }
 .on > .dot { border-color: var(--gold); background: var(--gold); }
@@ -611,7 +623,9 @@ body.has-tabbar .footer { bottom: calc(var(--tabbar-h) + var(--mb-inset-bottom))
 
 /* Device storage banner (legal pack B5): above the bottom navigation, never covering the whole screen. */
 .cookie-banner { position: fixed; left: 0; right: 0; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 60; display: flex; justify-content: center; padding: 0 16px; pointer-events: none; }
-.cookie-banner > .card { width: 100%; max-width: 520px; pointer-events: auto; }
+.cookie-banner > .card { width: 100%; max-width: 520px; pointer-events: auto; max-height: calc(100dvh - 120px); overflow-y: auto; }
+/* Above the tab bar, not over it. */
+body.has-tabbar .cookie-banner { bottom: calc(var(--tabbar-h) + 10px + var(--mb-inset-bottom)); }
 /* The three choices stay the same size: side by side where they fit, stacked full width on phones. */
 .cookie-actions { display: flex; gap: 8px; }
 @media (max-width: 480px) { .cookie-actions { flex-direction: column; } .cookie-actions > button { flex: none !important; width: 100%; } }

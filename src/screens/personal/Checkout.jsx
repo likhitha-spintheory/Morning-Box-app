@@ -311,18 +311,19 @@ export function Delivery() {
   };
 
   const WindowCards = ({ iso }) => (
-    <div className="stack gap-12" role="radiogroup" aria-label={`Delivery window${iso ? ` for ${dateInfo(iso).label}` : ''}`}>
+    <div className="grid-3" role="radiogroup" aria-label={`Delivery window${iso ? ` for ${dateInfo(iso).label}` : ''}`}>
       {DELIVERY_WINDOWS.map(w => {
         const fullOn = iso ? (isFull(iso, w.id) ? iso : null) : dates.find(d => isFull(d, w.id));
         const on = iso ? dl.perDay[iso]?.window === w.id : dl.window === w.id;
         const left = Math.min(...(iso ? [iso] : dates).map(d => remaining(d, w.id) ?? 999));
-        const sub = fullOn ? `Full for ${dateInfo(fullOn).wd}, ${dateInfo(fullOn).day} ${dateInfo(fullOn).mon}` : left <= 10 ? 'Few slots left' : '';
+        const sub = fullOn ? `Full ${dateInfo(fullOn).wd} ${dateInfo(fullOn).day}` : left <= 10 ? 'Few left' : 'AM';
         return (
-          <button key={w.id} type="button" className={`win${on ? ' on' : ''}`} role="radio" aria-checked={on} disabled={!!fullOn}
+          <button key={w.id} type="button" className={`win compact${on ? ' on' : ''}`} role="radio" aria-checked={on} disabled={!!fullOn}
+            aria-label={`${w.label}${fullOn ? `, full for ${dateInfo(fullOn).label}` : left <= 10 ? ', few slots left' : ''}`}
             onClick={() => upd(d => { if (iso) d.perDay[iso] = { ...(d.perDay[iso] || {}), window: w.id }; else d.window = w.id; })}>
-            <span className="ico" style={on ? { background: 'var(--gold-soft)' } : undefined}><Icon name={WINDOW_ICON[w.id]} size={24} stroke={1.6} /></span>
-            <span className="stack" style={{ flex: 1 }}><span style={{ fontSize: 19, fontWeight: 600 }}>{w.label}</span>{sub && <span className="help" style={{ fontSize: 15.5 }}>{sub}</span>}</span>
-            {fullOn ? <span className="tag" style={{ marginLeft: 'auto' }}>Full</span> : <span className="dot">{on && <Icon name="check" size={15} stroke={2.2} />}</span>}
+            {on && <span className="ck"><Icon name="check" size={13} stroke={2.6} /></span>}
+            <Icon name={WINDOW_ICON[w.id]} size={20} stroke={1.6} />
+            <span className="t">{w.label.replace(' AM', '')}</span><span className="xs">{sub}</span>
           </button>
         );
       })}

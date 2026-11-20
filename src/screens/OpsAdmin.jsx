@@ -12,7 +12,7 @@ const WINDOWS = [['w1', '7:30–8:30'], ['w2', '8:30–9:30'], ['w3', '9:30–10
 const windowCaps = wc => (wc ? `, per window ${WINDOWS.filter(([w]) => wc[w] != null).map(([w, label]) => `${label}: ${wc[w]}`).join(', ')}` : '');
 /* Service areas after DIFC: each bakery can have its own distance to them, so the nearest bakery is chosen per delivery area. */
 const LATER_AREAS = SERVICE_AREAS.filter(a => a.id !== 'DIFC');
-const Field = ({ label, children }) => <div className="field" style={{ gap: 6 }}><label>{label}</label>{children}</div>;
+const Field = ({ label, children }) => <div className="field" style={{ gap: 6, justifyContent: 'flex-end' }}><label>{label}</label>{children}</div>;
 
 /* ---------- Bakeries ---------- */
 export function Bakeries({ items, call, act, busy }) {
@@ -250,9 +250,9 @@ export function Pricing({ data, act, busy }) {
       <div className="card stack gap-12" style={{ padding: 18 }}>
         <h2 className="h3">Business volume discount</h2>
         {p.volumeDiscount.map((t, i) => (
-          <div key={i} className="row" style={{ gap: 10, justifyContent: 'flex-start' }}>
-            <span className="xs">From</span><input className="input" style={{ width: 90 }} inputMode="numeric" aria-label="Minimum boxes" value={t.min} onChange={e => setP(x => ({ ...x, volumeDiscount: x.volumeDiscount.map((y, k) => (k === i ? { ...y, min: e.target.value } : y)) }))} />
-            <span className="xs">boxes:</span><input className="input" style={{ width: 90 }} inputMode="decimal" aria-label="Discount percent" value={Math.round(t.pct * 1000) / 10} onChange={e => setP(x => ({ ...x, volumeDiscount: x.volumeDiscount.map((y, k) => (k === i ? { ...y, pct: Number(e.target.value) / 100 } : y)) }))} /><span className="xs">% off</span>
+          <div key={i} className="row" style={{ gap: 8, justifyContent: 'flex-start', flexWrap: 'wrap' }}>
+            <span className="xs">From</span><input className="input" style={{ width: 72 }} inputMode="numeric" aria-label="Minimum boxes" value={t.min} onChange={e => setP(x => ({ ...x, volumeDiscount: x.volumeDiscount.map((y, k) => (k === i ? { ...y, min: e.target.value } : y)) }))} />
+            <span className="xs">boxes:</span><input className="input" style={{ width: 64 }} inputMode="decimal" aria-label="Discount percent" value={Math.round(t.pct * 1000) / 10} onChange={e => setP(x => ({ ...x, volumeDiscount: x.volumeDiscount.map((y, k) => (k === i ? { ...y, pct: Number(e.target.value) / 100 } : y)) }))} /><span className="xs">% off</span>
             <button type="button" className="btn-text" onClick={() => setP(x => ({ ...x, volumeDiscount: x.volumeDiscount.filter((_, k) => k !== i) }))}>Remove</button>
           </div>
         ))}

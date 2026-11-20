@@ -112,11 +112,10 @@ export function FlavourPicker({ value, flavours, onChange }) {
 /* Bread comes as a half or whole loaf: tapping a size adds one loaf, or switches the size once added. */
 export function LoafPicker({ name, unit, prices, onPick }) {
   return (
-    <div className="chips sm" role="radiogroup" aria-label={`${name} size`}>
+    <div className="chips sm loaf" role="radiogroup" aria-label={`${name} size`}>
       {['half', 'whole'].map(u => (
         <button key={u} type="button" role="radio" aria-checked={unit === u} className={`chip${unit === u ? ' on' : ''}`} onClick={() => onPick(u)}>
-          {unit === u && <Icon name="check" size={15} stroke={2.2} />}
-          {u === 'half' ? 'Half loaf' : 'Whole loaf'}<span className="price">AED {prices[u]}</span>
+          <span>{unit === u && <Icon name="check" size={13} stroke={2.4} style={{ marginRight: 4, verticalAlign: '-2px' }} />}{u === 'half' ? 'Half loaf' : 'Whole loaf'}</span><span className="price">AED {prices[u]}</span>
         </button>
       ))}
     </div>
