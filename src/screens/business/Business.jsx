@@ -441,8 +441,9 @@ export function People() {
         <div className="chips tight" style={{ justifyContent: 'center' }} aria-label="Quick pick">
           {[5, 10, 20, 30, 50].map(n => <Chip key={n} on={b.people === n} onClick={() => setPeople(n)}>{n}</Chip>)}
         </div>
-        <p className="xs center" style={{ margin: 0 }}>For 2 or more people. Ordering just for yourself? <Link to="/start" className="link">Create My Morning</Link></p>
+        <p className="help center" style={{ margin: 0, fontSize: 15 }}>Minimum order: 2 people</p>
         <Note icon="info">Volume discount applies automatically.</Note>
+        <p className="help center" style={{ margin: 0, fontSize: 15 }}>Ordering just for yourself? <Link to="/start" className="link" style={{ whiteSpace: 'nowrap' }}>Create My Morning</Link></p>
       </main>
       <Footer><button className="btn" onClick={() => { setPeople(+text || b.people); nav('/business/special'); }}>Continue</button></Footer>
     </Screen>
