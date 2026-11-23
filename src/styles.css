@@ -267,6 +267,7 @@ img { max-width: 100%; display: block; }
 .tag.light { background: var(--white); border: 1px solid var(--line); }
 .tags { display: flex; flex-wrap: wrap; gap: 8px; }
 .sr { display: flex; justify-content: space-between; gap: 12px; font-size: 16px; }
+.sr > :last-child { min-width: 0; overflow-wrap: anywhere; text-align: right; }
 .sr.total { font-weight: 700; font-size: 20px; }
 .divider { height: 1px; background: var(--line); border: 0; margin: 4px 0; }
 .note { display: flex; gap: 12px; align-items: flex-start; padding: 15px 18px; border-radius: 20px; background: var(--grey-note); font-size: 15px; color: #4A3A2C; }

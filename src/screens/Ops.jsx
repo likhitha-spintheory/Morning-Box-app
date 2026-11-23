@@ -136,11 +136,11 @@ export default function Ops() {
             <span className="eyebrow">{current?.group}</span>
             <h1 className="serif ops-title">{current?.label}</h1>
           </span>
-          <span className="row" style={{ gap: 10 }}>
+          <span className="row" style={{ gap: 10, minWidth: 0, maxWidth: '100%' }}>
             {dated && <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Date" style={{ width: 170, minHeight: 44 }} />}
             {tab === 'report' && <>
-              <input className="input" type="date" value={range.from} max={range.to} onChange={e => e.target.value && setRange(r => ({ ...r, from: e.target.value }))} aria-label="From" style={{ width: 170, minHeight: 44 }} />
-              <input className="input" type="date" value={range.to} min={range.from} onChange={e => e.target.value && setRange(r => ({ ...r, to: e.target.value }))} aria-label="To" style={{ width: 170, minHeight: 44 }} />
+              <input className="input" type="date" value={range.from} max={range.to} onChange={e => e.target.value && setRange(r => ({ ...r, from: e.target.value }))} aria-label="From" style={{ width: 170, minWidth: 0, flex: '0 1 170px', minHeight: 44 }} />
+              <input className="input" type="date" value={range.to} min={range.from} onChange={e => e.target.value && setRange(r => ({ ...r, to: e.target.value }))} aria-label="To" style={{ width: 170, minWidth: 0, flex: '0 1 170px', minHeight: 44 }} />
             </>}
           </span>
         </header>
@@ -207,6 +207,7 @@ function Feedback({ data }) {
           </tr>
         ))}</tbody>
       </table>
+      {!data.items.length && <p className="help">No feedback yet. Customers rate each breakfast after delivery.</p>}
     </section>
   );
 }
@@ -338,7 +339,7 @@ function Report({ data }) {
       <div className="grid-2">
         <Tile label="Revenue (incl. VAT)" value={`AED ${t.revenue.toLocaleString('en-GB')}`} />
         <Tile label="Boxes booked" value={t.boxes} />
-        <Tile label="On time" value={`${pct(t.onTime, t.delivered)} of ${t.delivered}`} />
+        <Tile label="On time" value={t.delivered ? `${pct(t.onTime, t.delivered)} of ${t.delivered}` : '—'} />
         <Tile label="Late / failed" value={`${t.late} / ${t.failed}`} />
         <Tile label="Exceptions (safety)" value={`${t.exceptions} (${t.safety})`} />
         <Tile label="Loved it / Not for me" value={`${t.loved} / ${t.notForMe}`} />

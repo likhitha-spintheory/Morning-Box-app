@@ -151,7 +151,8 @@ export function SignIn() {
       nav(changedDays.length ? '/plan/summary' : next, { replace: true });
     } catch (e) {
       setBusy(false);
-      if (e.code === 'name_required') { setNeedName(true); setTouched(true); setError('Enter your first name to create your account.'); return; }
+      /* New customer: the code was right, we only need a first name. Ask kindly, not as an error. */
+      if (e.code === 'name_required') { setNeedName(true); setTouched(false); setTimeout(() => document.getElementById('fn2')?.focus(), 50); return; }
       setError(e.message);
       if (e.code === 'otp_wrong') { setCode(['', '', '', '', '', '']); refs.current[0]?.focus(); }
     }
@@ -184,6 +185,7 @@ export function SignIn() {
           {needName && (
             <div className="field">
               <label htmlFor="fn2">Your first name</label>
+              <span className="help" style={{ fontSize: 15 }}>New to Morning Box? Tell us your first name to create your account.</span>
               <input id="fn2" className={`input${touched && !nameOk ? ' invalid' : ''}`} value={name} autoComplete="given-name" onChange={e => setName(e.target.value)} />
             </div>
           )}

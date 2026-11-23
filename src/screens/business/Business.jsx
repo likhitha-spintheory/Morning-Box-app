@@ -1028,7 +1028,7 @@ export function BizDelivery() {
         ))}
         {touched && errs.window && <Err>{errs.window}</Err>}
         <div className="field"><label htmlFor="bd-notes">Delivery notes <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></label>
-          <input id="bd-notes" className="input" placeholder={family ? 'e.g. Ring the bell, gate code 1234' : 'e.g. Ask for the office manager at reception'} value={dl.notes} onChange={e => upd(d => { d.delivery.notes = e.target.value; })} /></div>
+          <input id="bd-notes" className="input" placeholder={family ? 'e.g. Ring the bell, gate code 1234' : 'e.g. Ask for the office manager'} value={dl.notes} onChange={e => upd(d => { d.delivery.notes = e.target.value; })} /></div>
         {(areaProblem || areaError) && <div className="banner-err" role="alert"><Icon name="alert" size={18} stroke={2} />{areaProblem?.message || areaError}</div>}
       </main>
       <Footer>
@@ -1119,7 +1119,7 @@ export function BizAccount() {
         set(s => { if (s.owner && s.owner !== ownerOf(res.user)) resetPersonal(s); applySession(s, res); });
         await saveAccount();
       } catch (e) {
-        if (e.code === 'name_required') { setNeedName(true); setError('New to Morning Box? Enter your first name to create your account.'); }
+        if (e.code === 'name_required') { setNeedName(true); setTouched(false); setTimeout(() => document.getElementById('ba-fn')?.focus(), 50); }
         else setError(e.message);
         if (e.code === 'otp_wrong') { setCode(['', '', '', '', '', '']); refs.current[0]?.focus(); }
       } finally { setBusy(false); }
@@ -1199,6 +1199,7 @@ export function BizAccount() {
             {sent && needName && (
               <div className="field">
                 <label htmlFor="ba-fn">Your first name</label>
+                <span className="help" style={{ fontSize: 15 }}>New to Morning Box? Tell us your first name to create your account.</span>
                 <input id="ba-fn" className={`input${touched && !nameOk ? ' invalid' : ''}`} value={name} autoComplete="given-name" onChange={e => setName(e.target.value)} />
                 {touched && !nameOk && <Err>Enter your first name</Err>}
               </div>

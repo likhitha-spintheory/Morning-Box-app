@@ -90,6 +90,7 @@ export function Dashboard({ data, call, open }) {
           <header><span className="strong">Last 7 days</span><button type="button" className="btn-text" onClick={() => open('report')}>Reports</button></header>
           {!extra ? <p className="help">Loading…</p> : (
             <>
+              {!week.boxes && <p className="help">No boxes booked in the last 7 days.</p>}
               <div className="dash-chart" role="img" aria-label="Boxes booked per day, last 7 days">
                 {days.map(d => (
                   <span key={d.date} className="dash-col">
