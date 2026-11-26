@@ -1,3 +1,4 @@
+import { priceOrder, DISCOUNTS, pctText } from '../../domain/discounts.js';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
@@ -643,9 +644,16 @@ export function WeeklySummary() {
   }, [unsafeSaved.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!plan.dates.length) return <Navigate to={state.orders.length ? '/today' : '/plan/dates'} replace />;
   const unsaved = plan.dates.find(d => !plan.days[d]?.saved);
-  const prices = rows.map(d => dayPrice(plan.days[d].cfg, state.profile));
-  const total = prices.reduce((t, p) => t + p.total, 0);
+  /* Multi-day discount is known here; the first-order discount is confirmed at review, once signed in. */
+  const priced = priceOrder('personal', rows.map(d => ({ date: d, gross: dayPrice(plan.days[d].cfg, state.profile).total, boxes: 1 })));
+  const prices = rows.map(d => priced.days.find(x => x.date === d));
+  const total = priced.total;
   const signedIn = !!(state.session && state.user);
+  const firstOffer = DISCOUNTS.firstOrder.enabled && DISCOUNTS.firstOrder.personal && !state.orders.length && !(state.businessOrders || []).length;
+  const nextTier = [...DISCOUNTS.multiDay.tiers].reverse().find(t => t.min > rows.length && t.pct > (prices[0]?.lines[0]?.pct || 0));
+  const discountHint = priced.discount > 0
+    ? `Multi-day discount (${pctText(prices[0].lines[0].pct)}): you save AED ${priced.discount}.`
+    : null;
 
   return (
     <Screen>
@@ -668,7 +676,7 @@ export function WeeklySummary() {
               <span className="stack" style={{ flex: 1, gap: 3, minWidth: 0 }}>
                 <span className="row" style={{ alignItems: 'baseline', gap: 10 }}>
                   <span className="strong" style={{ fontSize: 18, lineHeight: 1.3 }}>{boxName(day.cfg)}</span>
-                  <span className="money" style={{ fontSize: 18, whiteSpace: 'nowrap' }}>AED {prices[k].total}</span>
+                  <span className="money" style={{ fontSize: 18, whiteSpace: 'nowrap' }}>{prices[k].discount > 0 && <s className="xs" style={{ color: 'var(--text-3)', marginRight: 6 }}>{prices[k].gross}</s>}AED {prices[k].total}</span>
                 </span>
                 <span className="help" style={{ fontSize: 15 }}>{details}</span>
                 <span className="row" style={{ justifyContent: 'flex-start', gap: 16 }}>
@@ -691,6 +699,9 @@ export function WeeklySummary() {
         <div className="stack gap-4">
           <div className="row sm" style={{ fontSize: 15 }}><span>{rows.length} morning{rows.length === 1 ? '' : 's'}</span><span>Delivery included</span></div>
           <div className="row"><span className="strong" style={{ fontSize: 18 }}>Breakfast total</span><span style={{ font: '700 28px/1.15 var(--sans)' }}>AED {total}</span></div>
+          {discountHint && <span className="xs" style={{ color: 'var(--ok)', fontWeight: 600 }}>{discountHint}</span>}
+          {DISCOUNTS.multiDay.enabled && DISCOUNTS.multiDay.personal && nextTier && <span className="xs">Plan {nextTier.min} or more mornings to save {pctText(nextTier.pct)}.</span>}
+          {firstOffer && <span className="xs">New to Morning Box? Your first morning is {pctText(DISCOUNTS.firstOrder.pct)} off, applied at checkout.</span>}
         </div>
         <button className="btn" disabled={!!unsaved || !rows.length}
           onClick={() => nav(signedIn ? '/checkout/delivery' : '/sign-in?next=/checkout/delivery')}>

@@ -56,7 +56,7 @@ test('admin prices change what customers pay, and the app receives them', async 
   assert.equal(cfg.pricing.priceLevels.L1, DEFAULT_PRICING.priceLevels.L1 + 5);
   assert.equal(cfg.pricing.indicative, false);
   const { o } = await order('509100001', dates[0]);
-  assert.equal(o.days[0].price, Object.values(PRICE_LEVELS).find(v => v === o.days[0].price), 'server prices from the admin levels');
+  assert.equal(o.days[0].gross, Object.values(PRICE_LEVELS).find(v => v === o.days[0].gross), 'server prices from the admin levels');
   assert.equal((await call('GET', '/ops/admin/pricing')).status, 401, 'needs the operations key');
   await ops('POST', '/admin/pricing/reset');
   assert.equal(PRICE_LEVELS.L1, DEFAULT_PRICING.priceLevels.L1);

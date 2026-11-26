@@ -22,6 +22,8 @@ import { assertAllocatable, personalUnits, reallocateProvisional, isFinal } from
 import { activeBakeries, danishFlavours, cleanPhoto } from './rules.js';
 import { openSafetyCheck } from './days.js';
 import { pricingSnapshot } from '../src/domain/standards.js';
+import { discountsSnapshot, dayDiscountText } from '../src/domain/discounts.js';
+import { discountOrder, recordPromo, repriceDay, firstOrderEligible, loadPromo } from './discounts.js';
 import { LIBRARY_SETTINGS } from '../src/domain/library.js';
 import { menuSnapshot } from '../src/domain/menu.js';
 import { ACTIVE_AREAS, GLUTEN_FREE, areaFor } from '../src/domain/standards.js';
@@ -117,7 +119,7 @@ personalRouter.get('/availability', (req, res) => {
 personalRouter.get('/config', (_req, res) => {
   /* Prices set in Admin, and the Fruit Danish variants partner bakeries can make (MB-PRO-001 §14.2). */
   const flavours = [...new Set(activeBakeries().flatMap(danishFlavours))];
-  res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: { name: SUPPLIER.name, address: SUPPLIER.address, licence: SUPPLIER.licence }, legal: LEGAL, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples }, menu: menuSnapshot(), areas: [...ACTIVE_AREAS],
+  res.json({ closedDates: upcomingClosedDates(), support: SUPPORT, company: { name: SUPPLIER.name, address: SUPPLIER.address, licence: SUPPLIER.licence }, legal: LEGAL, termsVersion: TERMS_VERSION, pricing: pricingSnapshot(), discounts: discountsSnapshot(), danishFlavours: flavours, library: { samples: LIBRARY_SETTINGS.samples }, menu: menuSnapshot(), areas: [...ACTIVE_AREAS],
     /* Which sign-in codes can be delivered, so the app only offers those (development shows codes in the server log). */
     signIn: { email: DEV || mailConfigured(), mobile: DEV || whatsappConfigured() },
     /* Real map on order tracking (Google Maps Embed API: free, key restricted to this site in Google Cloud). */
@@ -147,7 +149,14 @@ personalRouter.post('/recommendations', (req, res) => {
 });
 
 /* ---------- Me ---------- */
-personalRouter.get('/me', requireUser, (req, res) => res.json({ ...userPayload(req.userId), credit: creditBalance(req.userId) }));
+personalRouter.get('/me', requireUser, (req, res) => res.json({ ...userPayload(req.userId), credit: creditBalance(req.userId), firstOrder: firstOrderEligible(req.userId) }));
+
+/** Check a promo code before review shows it: { promo } for the app to price with, or a 400 with the reason. */
+personalRouter.post('/promo/check', requireUser, (req, res) => {
+  limitIp(req, 'promo', 60);
+  const kind = req.body.kind === 'business' ? 'business' : 'personal';
+  res.json({ promo: loadPromo(req.body.code, { userId: req.userId, kind }), firstOrder: firstOrderEligible(req.userId) });
+});
 
 personalRouter.put('/me/profile', requireUser, (req, res) => {
   const p = validateProfile(req.body);
@@ -303,9 +312,10 @@ export function serializeOrders(orders) {
     return {
       id: o.id, createdAt: o.created_at, email: o.email || '', method: o.payment_method,
       total: own.filter(d => !d.cancelled).reduce((t, d) => t + d.price, 0),
-      paid: o.total, creditUsed: o.credit_used || 0,
+      paid: o.total, creditUsed: o.credit_used || 0, promoCode: o.promo_code || null,
       days: own.map(d => ({
         date: d.date, window: d.window, cfg: parse(d.cfg), price: d.price, address: parse(d.address),
+        gross: d.gross ?? d.price, discount: d.discount || 0, discountLines: parse(d.discount_lines) || [], discountBasis: parse(d.discount_basis),
         cancelled: !!d.cancelled, refund: d.refund, feedback: d.feedback, feedbackReasons: parse(d.feedback_reasons) || [],
         feedbackNote: d.feedback_note || '',
         /* DLV §5–6: the customer sees a missed delivery, a breakfast we couldn't prepare, and any refund. */
@@ -383,17 +393,23 @@ function preparePersonalOrder(userId, body) {
     const dayAddress = { ...(d.address ? validateAddress(d.address) : address), ...(contactMobile ? { mobile: contactMobile } : {}) };
     return { ...b, date: d.date, window: d.window, address: dayAddress };
   });
+  /* Launch discounts: first order, multi-day and any promo code, decided per day (src/domain/discounts.js). */
+  const priced = discountOrder(userId, 'personal', built.map(b => ({ date: b.date, gross: b.price, boxes: 1 })), body.promoCode);
+  built.forEach(b => {
+    const p = priced.days.find(x => x.date === b.date);
+    Object.assign(b, { gross: p.gross, price: p.total, discount: p.discount, basis: p.basis, discountLines: p.lines });
+  });
   const total = roundAed(built.reduce((t, b) => t + b.price, 0));
   if (body.expectedTotal !== undefined && Number(body.expectedTotal) !== total) {
     throw new ApiError(409, 'price_changed', `Your total is now AED ${total}. Please check it and pay again.`, { total, prices: built.map(b => ({ date: b.date, price: b.price })) });
   }
   const capacity = () => built.forEach(b => { assertCapacity(b.date, b.window, 1); assertAllocatable(b.date, [{ kind: 'personal', window: b.window, area: b.address.area, boxes: 1, units: personalUnits(b.cfg, b.trace.inputs) }]); });
-  return { profile, built, total, address, method, email, capacity };
+  return { profile, built, total, address, method, email, capacity, priced };
 }
 
 /** Saves a paid order. `payment` is { provider, ref, amount } for the card part; credit is used first. */
 function createPersonalOrder(userId, body, payment, key = null) {
-  const { profile, built, total, address, method, email, capacity } = preparePersonalOrder(userId, body);
+  const { profile, built, total, address, method, email, capacity, priced } = preparePersonalOrder(userId, body);
   const id = newOrderId('MB', 'orders');
   const order = tx(() => {
     capacity();
@@ -404,8 +420,10 @@ function createPersonalOrder(userId, body, payment, key = null) {
       .run(id, userId, email || null, method, payment.ref || 'credit', total, key, credit, payment.provider === 'stripe' ? 'captured' : 'captured_demo');
     recordPayment('personal', id, payment);
     if (credit > 0) db.prepare('INSERT INTO customer_credits (user_id, amount, reason, ref) VALUES (?, ?, ?, ?)').run(userId, -credit, 'Used on order', id);
-    const ins = db.prepare('INSERT INTO order_days (order_id, date, window, context, cfg, trace, price, address) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    built.forEach(b => ins.run(id, b.date, b.window, b.cfg.context, json(b.cfg), json(b.trace), b.price, json(b.address)));
+    const ins = db.prepare('INSERT INTO order_days (order_id, date, window, context, cfg, trace, price, address, gross, discount, discount_basis, discount_lines) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    built.forEach(b => ins.run(id, b.date, b.window, b.cfg.context, json(b.cfg), json(b.trace), b.price, json(b.address), b.gross, b.discount, json(b.basis), json(b.discountLines)));
+    if (priced.promo?.applied) db.prepare('UPDATE orders SET promo_code = ? WHERE id = ?').run(priced.promo.code, id);
+    recordPromo(priced, { userId, kind: 'personal', orderId: id });
     db.prepare(`INSERT INTO addresses (user_id, building, unit, area, handover, notes, default_window) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET building = excluded.building, unit = excluded.unit, area = excluded.area,
       handover = excluded.handover, notes = excluded.notes, default_window = excluded.default_window`)
@@ -484,6 +502,9 @@ function editPersonalDay(userId, orderId, date, body, payment = null) {
       size: body.size ?? current.size,
       addons: body.addons ?? current.addons
     }, profile);
+    /* The day keeps the discounts it was ordered with, applied to its new full price. */
+    const r = repriceDay(day.discount_basis, b.price, { kind: 'personal' });
+    b = { ...b, gross: r.gross, price: r.total, discount: r.discount, discountLines: r.lines };
   }
   const changes = [];
   if (window !== day.window) changes.push(`delivery window to ${windowLabel(window)}`);
@@ -508,8 +529,8 @@ function editPersonalDay(userId, orderId, date, body, payment = null) {
     /* Bakery capacity is per day and, where set, per delivery window (MB-B2B-001 §9). */
     if (b || window !== day.window || addressChanged) assertAllocatable(day.date, [{ kind: 'personal', window, area: address.area, boxes: 1, units: b ? personalUnits(b.cfg, b.trace.inputs) : personalUnits(parse(day.cfg), parse(day.trace).inputs) }], { exclude: [`personal:${day.id}`] });
     if (b) {
-      db.prepare('UPDATE order_days SET cfg = ?, trace = ?, price = ?, context = ?, window = ?, safety_hold = 0 WHERE id = ?')
-        .run(json(b.cfg), json(b.trace), b.price, b.cfg.context, window, day.id);
+      db.prepare('UPDATE order_days SET cfg = ?, trace = ?, price = ?, context = ?, window = ?, safety_hold = 0, gross = ?, discount = ?, discount_lines = ? WHERE id = ?')
+        .run(json(b.cfg), json(b.trace), b.price, b.cfg.context, window, b.gross, b.discount, json(b.discountLines), day.id);
       /* A higher price was paid before getting here; it is recorded against the order so refunds can reach it. */
       if (b.price !== day.price) db.prepare('INSERT INTO payment_adjustments (order_day_id, amount) VALUES (?, ?)').run(day.id, roundAed(b.price - day.price));
       if (due > 0) recordPayment('personal', order.id, payment);
@@ -621,7 +642,8 @@ personalRouter.get('/orders/:id/receipt', requireUser, (req, res) => {
   const u = db.prepare('SELECT first_name FROM users WHERE id = ?').get(req.userId);
   const vat = o.total - o.total / (1 + VAT_RATE);
   const refunded = o.days.filter(d => d.cancelled).reduce((t, d) => t + (d.refund || d.price), 0);
-  const rows = o.days.map(d => `<tr><td>${esc(d.date)}</td><td>${esc(boxName(d.cfg))}, ${esc(sizeLabel(d.cfg.size))}${d.cfg.addons.length ? `<br><small>+ ${esc(extrasText(d.cfg.addons))}</small>` : ''}${d.cancelled ? '<br><small>Cancelled and refunded</small>' : ''}${parties.multiple && !d.cancelled ? `<br><small>Seller: ${esc(parties.sellerOf(d.date))}</small>` : ''}</td><td>${esc(windowLabel(d.window))}</td><td style="text-align:right">${d.cancelled ? '0.00' : money(d.price)}</td></tr>`).join('');
+  const rows = o.days.map(d => `<tr><td>${esc(d.date)}</td><td>${esc(boxName(d.cfg))}, ${esc(sizeLabel(d.cfg.size))}${d.cfg.addons.length ? `<br><small>+ ${esc(extrasText(d.cfg.addons))}</small>` : ''}${d.cancelled ? '<br><small>Cancelled and refunded</small>' : ''}${parties.multiple && !d.cancelled ? `<br><small>Seller: ${esc(parties.sellerOf(d.date))}</small>` : ''}</td><td>${esc(windowLabel(d.window))}</td><td style="text-align:right">${d.cancelled ? '0.00' : d.discount ? `<s style="color:#8a7a6a">${money(d.gross)}</s><br>${money(d.price)}<br><small>${esc(dayDiscountText(d.discountLines))}</small>` : money(d.price)}</td></tr>`).join('');
+  const saved = o.days.filter(d => !d.cancelled).reduce((t, d) => t + (d.discount || 0), 0);
   res.type('html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Receipt ${esc(o.id)}</title>
 <style>body{font-family:Inter,Arial,sans-serif;color:#3B2D22;max-width:720px;margin:32px auto;padding:0 20px}h1{font-family:Georgia,serif;font-weight:400}table{width:100%;border-collapse:collapse;font-size:14px}td,th{border-bottom:1px solid #EADCC1;padding:8px;text-align:left;vertical-align:top}.r{text-align:right}</style>
 <h1>Morning Box ${parties.taxReady ? 'Tax Invoice' : 'Receipt'}</h1>
@@ -629,7 +651,7 @@ personalRouter.get('/orders/:id/receipt', requireUser, (req, res) => {
 ${parties.html}
 <p><b>Billed to:</b> ${esc(u?.first_name)}${o.email ? `<br>${esc(o.email)}` : ''}</p>
 <table><tr><th>Date</th><th>Breakfast</th><th>Delivery</th><th class="r">AED</th></tr>${rows}</table>
-<p class="r">Delivery: included<br>Total excluding VAT: AED ${money(o.total - vat)}<br>VAT ${Math.round(VAT_RATE * 100)}%: AED ${money(vat)}</p>
+<p class="r">${saved ? `Discounts: − AED ${money(saved)}${o.promoCode ? ` (includes promo code ${esc(o.promoCode)})` : ''}<br>` : ''}Delivery: included<br>Total excluding VAT: AED ${money(o.total - vat)}<br>VAT ${Math.round(VAT_RATE * 100)}%: AED ${money(vat)}</p>
 <p class="r" style="font-size:18px"><b>Total AED ${money(o.total)}</b></p>
 ${refunded ? `<p class="r">Refunded for cancelled mornings: AED ${money(refunded)}</p>` : ''}
 <p style="font-size:12px">${o.creditUsed ? `Paid with Morning Box credit: AED ${money(o.creditUsed)}. Paid online: AED ${money(o.total - o.creditUsed)}.` : 'Paid online.'} Prices include VAT.</p>`);

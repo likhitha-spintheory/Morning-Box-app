@@ -192,6 +192,12 @@ addColumns('business_days', FULFIL_DETAIL);
 addColumns('bakeries', { area_distances: 'TEXT' });
 /* Master Plan §6.1 onboarding gate evidence: safety data, packaging, system readiness, pilot handoff test. */
 addColumns('bakeries', { onboarding: 'TEXT' });
+/* Launch discounts: what each day cost before discounts, the discounts it got, and what it qualified for
+   when ordered (re-used when the day is edited). Older rows have none: their price is the full price. */
+addColumns('order_days', { gross: 'REAL', discount: 'REAL NOT NULL DEFAULT 0', discount_basis: 'TEXT', discount_lines: 'TEXT' });
+addColumns('business_days', { discount_basis: 'TEXT', discount_lines: 'TEXT' });
+addColumns('orders', { promo_code: 'TEXT' });
+addColumns('business_orders', { promo_code: 'TEXT' });
 /* MB-OPS-001 §9: reconciliation outcome, financial record and completion per delivery day. */
 const RECONCILE = { reconcile_status: 'TEXT', reconcile_issues: 'TEXT', finance: 'TEXT', completed_at: 'TEXT', reconciled_at: 'TEXT' };
 addColumns('order_days', RECONCILE);

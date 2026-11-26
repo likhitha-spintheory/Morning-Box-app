@@ -95,6 +95,9 @@ test('a morning already refunded by operations is not refunded again when the cu
 });
 
 test('a morning paid with Morning Box credit gives credit back on cancel, not card money', async () => {
+  /* Full prices here: with the launch first-order discount the credit (half price) wouldn't cover the second morning. */
+  const d0 = (await ops('GET', '/admin/discounts')).body.discounts;
+  await ops('PUT', '/admin/discounts', { ...d0, firstOrder: { ...d0.firstOrder, enabled: false } });
   const a = await signIn('509900003');
   /* Credit for an earlier morning... */
   const first = await order(a, dates[3]);
@@ -112,6 +115,7 @@ test('a morning paid with Morning Box credit gives credit back on cancel, not ca
   assert.equal(credits(userId), before, 'the credit is back');
   /* Ops credits are limited to the morning's price. */
   assert.equal((await ops('POST', `/days/personal/${first.day.id}/remedy`, { type: 'Credit', amount: 1e9, reason: 'Typo' })).body.error, 'amount_invalid');
+  await ops('POST', '/admin/discounts/reset');
 });
 
 test('business totals always add up: total = gross − discount, in whole dirhams', () => {

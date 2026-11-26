@@ -1,3 +1,4 @@
+import { applyDiscounts } from './domain/discounts.js';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
@@ -27,17 +28,18 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
 /* Prices are set by Morning Box in Admin. Use the last known prices straight away,
    then the server's current ones before the first screen renders (max 2.5 s). */
 const PRICE_CACHE = 'morningbox.pricing';
-try { const c = JSON.parse(localStorage.getItem(PRICE_CACHE) || 'null'); applyPricing(c?.pricing ?? c); setLibrarySettings(c?.library); applyMenu(c?.menu); applyAreas(c?.areas); applyGlutenFree(c?.glutenFree); applySignIn(c?.signIn); } catch { /* storage blocked */ }
+try { const c = JSON.parse(localStorage.getItem(PRICE_CACHE) || 'null'); applyPricing(c?.pricing ?? c); applyDiscounts(c?.discounts); setLibrarySettings(c?.library); applyMenu(c?.menu); applyAreas(c?.areas); applyGlutenFree(c?.glutenFree); applySignIn(c?.signIn); } catch { /* storage blocked */ }
 const pricing = Promise.race([
   fetch('./api/config').then(r => r.json()).then(c => {
     applyPricing(c.pricing);
+    applyDiscounts(c.discounts);
     setLibrarySettings(c.library);
     /* Menu rules set in Admin (food items, breakfasts, priority) — the engine recommends from these. */
     applyMenu(c.menu);
     applyAreas(c.areas);
     applyGlutenFree(c.glutenFree);
     applySignIn(c.signIn);
-    try { localStorage.setItem(PRICE_CACHE, JSON.stringify({ pricing: c.pricing, library: c.library, menu: c.menu, areas: c.areas, signIn: c.signIn, glutenFree: c.glutenFree })); } catch { /* storage blocked */ }
+    try { localStorage.setItem(PRICE_CACHE, JSON.stringify({ pricing: c.pricing, discounts: c.discounts, library: c.library, menu: c.menu, areas: c.areas, signIn: c.signIn, glutenFree: c.glutenFree })); } catch { /* storage blocked */ }
   }),
   new Promise(resolve => setTimeout(resolve, 2500))
 ]).catch(() => {});

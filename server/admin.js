@@ -5,6 +5,8 @@ import { randomInt, createHash } from 'node:crypto';
 import { db, json } from './db.js';
 import { allocate, isFinal } from './allocation.js';
 import { ApiError, bad, isIsoDate, BAKERY_CONDITIONS, areaDistances, bakeryCaps, bakeryProducts, danishFlavours, windowCapacity, WINDOW_IDS } from './rules.js';
+import { getDiscounts, saveDiscounts, resetDiscounts } from './settings.js';
+import { listPromos, createPromo, updatePromo, deletePromo } from './discounts.js';
 import { getPricing, savePricing, resetPricing, pricingHistory, getCompany, saveCompany, getLibrary, saveLibrary, getDelivery, saveDelivery, getAreas, saveAreas, getGlutenFree, saveGlutenFree } from './settings.js';
 import { COMPONENTS, ADDON_BREAD, ADDON_PASTRY } from '../src/domain/library.js';
 import { BASE_RECOMMENDATIONS, describe, priceLevel } from '../src/domain/recipes.js';
@@ -23,6 +25,14 @@ adminRouter.get('/pricing', (_req, res) => {
 });
 adminRouter.put('/pricing', (req, res) => res.json({ pricing: savePricing(req.body) }));
 adminRouter.post('/pricing/reset', (_req, res) => res.json({ pricing: resetPricing() }));
+
+/* ---------- Launch discounts & promotional codes (Admin → Discounts) ---------- */
+adminRouter.get('/discounts', (_req, res) => res.json({ discounts: getDiscounts(), promos: listPromos() }));
+adminRouter.put('/discounts', (req, res) => res.json({ discounts: saveDiscounts(req.body) }));
+adminRouter.post('/discounts/reset', (_req, res) => res.json({ discounts: resetDiscounts() }));
+adminRouter.post('/promos', (req, res) => res.json({ promos: createPromo(req.body) }));
+adminRouter.put('/promos/:code', (req, res) => res.json({ promos: updatePromo(req.params.code, req.body) }));
+adminRouter.delete('/promos/:code', (req, res) => res.json({ promos: deletePromo(req.params.code) }));
 
 /* ---------- Company & support details ---------- */
 adminRouter.get('/company', (_req, res) => res.json(getCompany()));

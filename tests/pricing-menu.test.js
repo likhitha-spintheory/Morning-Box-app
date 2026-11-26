@@ -36,7 +36,7 @@ async function priceOf(date, extra) {
   await call('PUT', '/me/profile', profile, token);
   const o = await call('POST', '/orders', { days: [day(date, extra)], address }, token);
   assert.equal(o.status, 201, JSON.stringify(o.body));
-  return o.body.days[0].price;
+  return o.body.days[0].gross;   // the list price; a first order also gets the launch discount (tests/discounts.test.js)
 }
 const bread = (item, unit = 'half', qty = 1) => ({ addons: [{ group: 'bread', item, unit, qty }] });
 

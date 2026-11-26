@@ -9,6 +9,8 @@ import {
 } from '../../domain/app.js';
 import { useOrder, Loading, usePruneExpired } from '../../state/orders.jsx';
 import { PRICING, areaFor } from '../../domain/standards.js';
+import { priceOrder } from '../../domain/discounts.js';
+import { DiscountLines, Savings, PromoField } from '../../components/Discounts.jsx';
 import { CONSENT } from '../../legal/documents.js';
 import { placeProblem } from '../../domain/places.js';
 
@@ -88,7 +90,8 @@ export function SignIn() {
   const target = byEmail ? { email: email.trim() } : { mobile: digits };
   const nameOk = name.trim().length > 0;
   const planned = state.plan.dates.filter(d => state.plan.days[d]?.saved);
-  const total = planned.reduce((t, d) => t + dayPrice(state.plan.days[d].cfg, state.profile).total, 0);
+  /* Same as the plan summary: the multi-day discount is known; the first-order one is added at review. */
+  const total = priceOrder('personal', planned.map(d => ({ date: d, gross: dayPrice(state.plan.days[d].cfg, state.profile).total, boxes: 1 }))).total;
 
   useEffect(() => {
     if (wait <= 0) return undefined;
@@ -451,7 +454,10 @@ export function ReviewPay() {
   const [serverTotal, setServerTotal] = useState(null);
   /* Morning Box credit from service recovery is used automatically. */
   const [credit, setCredit] = useState(0);
-  useEffect(() => { if (state.session) get('/me').then(m => setCredit(m.credit || 0)).catch(() => {}); track('checkout_started'); }, [state.session]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* Launch discounts: is this the customer's first order, and any promo code they entered. */
+  const [firstOrder, setFirstOrder] = useState(false);
+  const [promo, setPromo] = useState(null);
+  useEffect(() => { if (state.session) get('/me').then(m => { setCredit(m.credit || 0); setFirstOrder(!!m.firstOrder); }).catch(() => {}); track('checkout_started'); }, [state.session]); // eslint-disable-line react-hooks/exhaustive-deps
   const expiredNote = usePruneExpired();
   const plan = state.plan;
   const dates = plan.dates.filter(d => plan.days[d]?.saved);
@@ -462,8 +468,11 @@ export function ReviewPay() {
   if (dates.length > 1 && (typeof dl.sameForAll !== 'boolean' || dl.sameAnswerFor !== dates.join(','))) return <Navigate to="/checkout/delivery" replace />;
   const win = iso => (dl.sameForAll || dates.length === 1 ? dl.window : dl.perDay[iso]?.window);
   const addrOf = iso => (dl.sameForAll || dates.length === 1 ? dl.address : (dl.perDay[iso]?.address || dl.address));
-  const prices = dates.map(d => dayPrice(plan.days[d].cfg, state.profile));
-  const total = prices.reduce((t, p) => t + p.total, 0);
+  const listPrices = dates.map(d => dayPrice(plan.days[d].cfg, state.profile));
+  const priced = priceOrder('personal', dates.map((d, k) => ({ date: d, gross: listPrices[k].total, boxes: 1 })), { firstEligible: firstOrder, promo });
+  const prices = dates.map(d => priced.days.find(x => x.date === d));
+  const gross = priced.gross;
+  const total = priced.total;
   const payTotal = serverTotal ?? total;
   const creditUsed = Math.min(credit, payTotal);
   const oneAddress = dl.sameForAll || dates.length === 1;
@@ -493,7 +502,7 @@ export function ReviewPay() {
     try {
       if (!(await syncProfile())) return;
       const order = await post('/orders', {
-        idempotencyKey: idemKey, expectedTotal: payTotal,
+        idempotencyKey: idemKey, expectedTotal: payTotal, ...(priced.promo?.applied ? { promoCode: promo.code } : {}),
         method: method === 'apple' ? 'apple' : 'card', email: email.trim(), address: addrOf(dates[0]),
         ...(!state.user?.mobile ? { contactMobile: dl.contactMobile || '' } : {}),
         days: dates.map(iso => {
@@ -542,17 +551,23 @@ export function ReviewPay() {
                   <Link to={`/plan/day/${iso}/box`} className="strong" style={{ fontSize: 17, textDecoration: 'none' }}>{boxName(c)}, {canChooseSize(c) ? sizeLabel(c.size) : 'Standard'}</Link>
                   <span className="help" style={{ fontSize: 15 }}>{meta}</span>
                 </span>
-                <span className="money" style={{ fontSize: 17 }}>AED {prices[k].total}</span>
+                <span className="stack" style={{ alignItems: 'flex-end', gap: 0, flex: 'none' }}>
+                  {prices[k].discount > 0 && <s className="xs" style={{ color: 'var(--text-3)' }}>AED {prices[k].gross}</s>}
+                  <span className="money" style={{ fontSize: 17 }}>AED {prices[k].total}</span>
+                </span>
               </div>
             );
           })}
         </section>
         <section className="card stack gap-12" style={{ padding: 20 }}>
-          <div className="sr"><span className="help">Breakfasts &amp; extras</span><span>AED {total}</span></div>
+          <div className="sr"><span className="help">Breakfasts &amp; extras</span><span>AED {gross}</span></div>
+          <DiscountLines days={priced.days} />
           <div className="sr"><span className="help">Delivery</span><span>Included</span></div>
           {creditUsed > 0 && <div className="sr"><span className="help">Morning Box credit</span><span>− AED {creditUsed}</span></div>}
           <hr className="divider" />
           <div className="sr" style={{ fontSize: 22, fontWeight: 700 }}><span>Total</span><span>AED {payTotal - creditUsed}</span></div>
+          <Savings amount={priced.discount} />
+          <PromoField kind="personal" promo={promo} onChange={p => { setPromo(p); setServerTotal(null); }} result={priced.promo} />
           {PRICING.indicative && <span className="xs">Prices are indicative during our pilot.</span>}
         </section>
         {oneAddress && dl.address.building && (

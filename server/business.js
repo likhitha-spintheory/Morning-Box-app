@@ -14,6 +14,8 @@ import { recipeById, describe } from '../src/domain/recipes.js';
 
 import { assertAllocatable, businessUnits, reallocateProvisional, isFinal } from './allocation.js';
 import { dubaiTodayIso, PRICING } from '../src/domain/standards.js';
+import { discountOrder, recordPromo, repriceDay } from './discounts.js';
+import { dayDiscountText } from '../src/domain/discounts.js';
 const { raiseException } = rules;
 const { ApiError, bad, assertOrderable, assertEditable, assertCapacity, buildBusinessDay, validateBusinessDelivery, emailOk, plain, isIsoDate } = rules;
 const idemKey = v => (typeof v === 'string' && /^[\w-]{8,64}$/.test(v) ? v : null);
@@ -62,10 +64,12 @@ function serialize(o) {
     id: o.id, createdAt: o.created_at, company: parse(o.invoice)?.orderType === 'family' ? '' : o.company, email: o.email,
     orderType: parse(o.invoice)?.orderType || (o.company ? 'business' : null),
     contact: { name: contact.contact, mobile: contact.mobile }, invoice: parse(o.invoice), mode: parse(o.invoice)?.mode || 'mix',
-    total: days.filter(d => !d.cancelled).reduce((t, d) => t + d.total, 0), paid: o.total,
+    total: days.filter(d => !d.cancelled).reduce((t, d) => t + d.total, 0), paid: o.total, promoCode: o.promo_code || null,
     days: days.map(d => ({
       date: d.date, people: d.people, lines: parse(d.lines), specials: parse(d.specials), window: d.window,
       delivery: parse(d.delivery), cancelled: !!d.cancelled, total: d.total, gross: d.gross, discount: d.discount,
+      discountBasis: parse(d.discount_basis),
+      discountLines: parse(d.discount_lines) || (d.discount ? [{ kind: 'volume', label: 'Volume discount', amount: d.discount }] : []),
       refund: d.cancelled ? (d.refund || d.total) : (d.refund || 0),
       problem: ['Failed', 'Not Fulfilled'].includes(d.delivery_state) && d.stage < 3 ? d.delivery_state : null,
       stage: d.cancelled ? -1 : d.stage,
@@ -100,7 +104,9 @@ businessRouter.post('/quote', (req, res) => {
     if (d?.date !== undefined && !isIsoDate(d.date)) throw bad('date_invalid', 'Invalid date.');
     return { date: d.date, ...buildBusinessDay(d) };
   });
-  res.json({ days, total: days.reduce((t, d) => t + d.total, 0) });
+  const priced = discountOrder(req.userId, 'business', days.map(d => ({ date: d.date, gross: d.gross, boxes: d.people })), req.body.promoCode);
+  const out = days.map(d => { const p = priced.days.find(x => x.date === d.date); return { ...d, discount: p.discount, total: p.total, discountLines: p.lines }; });
+  res.json({ days: out, total: priced.total, promo: priced.promo });
 });
 
 /** Union of Special Breakfast requirements for one day (bakery eligibility, MB-BKY-001). */
@@ -131,6 +137,12 @@ function prepareBusinessOrder(userId, body) {
     billingName: plain(inv.billingName, 120) || (orderType === 'family' ? '' : acct.company) || plain(built[0]?.delivery?.contact, 120),
     address: plain(inv.address, 200), trn, po: plain(inv.po, 40), mode: body.mode === 'choose' ? 'choose' : 'mix'
   };
+  /* Launch discounts: first order, multi-day, volume and any promo code, the best one per day (src/domain/discounts.js). */
+  const priced = discountOrder(userId, 'business', built.map(b => ({ date: b.date, gross: b.gross, boxes: b.people })), body.promoCode);
+  built.forEach(b => {
+    const p = priced.days.find(x => x.date === b.date);
+    Object.assign(b, { discount: p.discount, total: p.total, basis: p.basis, discountLines: p.lines });
+  });
   const total = built.reduce((t, b) => t + b.total, 0);
   if (body.expectedTotal !== undefined && Number(body.expectedTotal) !== total) {
     throw new ApiError(409, 'price_changed', `Your total is now AED ${total}. Please check it and pay again.`, { total });
@@ -139,7 +151,7 @@ function prepareBusinessOrder(userId, body) {
     built.forEach(b => assertCapacity(b.date, b.window, b.people));
     built.forEach(b => assertAllocatable(b.date, [{ kind: 'business', window: b.window, area: b.delivery.area, boxes: b.people, units: businessUnits(b.lines, b.specials) }]));
   };
-  return { acct, built, invoice, total, capacity };
+  return { acct, built, invoice, total, capacity, priced };
 }
 
 /** The company this order is for: the one entered at Delivery (a returning customer may order for another
@@ -148,7 +160,7 @@ const orderCompany = (invoice, built, acct) => (invoice.orderType === 'family' ?
 
 /** Saves a paid business order (`payment`: { provider, ref, amount }). */
 function createBusinessOrder(userId, body, payment, key = null) {
-  const { acct, built, invoice, total, capacity } = prepareBusinessOrder(userId, body);
+  const { acct, built, invoice, total, capacity, priced } = prepareBusinessOrder(userId, body);
   if (Math.abs(total - payment.amount) > 0.001) throw new ApiError(409, 'price_changed', 'The price changed while you were paying. Your payment is being refunded. Please order again.');
   const id = newOrderId('MB-B', 'business_orders');
   const order = tx(() => {
@@ -156,9 +168,11 @@ function createBusinessOrder(userId, body, payment, key = null) {
     db.prepare('INSERT INTO business_orders (id, user_id, company, email, invoice, payment_ref, total, idempotency_key, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, userId, orderCompany(invoice, built, acct), acct.email, json(invoice), payment.ref || demoRef(), total, key, payment.provider === 'stripe' ? 'captured' : 'captured_demo');
     recordPayment('business', id, payment);
-    const ins = db.prepare(`INSERT INTO business_days (order_id, date, window, people, lines, specials, delivery, gross, discount, total)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-    built.forEach(b => ins.run(id, b.date, b.window, b.people, json(b.lines), json(b.specials), json(b.delivery), b.gross, b.discount, b.total));
+    const ins = db.prepare(`INSERT INTO business_days (order_id, date, window, people, lines, specials, delivery, gross, discount, total, discount_basis, discount_lines)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    built.forEach(b => ins.run(id, b.date, b.window, b.people, json(b.lines), json(b.specials), json(b.delivery), b.gross, b.discount, b.total, json(b.basis), json(b.discountLines)));
+    if (priced.promo?.applied) db.prepare('UPDATE business_orders SET promo_code = ? WHERE id = ?').run(priced.promo.code, id);
+    recordPromo(priced, { userId, kind: 'business', orderId: id });
     return db.prepare('SELECT * FROM business_orders WHERE id = ?').get(id);
   });
   reallocateProvisional(built.map(b => b.date));
@@ -199,11 +213,14 @@ function editBusinessDay(userId, orderId, date, body, payment = null) {
   const window = body.window ?? d.window;
   if (!windowOk(window)) throw bad('window_invalid', 'Choose a delivery window.');
   const delivery = body.delivery ? validateBusinessDelivery({ ...parse(d.delivery), ...body.delivery }) : parse(d.delivery);
-  const b = buildBusinessDay({
+  const built = buildBusinessDay({
     people: body.people ?? d.people,
     lines: body.lines ?? parse(d.lines),
     specials: body.specials ?? parse(d.specials)
   });
+  /* The day keeps the discounts it was ordered with; the volume tier follows the new headcount. */
+  const r = repriceDay(d.discount_basis, built.gross, { kind: 'business', boxes: built.people });
+  const b = { ...built, discount: r.discount, total: r.total, discountLines: r.lines };
   const diff = Math.round((b.total - d.total) * 100) / 100;
   if (diff > 0 && !payment) return { due: diff, label: `Morning Box Business Breakfast, change to ${rules.prettyDate(d.date)}` };
   if (diff > 0 && Math.abs(payment.amount - diff) > 0.001) throw new ApiError(409, 'price_changed', 'The price of this change moved while you were paying. Your payment is being refunded. Please try again.');
@@ -211,8 +228,8 @@ function editBusinessDay(userId, orderId, date, body, payment = null) {
     if (window !== d.window || b.people > d.people) assertCapacity(d.date, window, b.people, { excludeBusinessDay: d.id });
     /* Any change of boxes or Special Breakfasts must still be allocatable (DLV §8). */
     assertAllocatable(d.date, [{ kind: 'business', window, area: delivery.area, boxes: b.people, units: businessUnits(b.lines, b.specials) }], { exclude: [`business:${d.id}`] });
-    db.prepare('UPDATE business_days SET window = ?, delivery = ?, people = ?, lines = ?, specials = ?, gross = ?, discount = ?, total = ? WHERE id = ?')
-      .run(window, json(delivery), b.people, json(b.lines), json(b.specials), b.gross, b.discount, b.total, d.id);
+    db.prepare('UPDATE business_days SET window = ?, delivery = ?, people = ?, lines = ?, specials = ?, gross = ?, discount = ?, total = ?, discount_lines = ? WHERE id = ?')
+      .run(window, json(delivery), b.people, json(b.lines), json(b.specials), b.gross, b.discount, b.total, json(b.discountLines), d.id);
     /* Business Breakfast is prepaid: an edit that changes the total is settled — paid before this point, or refunded. */
     if (diff !== 0) db.prepare('INSERT INTO business_payment_adjustments (business_day_id, amount) VALUES (?, ?)').run(d.id, diff);
     if (diff > 0) recordPayment('business', o.id, payment);
@@ -319,7 +336,7 @@ businessRouter.get('/orders/:id/invoice', (req, res) => {
   const vatOf = gross => gross - gross / (1 + VAT_RATE);
   const rows = o.days.map(d => `<tr><td>${esc(d.date)}${d.cancelled ? ` (cancelled, refunded AED ${esc(d.refund)})` : ''}${parties.multiple && !d.cancelled ? `<br><small>Seller: ${esc(parties.sellerOf(d.date))}</small>` : ''}</td><td>${esc(d.people)}</td>
     <td>${d.lines.map(l => `${esc(name(l.recipeId))}, ${esc(l.size)} × ${esc(l.qty)}`).join('<br>')}${d.specials.length ? `<br>Special Breakfasts × ${d.specials.reduce((t, s) => t + s.qty, 0)}` : ''}</td>
-    <td style="text-align:right">${d.cancelled ? 0 : esc(d.gross)}</td><td style="text-align:right">${d.cancelled ? 0 : esc(d.discount)}</td><td style="text-align:right">${d.cancelled ? 0 : esc(d.total)}</td></tr>`).join('');
+    <td style="text-align:right">${d.cancelled ? 0 : esc(d.gross)}</td><td style="text-align:right">${d.cancelled ? 0 : esc(d.discount)}${!d.cancelled && d.discount ? `<br><small>${esc(dayDiscountText(d.discountLines))}</small>` : ''}</td><td style="text-align:right">${d.cancelled ? 0 : esc(d.total)}</td></tr>`).join('');
   /* B2B §8: what was paid, then each edit charge, refund and credit, so the invoice matches the money moved. */
   const dayIds = db.prepare('SELECT id, date FROM business_days WHERE order_id = ?').all(o.id);
   const settlement = [{ at: o.createdAt, label: 'Paid at order', amount: o.paid },
@@ -338,7 +355,7 @@ businessRouter.get('/orders/:id/invoice', (req, res) => {
 ${parties.html}
 <p><b>Billed to:</b> ${esc(inv.billingName || o.company)}<br>Company: ${esc(o.company)}<br>Email: ${esc(o.email)}${inv.address ? `<br>${esc(inv.address)}` : ''}${inv.trn ? `<br>TRN ${esc(inv.trn)}` : ''}${inv.po ? `<br>PO number: ${esc(inv.po)}` : ''}</p>
 <table><tr><th>Date</th><th>People</th><th>Breakfasts</th><th>Gross AED</th><th>Discount AED</th><th>Total AED</th></tr>${rows}</table>
-<p style="text-align:right">Total excluding VAT: AED ${money(o.total - vat)}<br>VAT ${Math.round(VAT_RATE * 100)}%: AED ${money(vat)}</p>
+${o.promoCode ? `<p style="text-align:right">Promo code ${esc(o.promoCode)} applied.</p>` : ''}<p style="text-align:right">Total excluding VAT: AED ${money(o.total - vat)}<br>VAT ${Math.round(VAT_RATE * 100)}%: AED ${money(vat)}</p>
 <p style="text-align:right;font-size:18px"><b>Total AED ${esc(o.total)}</b></p>
 ${settlement.length ? `<h3>Payments &amp; adjustments</h3><table><tr><th>Date</th><th>Item</th><th style="text-align:right">AED</th></tr>${settlement.map(x => `<tr><td>${esc(x.at)}</td><td>${esc(x.label)}</td><td style="text-align:right">${money(x.amount)}</td></tr>`).join('')}</table><p style="text-align:right"><b>Net paid AED ${money(settlement.reduce((t, x) => t + x.amount, 0))}</b></p>` : ''}
 <p style="font-size:12px">Prices include VAT.${PRICING.indicative ? ' Prices indicative pending final costing.' : ''} Delivery included.</p>`);

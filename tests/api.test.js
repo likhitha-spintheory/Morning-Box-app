@@ -63,7 +63,7 @@ test('creates an order and prices it on the server', async () => {
   assert.equal(r.status, 201, JSON.stringify(r.body));
   orderId = r.body.id;
   assert.equal(r.body.days.length, 2);
-  assert.ok(r.body.days[0].price > 30, 'server computed price, ignored client price');
+  assert.ok(r.body.days[0].gross > 30, 'server computed price, ignored client price');
   assert.equal(r.body.total, r.body.days[0].price + r.body.days[1].price);
 });
 

@@ -1,3 +1,4 @@
+import { priceDay, dayDiscountText } from '../../domain/discounts.js';
 import { useEffect, useState } from 'react';
 import { get, post, put, patch, del, setToken, goToPayment, signIn } from '../../api.js';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -485,6 +486,7 @@ export function OrderDay() {
 
         <section className="card stack gap-10" style={{ padding: 20 }}>
           <div className="row"><span className="strong" style={{ fontSize: 17 }}>{boxName(day.cfg)}, {canChooseSize(day.cfg) ? sizeLabel(day.cfg.size) : 'Standard'}</span><Money value={price.total} /></div>
+          {day.discount > 0 && !day.cancelled && <span className="xs" style={{ color: 'var(--ok)' }}>{dayDiscountText(day.discountLines)}: you saved AED {day.discount} (was AED {day.gross})</span>}
           <span className="help" style={{ fontSize: 15 }}>{day.cfg.components.map(componentName).join(', ')}{day.cfg.addons.length ? ` + ${extrasText(day.cfg.addons)}` : ''}</span>
           {containsAllergens(day.cfg).length > 0 && <span className="xs">Contains: {containsAllergens(day.cfg).join(', ')} <InfoTip label="About allergens">Prepared in a kitchen that handles other allergens, so traces can’t be ruled out. <Link to="/legal/allergens" className="link" style={{ color: 'inherit' }}>Allergen information</Link></InfoTip></span>}
         </section>
@@ -568,7 +570,8 @@ export function EditMorning() {
   if (!isBeforeCutoff(date) || day.cancelled || trackingStage(day) > 0) return <Navigate to={`/orders/${id}/${date}`} replace />;
 
   const noSafe = !draft.cfg;
-  const price = noSafe ? { total: 0 } : dayPrice(draft.cfg, state.profile);
+  /* The morning keeps the discounts it was ordered with (src/domain/discounts.js). */
+  const price = noSafe ? { total: 0 } : priceDay(day.discountBasis, dayPrice(draft.cfg, state.profile).total);
   const groups = addonGroups(state.profile);
   const pastry = groups.find(g => g.id === 'pastry');
   const bread = groups.find(g => g.id === 'bread');
@@ -760,7 +763,7 @@ export function EditMorning() {
             <input id="ed-n" className="input" maxLength={200} value={draft.address.notes || ''} onChange={e => setAddr('notes', e.target.value)} /></div>
         </section>}
 
-        {!noSafe && price.total !== day.price && <p className="help" style={{ fontSize: 15, margin: 0 }}>Was AED {day.price}. We’ll charge or refund the difference.</p>}
+        {!noSafe && price.total !== day.price && <p className="help" style={{ fontSize: 15, margin: 0 }}>Was AED {day.price}. We’ll charge or refund the difference.{price.discount > 0 ? ` Your discount still applies (${dayDiscountText(price.lines)}).` : ''}</p>}
 
         <section className="stack gap-10" style={{ marginTop: 4 }}>
           {!confirmCancel ? (

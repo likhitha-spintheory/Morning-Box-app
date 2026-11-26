@@ -110,7 +110,7 @@ opsRouter.get('/report', (req, res) => {
   const FULFIL = `SUM(stage = 3 AND cancelled = 0) AS delivered, SUM(stage = 3 AND cancelled = 0 AND late = 0) AS onTime,
       SUM(cancelled = 0 AND late = 1) AS late, SUM(cancelled = 0 AND (delivery_state = 'Failed' OR bakery_state = 'Unable to Fulfil')) AS failed`;
   const personal = db.prepare(`SELECT date, SUM(cancelled = 0) AS mornings, SUM(CASE WHEN cancelled = 0 THEN price ELSE 0 END) AS revenue,
-      SUM(cancelled) AS cancelled, SUM(CASE WHEN cancelled = 1 THEN COALESCE(NULLIF(refund, 0), price) ELSE refund END) AS refunds,
+      SUM(CASE WHEN cancelled = 0 THEN discount ELSE 0 END) AS discounts, SUM(cancelled) AS cancelled, SUM(CASE WHEN cancelled = 1 THEN COALESCE(NULLIF(refund, 0), price) ELSE refund END) AS refunds,
       SUM(cancelled = 1 OR refund > 0) AS refundedOrders,
       ${FULFIL}, SUM(feedback = 'Loved it') AS loved, SUM(feedback = 'Not for me') AS notForMe
     FROM order_days WHERE date BETWEEN ? AND ? GROUP BY date`).all(from, to);
@@ -134,7 +134,7 @@ opsRouter.get('/report', (req, res) => {
     return {
       date, personalMornings: p.mornings || 0, businessOrders: b.orders || 0, businessBoxes: b.boxes || 0,
       boxes: (p.mornings || 0) + (b.boxes || 0), revenue: (p.revenue || 0) + (b.revenue || 0),
-      personalRevenue: p.revenue || 0, businessRevenue: b.revenue || 0, businessDiscounts: b.discounts || 0,
+      personalRevenue: p.revenue || 0, businessRevenue: b.revenue || 0, businessDiscounts: b.discounts || 0, personalDiscounts: p.discounts || 0, discounts: (p.discounts || 0) + (b.discounts || 0),
       cancelled: (p.cancelled || 0) + (b.cancelled || 0), refunds: (p.refunds || 0) + (b.refunds || 0), refundedOrders: (p.refundedOrders || 0) + (b.refundedOrders || 0), credits: credits.find(c => c.date === date)?.n || 0,
       delivered: (p.delivered || 0) + (b.delivered || 0), onTime: (p.onTime || 0) + (b.onTime || 0), late: (p.late || 0) + (b.late || 0), failed: (p.failed || 0) + (b.failed || 0),
       exceptions: ex(), safety: ex('Safety'), bakeryIssues: ex('Bakery'), customerIssues: ex('Customer/Location'),
@@ -236,7 +236,7 @@ opsRouter.get('/report', (req, res) => {
   }
   res.json({
     from, to, days, vatRate: VAT_RATE, partners, finance, completed, kpis, reconciliation,
-    totals: { boxes: sum('boxes'), revenue: sum('revenue'), personalRevenue: sum('personalRevenue'), businessRevenue: sum('businessRevenue'), cancelled: sum('cancelled'), refunds: sum('refunds'), credits: sum('credits'),
+    totals: { boxes: sum('boxes'), revenue: sum('revenue'), personalRevenue: sum('personalRevenue'), businessRevenue: sum('businessRevenue'), cancelled: sum('cancelled'), refunds: sum('refunds'), credits: sum('credits'), discounts: sum('discounts'),
       delivered: sum('delivered'), onTime: sum('onTime'), late: sum('late'), failed: sum('failed'), exceptions: sum('exceptions'), safety: sum('safety'),
       loved: sum('loved'), notForMe: sum('notForMe'), refundedOrders: sum('refundedOrders'), businessBoxes: sum('businessBoxes'), businessOrders: sum('businessOrders'),
       customers: db.prepare(`SELECT COUNT(DISTINCT o.user_id) AS n FROM order_days d JOIN orders o ON o.id = d.order_id WHERE d.date BETWEEN ? AND ? AND d.cancelled = 0`).get(from, to).n }

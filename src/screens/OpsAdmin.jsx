@@ -212,7 +212,7 @@ export function Pricing({ data, act, busy }) {
   const box = (path, value, label, hint) => (
     <Field label={label}><input className="input" inputMode="decimal" value={value} onChange={e => num(path, e.target.value)} />{hint && <span className="xs">{hint}</span>}</Field>
   );
-  const save = () => act('PUT', '/admin/pricing', { ...p, volumeDiscount: p.volumeDiscount.map(t => ({ min: Number(t.min), pct: Number(t.pct) })) });
+  const save = () => act('PUT', '/admin/pricing', p);
   const regular = Object.values(p.priceLevels);
   return (
     <section className="stack gap-16">
@@ -247,24 +247,14 @@ export function Pricing({ data, act, busy }) {
           {Object.keys(p.addons.pastry).map(k => <Fragment key={k}>{box(['addons', 'pastry', k], p.addons.pastry[k], k)}</Fragment>)}
         </div>
       </div>
-      <div className="card stack gap-12" style={{ padding: 18 }}>
-        <h2 className="h3">Business volume discount</h2>
-        {p.volumeDiscount.map((t, i) => (
-          <div key={i} className="row" style={{ gap: 8, justifyContent: 'flex-start', flexWrap: 'wrap' }}>
-            <span className="xs">From</span><input className="input" style={{ width: 72 }} inputMode="numeric" aria-label="Minimum boxes" value={t.min} onChange={e => setP(x => ({ ...x, volumeDiscount: x.volumeDiscount.map((y, k) => (k === i ? { ...y, min: e.target.value } : y)) }))} />
-            <span className="xs">boxes:</span><input className="input" style={{ width: 64 }} inputMode="decimal" aria-label="Discount percent" value={Math.round(t.pct * 1000) / 10} onChange={e => setP(x => ({ ...x, volumeDiscount: x.volumeDiscount.map((y, k) => (k === i ? { ...y, pct: Number(e.target.value) / 100 } : y)) }))} /><span className="xs">% off</span>
-            <button type="button" className="btn-text" onClick={() => setP(x => ({ ...x, volumeDiscount: x.volumeDiscount.filter((_, k) => k !== i) }))}>Remove</button>
-          </div>
-        ))}
-        {p.volumeDiscount.length < 6 && <button type="button" className="btn-text" style={{ alignSelf: 'flex-start' }} onClick={() => setP(x => ({ ...x, volumeDiscount: [...x.volumeDiscount, { min: 100, pct: 0.12 }] }))}>Add a tier</button>}
-      </div>
+      <p className="xs" style={{ margin: 0 }}>Discounts (first order, multi-day, business volume) and promo codes are in Admin → Discounts.</p>
       <label className="card row" style={{ gap: 10, justifyContent: 'flex-start', padding: 18 }}>
         <input type="checkbox" checked={p.indicative} onChange={e => setP(x => ({ ...x, indicative: e.target.checked }))} />
         <span><b>Prices are indicative</b><br /><span className="xs">While on, customers see “Prices are indicative during our pilot”. Turn off once the client has approved the final prices.</span></span>
       </label>
       <div className="row" style={{ gap: 12, justifyContent: 'flex-start' }}>
         <button type="button" className="btn" style={{ width: 'auto', padding: '0 28px' }} disabled={busy} onClick={save}>Save prices</button>
-        <button type="button" className="btn-text" disabled={busy} onClick={() => window.confirm('Reset all prices, sizes, add-ons and discounts to the defaults? Your saved prices are replaced.') && act('POST', '/admin/pricing/reset')}>Reset to defaults</button>
+        <button type="button" className="btn-text" disabled={busy} onClick={() => window.confirm('Reset all prices, sizes and add-ons to the defaults? Your saved prices are replaced.') && act('POST', '/admin/pricing/reset')}>Reset to defaults</button>
       </div>
       <span className="xs">New prices apply to new orders and edits right away. Orders already paid keep their price.</span>
       {data.history.length > 0 && <details><summary className="xs" style={{ cursor: 'pointer' }}>Change history</summary>{data.history.map((h, i) => <div key={i} className="xs">{h.at}, levels {Object.values(h.pricing.priceLevels).join('/')}, Light {h.pricing.sizeAdjustment.light}, Large +{h.pricing.sizeAdjustment.large}</div>)}</details>}

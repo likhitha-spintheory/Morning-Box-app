@@ -3,6 +3,7 @@
    objects in place, so every route prices and prints from the same numbers. */
 import { db, json, parse } from './db.js';
 import { DEV } from './env.js';
+import { applyDiscounts, discountsSnapshot, DEFAULT_DISCOUNTS } from '../src/domain/discounts.js';
 import { applyPricing, pricingSnapshot, DEFAULT_PRICING, PRICE_LEVELS, ADDON_PRICES, expandBreadPrices, GLUTEN_FREE, applyGlutenFree } from '../src/domain/standards.js';
 import { SUPPLIER, SUPPORT } from './company.js';
 import { LIBRARY_SETTINGS, setLibrarySettings, COMPONENTS } from '../src/domain/library.js';
@@ -38,18 +39,11 @@ function validatePricing(p) {
     if (!money(bread[id]?.[k], { min: 1 })) throw bad('pricing_invalid', `${COMPONENTS[id]?.name || id} ${k} loaf price must be an amount in AED.`);
   }
   for (const k of Object.keys(ADDON_PRICES.pastry)) if (!money(p.addons?.pastry?.[k], { min: 1 })) throw bad('pricing_invalid', `${k} price must be an amount in AED.`);
-  if (!Array.isArray(p.volumeDiscount) || p.volumeDiscount.length > 6) throw bad('pricing_invalid', 'Up to 6 discount tiers.');
-  for (const t of p.volumeDiscount) {
-    if (!Number.isInteger(t?.min) || t.min < 2 || t.min > 999) throw bad('pricing_invalid', 'Each discount tier needs a minimum number of boxes (2–999).');
-    if (!Number.isFinite(t?.pct) || t.pct <= 0 || t.pct > 0.5) throw bad('pricing_invalid', 'Discounts must be between 0.1% and 50%.');
-  }
-  if (new Set(p.volumeDiscount.map(t => t.min)).size !== p.volumeDiscount.length) throw bad('pricing_invalid', 'Two discount tiers have the same minimum.');
   return {
     indicative: !!p.indicative,
     priceLevels: Object.fromEntries(Object.keys(PRICE_LEVELS).map(k => [k, p.priceLevels[k]])),
     sizeAdjustment: { light: p.sizeAdjustment.light, regular: 0, large: p.sizeAdjustment.large },
-    addons: { bread: Object.fromEntries(Object.keys(ADDON_PRICES.breads).map(id => [id, { half: bread[id].half, whole: bread[id].whole }])), pastry: Object.fromEntries(Object.keys(ADDON_PRICES.pastry).map(k => [k, p.addons.pastry[k]])) },
-    volumeDiscount: p.volumeDiscount.map(t => ({ min: t.min, pct: Math.round(t.pct * 10000) / 10000 })).sort((a, b) => b.min - a.min)
+    addons: { bread: Object.fromEntries(Object.keys(ADDON_PRICES.breads).map(id => [id, { half: bread[id].half, whole: bread[id].whole }])), pastry: Object.fromEntries(Object.keys(ADDON_PRICES.pastry).map(k => [k, p.addons.pastry[k]])) }
   };
 }
 
@@ -67,6 +61,39 @@ export function resetPricing() {
 }
 export const pricingHistory = () => db.prepare("SELECT value, created_at FROM settings_history WHERE key = 'pricing' ORDER BY id DESC LIMIT 20").all()
   .map(r => ({ at: r.created_at, pricing: parse(r.value) }));
+
+/* ---------- Launch discounts (Admin → Discounts) ---------- */
+function validTiers(list, what) {
+  if (!Array.isArray(list) || list.length > 8) throw bad('discounts_invalid', `Up to 8 ${what} tiers.`);
+  for (const t of list) {
+    if (!Number.isInteger(t?.min) || t.min < 1 || t.min > 999) throw bad('discounts_invalid', `Each ${what} tier needs a whole-number minimum (1–999).`);
+    if (!Number.isFinite(t?.pct) || t.pct <= 0 || t.pct >= 1) throw bad('discounts_invalid', 'Each tier discount must be between 0.1% and 99%.');
+  }
+  if (new Set(list.map(t => t.min)).size !== list.length) throw bad('discounts_invalid', `Two ${what} tiers have the same minimum.`);
+  return list.map(t => ({ min: t.min, pct: Math.round(t.pct * 10000) / 10000 })).sort((a, b) => b.min - a.min);
+}
+function validateDiscounts(d) {
+  if (!d || typeof d !== 'object') throw bad('discounts_invalid', 'Send all discount settings.');
+  const f = d.firstOrder || {}, m = d.multiDay || {}, v = d.volume || {};
+  if (!Number.isFinite(f.pct) || f.pct <= 0 || f.pct > 1) throw bad('discounts_invalid', 'The first-order discount must be between 0.1% and 100%.');
+  return {
+    firstOrder: { enabled: !!f.enabled, pct: Math.round(f.pct * 10000) / 10000, personal: !!f.personal, business: !!f.business },
+    multiDay: { enabled: !!m.enabled, personal: !!m.personal, business: !!m.business, tiers: validTiers(m.tiers, 'multi-day') },
+    volume: { enabled: !!v.enabled, business: true, tiers: validTiers(v.tiers, 'volume') }
+  };
+}
+export const getDiscounts = () => discountsSnapshot();
+export function saveDiscounts(input) {
+  const d = validateDiscounts(input);
+  write('discounts', d);
+  applyDiscounts(d);
+  return discountsSnapshot();
+}
+export function resetDiscounts() {
+  db.prepare("DELETE FROM settings WHERE key = 'discounts'").run();
+  applyDiscounts(DEFAULT_DISCOUNTS);
+  return discountsSnapshot();
+}
 
 /* ---------- Company & support details ---------- */
 const COMPANY_FIELDS = { name: 120, trn: 15, address: 200 };
@@ -166,6 +193,7 @@ const savedDelivery = read('delivery');
 if (savedDelivery) { Object.assign(DELIVERY_CAPACITY, savedDelivery.capacity); DELIVERY_COST.perDelivery = savedDelivery.costPerDelivery ?? 0; }
 setLibrarySettings(read('library') || { samples: DEV });
 applyPricing(read('pricing'));
+applyDiscounts(read('discounts'));
 /* A saved menu is re-checked on start; one that no longer passes is ignored (approved menu used) rather than half-applied. */
 try { const m = read('menu'); if (m) applyMenu(validateMenu(m, failMenu)); } catch (e) { console.error('[menu] Saved menu ignored:', e.message); }
 const savedCompany = read('company');

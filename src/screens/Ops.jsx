@@ -4,6 +4,7 @@ import { addDaysIso, dubaiTodayIso } from '../domain/standards.js';
 import { defaultStaffDate } from './StaffUi.jsx';
 import { Live, Prep, Labels } from './OpsLive.jsx';
 import { Bakeries, Pricing, Company, Products } from './OpsAdmin.jsx';
+import { Discounts } from './OpsDiscounts.jsx';
 import { MenuRules } from './OpsMenu.jsx';
 import { Dashboard } from './OpsDashboard.jsx';
 
@@ -18,7 +19,7 @@ const GROUPS = [
   ['Today', [['days', 'Live', 'clock'], ['prep', 'Production', 'bread'], ['labels', 'Labels', 'doc']]],
   ['Service', [['exceptions', 'Exceptions', 'alert'], ['support', 'Support', 'help'], ['feedback', 'Feedback', 'heart']]],
   ['Insights', [['report', 'Reports', 'bookmark'], ['closed', 'Closed days', 'cal']]],
-  ['Admin', [['bakeries', 'Bakeries', 'building'], ['menu', 'Menu rules', 'bowl'], ['products', 'Products & allergens', 'shieldAlert'], ['pricing', 'Prices', 'card'], ['company', 'Company', 'brief']]]
+  ['Admin', [['bakeries', 'Bakeries', 'building'], ['menu', 'Menu rules', 'bowl'], ['products', 'Products & allergens', 'shieldAlert'], ['pricing', 'Prices', 'card'], ['discounts', 'Discounts', 'star'], ['company', 'Company', 'brief']]]
 ];
 const TABS = GROUPS.flatMap(([group, items]) => items.map(([id, label, icon]) => ({ id, label, icon, group })));
 
@@ -50,7 +51,7 @@ export default function Ops() {
        (open rows, ticks, notes typed in other cards, "Saved." notices). */
     setError('');
     const path = { home: `/dashboard?date=${date}`, days: `/dashboard?date=${date}`, prep: `/prep?date=${date}`, labels: `/labels?date=${date}`, support: '/support', feedback: '/feedback', exceptions: '/exceptions', closed: '/closed-dates',
-      report: `/report?from=${range.from}&to=${range.to}`, bakeries: '/admin/bakeries', menu: '/admin/menu', products: '/admin/products', pricing: '/admin/pricing', company: '/admin/company' }[tab];
+      report: `/report?from=${range.from}&to=${range.to}`, bakeries: '/admin/bakeries', menu: '/admin/menu', products: '/admin/products', pricing: '/admin/pricing', discounts: '/admin/discounts', company: '/admin/company' }[tab];
     try { const value = await call('GET', path); setData({ key: `${tab}|${date}|${range.from}|${range.to}`, value }); } catch (e) { setError(e.message); if (e.status === 401) save(''); }
   }, [key, tab, date, range, call]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
@@ -159,6 +160,7 @@ export default function Ops() {
         {view && tab === 'menu' && <MenuRules data={view} act={act} busy={busy} call={call} />}
         {view && tab === 'products' && <Products data={view} />}
         {view && tab === 'pricing' && <Pricing data={view} act={act} busy={busy} />}
+        {view && tab === 'discounts' && <Discounts data={view} act={act} busy={busy} />}
         {view && tab === 'company' && <Company data={view} act={act} busy={busy} call={call} />}
       </div>
     </div>
@@ -310,7 +312,7 @@ function Closed({ items, busy, act }) {
 }
 
 const CSV_COLUMNS = [['date', 'Date'], ['boxes', 'Boxes'], ['personalMornings', 'Personal mornings'], ['businessOrders', 'Business orders'], ['businessBoxes', 'Business boxes'],
-  ['personalRevenue', 'Personal revenue AED'], ['businessRevenue', 'Business revenue AED'], ['businessDiscounts', 'Business discounts AED'], ['revenue', 'Revenue AED (incl. VAT)'],
+  ['personalRevenue', 'Personal revenue AED'], ['businessRevenue', 'Business revenue AED'], ['personalDiscounts', 'Personal discounts AED'], ['businessDiscounts', 'Business discounts AED'], ['revenue', 'Revenue AED (incl. VAT)'],
   ['cancelled', 'Cancelled'], ['refundedOrders', 'Refunded orders'], ['refunds', 'Refunds AED'], ['credits', 'Credits AED'], ['delivered', 'Delivered'], ['onTime', 'On time'], ['late', 'Late'], ['failed', 'Failed'],
   ['exceptions', 'Exceptions'], ['safety', 'Safety'], ['bakeryIssues', 'Bakery issues'], ['customerIssues', 'Customer/location issues'],
   ['loved', 'Loved it'], ['notForMe', 'Not for me']];
@@ -344,7 +346,7 @@ function Report({ data }) {
         <Tile label="Exceptions (safety)" value={`${t.exceptions} (${t.safety})`} />
         <Tile label="Loved it / Not for me" value={`${t.loved} / ${t.notForMe}`} />
       </div>
-      <p className="help" style={{ margin: 0 }}>Personal AED {t.personalRevenue}, Business AED {t.businessRevenue} ({t.businessBoxes} boxes, {t.businessOrders} orders), VAT included AED {vat(t.revenue).toFixed(2)}, Cancelled {t.cancelled}, Refunds AED {t.refunds} ({t.refundedOrders ?? 0} orders), Credits AED {t.credits}, {t.customers} customers</p>
+      <p className="help" style={{ margin: 0 }}>Personal AED {t.personalRevenue}, Business AED {t.businessRevenue} ({t.businessBoxes} boxes, {t.businessOrders} orders), VAT included AED {vat(t.revenue).toFixed(2)}, Discounts given AED {t.discounts ?? 0}, Cancelled {t.cancelled}, Refunds AED {t.refunds} ({t.refundedOrders ?? 0} orders), Credits AED {t.credits}, {t.customers} customers</p>
       <h2 className="h3">Daily snapshot</h2>
       <table className="ops-table">
         <thead><tr><th>Date</th><th>Boxes</th><th>Revenue</th><th>Delivered</th><th>On time</th><th>Late</th><th>Failed</th><th>Refunds</th><th>Exceptions</th><th>Feedback</th></tr></thead>

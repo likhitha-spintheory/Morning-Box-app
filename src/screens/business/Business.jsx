@@ -12,6 +12,8 @@ import { Loading } from '../../state/orders.jsx';
 
 const SHOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_DEMO === '1';
 import { businessModels, morningBoxMix, resolveSpecial, priceBusinessDay } from '../../domain/engine.js';
+import { priceOrder, dayDiscountText, priceDay as discPriceDay, pctText, DISCOUNTS } from '../../domain/discounts.js';
+import { DiscountLines, Savings, PromoField } from '../../components/Discounts.jsx';
 import { recipeById, describe, priceLevel } from '../../domain/recipes.js';
 import { COMPONENTS } from '../../domain/library.js';
 import { DIETARY, ALLERGENS, DELIVERY_WINDOWS, SIZE_ADJUSTMENT, PRICE_LEVELS, areaFor, glutenFreeBlocked, GLUTEN_FREE_MESSAGE } from '../../domain/standards.js';
@@ -138,7 +140,9 @@ function DayBoxes({ lines, specials, onChange, max = MAX_PEOPLE }) {
 /** Price one day from serializable lines and specials. */
 function priceDay(lines, specials) {
   const p = priceBusinessDay(lines.filter(l => l.qty > 0).map(hydrateLine), specials.map(s => resolveSpecial(s, 'regular')));
-  return { ...p, gross: Math.round(p.gross), discount: Math.round(p.discount), total: Math.round(p.total) };
+  const discount = Math.round(p.discount);
+  return { ...p, gross: Math.round(p.gross), discount, total: Math.round(p.total),
+    lines: discount > 0 ? [{ kind: 'volume', label: 'Volume discount', pct: p.discountPct, amount: discount }] : [] };
 }
 
 /** Largest-remainder rescale of chosen lines to a new general count. */
@@ -204,15 +208,16 @@ function SizeSeg({ value, onChange, label }) {
   );
 }
 
-function PriceSummary({ price, people }) {
+function PriceSummary({ price, people, hint }) {
   return (
     <section className="panel" aria-label="Price per day">
       <div className="sr"><span>{price.boxes} boxes</span><Money value={price.gross} /></div>
-      {price.discount > 0 && (
-        <div className="sr" style={{ color: 'var(--ok)' }}><span>Volume discount ({Math.round(price.discountPct * 100)}%)</span><span className="money">− AED {price.discount}</span></div>
-      )}
+      {(price.lines || []).map(l => (
+        <div key={l.kind} className="sr" style={{ color: 'var(--ok)' }}><span>{l.label}{l.pct ? ` (${pctText(l.pct)})` : ''}</span><span className="money">− AED {l.amount}</span></div>
+      ))}
       <hr className="divider" />
       <div className="sr total"><span>Per day</span><span>AED {price.total}</span></div>
+      {hint && (DISCOUNTS.firstOrder.enabled || DISCOUNTS.multiDay.enabled) && <span className="xs">First-order and multi-day discounts are checked at review. Each day gets the highest discount it qualifies for.</span>}
       {people !== undefined && (
         <span className="sm" style={{ color: price.boxes === people ? 'var(--ok)' : 'var(--err)', display: 'flex', alignItems: 'center', gap: 6 }}>
           <Icon name={price.boxes === people ? 'check' : 'alert'} size={15} stroke={2.4} />
@@ -656,7 +661,7 @@ export function Selection() {
             <SpecialDetails specials={specials} />
           </section>
         )}
-        <PriceSummary price={price} people={b.people} />
+        <PriceSummary price={price} people={b.people} hint />
       </main>
       <Footer><button className="btn" disabled={price.boxes !== b.people || !specialsOk} onClick={confirm}>{specialsOk ? 'Confirm Selection' : 'Change Special Breakfasts to continue'}</button></Footer>
     </Screen>
@@ -1246,6 +1251,10 @@ export function BizReview() {
   /* One key per checkout: double taps and retries never create a second order. */
   const [idemKey] = useState(newIdempotencyKey);
   const [serverTotal, setServerTotal] = useState(null);
+  /* Launch discounts: first order (from the account), multi-day, volume and any promo code. */
+  const [firstOrder, setFirstOrder] = useState(false);
+  const [promo, setPromo] = useState(null);
+  useEffect(() => { if (state.session) get('/me').then(m => setFirstOrder(!!m.firstOrder)).catch(() => {}); }, [state.session]);
   if (!state.session || !state.businessUser) return <Navigate to="/business/account" replace />;
   if (!b.dates?.length) return <Navigate to={state.businessOrders.length ? '/business' : '/business/dates'} replace />;
 
@@ -1257,9 +1266,10 @@ export function BizReview() {
     const specials = daySpecials(b, iso).filter(x => x.qty > 0);
     return { iso, people, lines, specials, window: windowFor(b, iso), price: priceDay(lines, specials), delivery: b.deliverySameForAll === false ? b.perDay?.[iso]?.delivery || null : null };
   });
-  const gross = sum(days, d => d.price.gross);
-  const discount = sum(days, d => d.price.discount);
-  const total = sum(days, d => d.price.total);
+  const priced = priceOrder('business', days.map(d => ({ date: d.iso, gross: d.price.gross, boxes: d.people })), { firstEligible: firstOrder, promo });
+  days.forEach(d => { d.priced = priced.days.find(x => x.date === d.iso); });
+  const gross = priced.gross;
+  const total = priced.total;
   const inv = b.invoice;
   const payTotal = serverTotal ?? total;
   const trnBad = inv.wanted && !trnOk(inv.trn);
@@ -1272,7 +1282,7 @@ export function BizReview() {
       contact: dl.contact.trim(), mobile: fmtMobile(mobileDigits(dl.mobile)), notes: dl.notes.trim() };
     try {
       const order = await post('/business/orders', {
-        idempotencyKey: idemKey, expectedTotal: payTotal,
+        idempotencyKey: idemKey, expectedTotal: payTotal, ...(priced.promo?.applied ? { promoCode: promo.code } : {}),
         mode: b.mode === 'choose' ? 'choose' : 'mix', orderType: b.orderType,
         invoice: { wanted: b.orderType !== 'family' && inv.wanted, billingName: inv.billingName.trim() || snap.company, address: inv.address.trim(), trn: inv.trn.trim(), po: (inv.po || '').trim() },
         days: days.map(d => ({
@@ -1309,17 +1319,20 @@ export function BizReview() {
             {d.specials.length > 0 && <span className="xs"><Icon name="shield" size={12} stroke={2} style={{ verticalAlign: '-2px', marginRight: 4 }} />Special × {sum(d.specials)}: {d.specials.map(s => `${specialText(s)} × ${s.qty}`).join(', ')}</span>}
             <span className="xs">{(d.delivery || dl).building}, {(d.delivery || dl).office}, {areaFor((d.delivery || dl).area || dl.area)}, {(d.delivery || dl).contact}, {fmtMobile(mobileDigits((d.delivery || dl).mobile))}</span>
             <div className="sr">
-              <span className="xs" style={d.price.discount ? { color: 'var(--ok)' } : undefined}>{d.price.discount ? `Includes ${Math.round(d.price.discountPct * 100)}% volume discount` : ''}</span>
-              <span className="money">AED {d.price.total}</span>
+              <span className="xs" style={d.priced.discount ? { color: 'var(--ok)' } : undefined}>{d.priced.discount ? `${dayDiscountText(d.priced.lines)}: − AED ${d.priced.discount}` : ''}</span>
+              <span className="money" style={{ flex: 'none' }}>{d.priced.discount > 0 && <s className="xs" style={{ color: 'var(--text-3)', marginRight: 6 }}>{d.priced.gross}</s>}AED {d.priced.total}</span>
             </div>
           </section>
         ))}
         <section className="panel">
           <div className="sr"><span>Breakfast total</span><span className="money">AED {gross}</span></div>
+          <DiscountLines days={priced.days} />
           <div className="sr"><span>Delivery</span><span>Included</span></div>
-          {discount > 0 && <div className="sr" style={{ color: 'var(--ok)' }}><span>Volume discount <InfoTip label="About the volume discount">Calculated separately for each day, based on that day’s headcount.</InfoTip></span><span className="money">− AED {discount}</span></div>}
           <hr className="divider" />
           <div className="sr total"><span>Final total</span><span>AED {payTotal}</span></div>
+          <Savings amount={priced.discount} />
+          {priced.discount > 0 && <span className="xs">One discount per day, the highest one you qualify for.</span>}
+          <PromoField kind="business" promo={promo} onChange={p => { setPromo(p); setServerTotal(null); }} result={priced.promo} />
         </section>
         {b.orderType === 'family' ? <p className="xs" style={{ margin: 0 }}>A receipt is available on your order after paying.</p> : <section className="stack gap-12">
           <div className="row">
@@ -1572,7 +1585,10 @@ function DayEditor({ order, day, set, signedIn }) {
   const changed = people !== day.people || win !== day.window || contactChanged
     || JSON.stringify(lines.map(l => [l.recipeId, l.size, l.qty])) !== JSON.stringify(day.lines.map(l => [l.recipeId, l.size, l.qty]))
     || JSON.stringify(specials.map(x => [x.dietary, x.allergies, x.size || 'regular', x.qty])) !== JSON.stringify(day.specials.map(x => [x.dietary, x.allergies, x.size || 'regular', x.qty]));
-  const price = priceDay(lines, specials);
+  /* The day keeps the discounts it was ordered with; the volume tier follows the new headcount. */
+  const listPrice = priceDay(lines, specials);
+  const kept = discPriceDay(day.discountBasis, listPrice.gross, { kind: 'business', boxes: listPrice.boxes });
+  const price = { ...listPrice, discount: kept.discount, total: kept.total, lines: kept.lines };
   const contactOk = contact.building.trim() && contact.office.trim() && contact.contact.trim() && /^5\d{8}$/.test(mobileDigits(contact.mobile));
   /* A window is offered only if it can take this day's headcount (its own boxes don't count against it). */
   const winFull = w => { const r = avail[w]?.remaining; return typeof r === 'number' && r + (w === day.window ? day.people : 0) < people; };

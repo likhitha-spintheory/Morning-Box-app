@@ -10,6 +10,7 @@
    ============================================================ */
 
 import { ADDON_BREAD, COMPONENTS } from './library.js';
+import { volumePct } from './discounts.js';
 
 export const CURRENCY = 'AED';
 
@@ -143,14 +144,8 @@ export const ADDON_PRICES = {                                     // AED, indica
 
 export const DELIVERY_FEE = 0;        // included in MVP pricing, indicative
 
-/* MB-B2B-001 §7 — volume discount exists; tiers are explicitly TBD. */
-export const VOLUME_DISCOUNT = [
-  { min: 50, pct: 0.10 }, { min: 25, pct: 0.07 }, { min: 10, pct: 0.04 }
-];
-export function volumeDiscount(qty) {
-  const t = VOLUME_DISCOUNT.find(t => qty >= t.min);
-  return t ? t.pct : 0;
-}
+/* Volume discount tiers moved to the launch discounts (src/domain/discounts.js, Admin → Discounts). */
+export const volumeDiscount = qty => volumePct('business', qty);
 
 /* ---------- Admin-editable pricing ----------
    The numbers above are the defaults. Morning Box sets the real prices in the
@@ -162,8 +157,7 @@ export const pricingSnapshot = () => ({
   indicative: PRICING.indicative,
   priceLevels: { ...PRICE_LEVELS },
   sizeAdjustment: { ...SIZE_ADJUSTMENT },
-  addons: { bread: Object.fromEntries(Object.entries(ADDON_PRICES.breads).map(([id, b]) => [id, { ...b }])), pastry: { ...ADDON_PRICES.pastry } },
-  volumeDiscount: VOLUME_DISCOUNT.map(t => ({ ...t }))
+  addons: { bread: Object.fromEntries(Object.entries(ADDON_PRICES.breads).map(([id, b]) => [id, { ...b }])), pastry: { ...ADDON_PRICES.pastry } }
 });
 export const DEFAULT_PRICING = pricingSnapshot();
 /** Bread prices per bread id. A saved/legacy { half, whole } (one price for every bread) is expanded to each bread. */
@@ -186,11 +180,6 @@ export function applyPricing(p) {
   for (const id of Object.keys(ADDON_PRICES.breads)) for (const k of ['half', 'whole']) if (Number.isFinite(bread[id]?.[k])) ADDON_PRICES.breads[id][k] = bread[id][k];
   for (const k of ['half', 'whole']) ADDON_PRICES.bread[k] = Math.min(...Object.values(ADDON_PRICES.breads).map(b => b[k]));
   for (const k of Object.keys(ADDON_PRICES.pastry)) if (Number.isFinite(p.addons?.pastry?.[k])) ADDON_PRICES.pastry[k] = p.addons.pastry[k];
-  if (Array.isArray(p.volumeDiscount)) {
-    const tiers = p.volumeDiscount.filter(t => Number.isInteger(t?.min) && t.min > 0 && Number.isFinite(t?.pct) && t.pct >= 0 && t.pct < 1)
-      .sort((a, b) => b.min - a.min).map(t => ({ min: t.min, pct: t.pct }));
-    VOLUME_DISCOUNT.splice(0, VOLUME_DISCOUNT.length, ...tiers);
-  }
 }
 
 export const fmtAED = n =>
